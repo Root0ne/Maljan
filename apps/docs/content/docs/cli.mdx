@@ -1,0 +1,93 @@
+---
+title: "Command line"
+sidebarTitle: "CLI"
+description: "The malspark command: run the pipeline in one process, show the configuration, and maintain the long-term memory."
+---
+
+The `malspark` command runs the pipeline in a single process, with no API,
+worker or backing service. It is useful for a quick local run, for scripting
+and for development. For anything shared, use the stack and the
+[REST API](/docs/api/).
+
+```bash
+uv run malspark --help
+```
+
+## Where it reads its settings
+
+The command line builds the settings model directly. It reads the process
+environment and a `.env` file at the project root, not the settings store the
+console edits. Nested settings use a double underscore:
+
+```bash
+export LLM__PROVIDER=anthropic
+export NEGOTIATION__MAX_ITERATIONS=3
+```
+
+It is the one consumer that still works this way. See
+[Configuration](/docs/configuration/).
+
+## `malspark analyze`
+
+Runs the full pipeline on one sample and prints the verdict.
+
+```bash
+uv run malspark analyze <sha256> --sample ./sample.dll --report report.md --output bundle.json
+```
+
+| Argument or option | Meaning |
+| :-- | :-- |
+| `FILE_HASH` | The sample's identifier: the hash that names its file under `data/samples/`. |
+| `--name`, `-n` | A readable file name for the report. |
+| `--sample`, `-s` | The path of the sample file, for sandbox submission. |
+| `--provider`, `-p` | A registered LLM provider's name, in place of the configured one. |
+| `--max-iterations`, `-i` | The debate's round limit, in place of `negotiation.max_iterations`. |
+| `--mock`, `-m` | Run without real model calls. |
+| `--output`, `-o` | Write the STIX 2.1 bundle to this file. |
+| `--report`, `-r` | Write the Markdown report to this file. |
+| `--ignore-earlier-runs` | Start without an earlier run's memory of this sample. The run still stores its own case when it completes. |
+
+The command prints the verdict, the number of debate rounds, whether
+consensus was reached, a short run summary and the STIX bundle. It exits with
+code 1 when the pipeline fails.
+
+A run from the command line has no account, so it uses the unscoped memory.
+There is no `isolated_memory` option.
+
+A dry run with no model:
+
+```bash
+uv run malspark analyze sample_1 --mock --name test.exe
+```
+
+## `malspark info`
+
+Prints the active configuration: the LLM provider, the expert and judge
+models, the round limit, the token limit, the active team, its analysts and
+the registered parsers.
+
+## `malspark memory`
+
+Inspects and maintains the long-term case memory.
+
+```bash
+uv run malspark memory stats
+uv run malspark memory purge-low-quality --dry-run
+```
+
+| Command | What it does |
+| :-- | :-- |
+| `memory stats` | Shows the configured backend and how many cases it holds. |
+| `memory purge-low-quality` | Removes cases stored before the write-time quality gate existed, which would otherwise bias later runs. |
+
+`purge-low-quality` takes:
+
+| Option | Default | Meaning |
+| :-- | :-- | :-- |
+| `--max-techniques N` | 1 | Purge cases with at most N techniques. `-1` turns this test off. |
+| `--require-uncorroborated` / `--allow-corroborated` | require | Also require that no technique was corroborated. |
+| `--include-errors` / `--skip-errors` | include | Also purge cases recorded with an analyst error. |
+| `--dry-run` | off | Count what would be removed, and remove nothing. |
+
+The same purge is available to an administrator through
+`POST /api/v1/system/ltm/purge`.

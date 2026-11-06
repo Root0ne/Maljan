@@ -22,8 +22,8 @@ item by its id, in brackets or in its evidence field. See
 ## One neutral report
 
 Whichever sandbox produced it, a report is read into one neutral form
-(`SandboxReport`, `maljan.schemas.sandbox_report`) and every consumer reads
-that form's document (`maljan.schemas.sandbox_document`): the analysts'
+(`SandboxReport`, `malspark.schemas.sandbox_report`) and every consumer reads
+that form's document (`malspark.schemas.sandbox_document`): the analysts'
 inputs, the sandbox tools, the triage pack's sections and rule events, the
 report and the run summary. A consumer reads each part by its name, never by a
 sandbox's own key. The form holds:
@@ -380,13 +380,13 @@ report it reads) and `read(payload)` (the payload as the neutral report), and
 what its reports can fill. The shipped readers are `cape2`, `cuckoo`, `triage`,
 `mock` (the mock sandbox's fixtures) and `generic` (the JSONPath mapping of
 `sandbox.rest.mapping`). An operator's own reader is a subclass of
-`maljan.providers.sandbox.readers.ReportReader`, registered at run time with
+`malspark.providers.sandbox.readers.ReportReader`, registered at run time with
 `register_report_reader` or by an installed package's entry point in the
-`maljan.sandbox_report_readers` group:
+`malspark.sandbox_report_readers` group:
 
 ```python
-from maljan.providers.sandbox.readers import ReportReader
-from maljan.schemas.sandbox_report import SandboxReport, SandboxTarget
+from malspark.providers.sandbox.readers import ReportReader
+from malspark.schemas.sandbox_report import SandboxReport, SandboxTarget
 
 
 class AcmeBoxReader(ReportReader):
@@ -407,8 +407,8 @@ class AcmeBoxReader(ReportReader):
 ```
 
 ```toml
-[project.entry-points."maljan.sandbox_report_readers"]
-acmebox = "acme_maljan.reader:AcmeBoxReader"
+[project.entry-points."malspark.sandbox_report_readers"]
+acmebox = "acme_malspark.reader:AcmeBoxReader"
 ```
 
 A reader whose source already uses the document's arrangement sets

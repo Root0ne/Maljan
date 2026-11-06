@@ -5,7 +5,7 @@ description: "The four built-in stdio tool servers under services/."
 
 Four tool servers ship built in, each a single-file stdio MCP server under
 `services/`, launched with the same interpreter the worker runs on. Their
-implementations live in `src/maljan/tools/` as plain functions, so the same code
+implementations live in `src/malspark/tools/` as plain functions, so the same code
 backs the triage pack's in-process calls and an agent's calls through the
 sidecar.
 
@@ -46,7 +46,7 @@ measurement baseline](/docs/configuration/#tools-and-the-measurement-baseline).
 ## UPX unpacking needs no upx program
 
 The `analysis` server's `unpack_upx` reads a UPX-packed Windows PE in Python
-(`src/maljan/tools/upx.py`): UPX's pack header, the NRV2B, NRV2D, NRV2E and
+(`src/malspark/tools/upx.py`): UPX's pack header, the NRV2B, NRV2D, NRV2E and
 LZMA streams, the call and jump filters 0x24 to 0x26, and the import,
 relocation, export and resource records UPX keeps to rebuild the file. Nothing
 in the sample runs and nothing needs installing: the `upx` program is not
@@ -69,7 +69,7 @@ fact the answer states.
 - **FLOSS.** `floss` runs FLARE's pinned standalone Linux build outside the
   Python environment. The backend image installs it checksum-verified;
   `scripts/install_floss.sh` installs it on a host. The pin, the paths and
-  `MALJAN_FLOSS_PATH` are in [Tools, and the measurement
+  `MALSPARK_FLOSS_PATH` are in [Tools, and the measurement
   baseline](/docs/configuration/#tools-and-the-measurement-baseline).
 
 ## The sample's path is the platform's

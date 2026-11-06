@@ -1,44 +1,189 @@
 ---
-title: "Tools"
-description: "Static providers, sandboxes, VirusTotal, the built-in sidecars and generic MCP servers."
+title: "Bring your own tools"
+sidebarTitle: "Overview"
+description: "Plug any MCP server, sidecar, static analyser or sandbox into the agents, with no code change. A tool Malspark has never seen is used at full strength."
 ---
 
 import { FileSearch, Fingerprint, FlaskConical, Globe, PackageOpen, Plug, Puzzle, ScanSearch, ShieldCheck, SquareTerminal } from 'lucide-react';
 
-Agents reach analysis tools in three ways, and each is configuration rather
-than code:
+Malspark is a framework. The agents, the tools they call, the models behind
+them and the sandbox are all configuration. You add a tool in the console,
+and the next job can use it.
 
-- **A static provider** — the reverse-engineering tool the static analyst
-  attaches: Ghidra, radare2, capa and YARA, an MCP server of your own, or
-  nothing (`core.static.provider`).
-- **A sandbox provider** — where samples are detonated, or which uploaded report
-  stands in (`core.sandbox.provider`).
-- **Tool servers (MCP)** — the built-in sidecars, VirusTotal's own server, and
-  any server an operator adds, each with the tools it exposes and the agents
-  that may call it (`core.mcp.servers`).
+## Four ways in
 
-Every call an agent makes, whichever way it went, is written to the evidence
-ledger with a citable id.
+| Way in | What it is | Where |
+| :-- | :-- | :-- |
+| **An MCP server** | Any [Model Context Protocol](https://modelcontextprotocol.io) server, local over stdio or remote over HTTP. Its tools go to the agents you choose. | `core.mcp.servers`; see [MCP servers](/docs/integrations/mcp-servers/) |
+| **A sidecar** | A shipped tool server in its own container: Detect It Easy, ILSpy, GoReSym, YARA-X, oletools, webcrack, unblob, JADX, and the platform's own analysis and network servers. | A Compose profile; see [Sidecars](/docs/tools/sidecars/) |
+| **A static provider** | The decompiler or disassembler an analyst opens: Ghidra, radare2, capa and YARA, or any MCP server. | `core.static.provider`; see below |
+| **A sandbox** | Where the sample is detonated: CAPEv2, Hatching Triage, any REST sandbox, an uploaded report. | `core.sandbox.provider`; see [Sandboxes](/docs/tools/sandboxes/) |
+
+Models plug in the same way; see [LLM providers](/docs/providers/). Packages
+can also add providers of every kind as plugins; see [Provider
+plugins](/docs/configuration/#provider-plugins).
+
+Whichever way a call goes, it is written to the [evidence
+ledger](/docs/concepts/ledger/) and can be cited.
+
+## Undeclared tools at full strength
+
+You do not have to describe a tool before an agent can use it well. A server
+Malspark has never seen, with no declaration at all, gets:
+
+- **Every tool it advertises**, once you tick them in the probe or set
+  `tools` to `null`. There is no allow-list in the code.
+- **Its own words, uncut.** The agent reads each tool's description and the
+  server's own MCP `instructions`, quoted as they are served. Nothing is
+  shortened.
+- **No call limits.** The agent decides what to call, how often and when to
+  stop. Only safety and physical limits apply, and each is stated.
+- **The same record.** Every call is timed, written to the ledger with its
+  arguments and its whole answer, and cited like any built-in tool's.
+
+The report stays honest about it. Where the platform cannot tell what an
+undeclared tool did beyond answering, such as whether it ran the sample or
+reached the network, the report lists the tool as **undeclared** for that
+call instead of guessing. See [What left this
+machine](/docs/usage/reports-and-exports/#what-left-this-machine).
+
+## What a declaration adds
+
+A **declaration** is data on the server's block that tells the platform what
+its tools return. It never limits the tools. It lets the platform read their
+answers as facts: build the function index from a decompiler's listing, check
+a citation against a rule match, stage the sample where a container can see
+it, and say in the report what each call did.
+
+This is the declaration shipped for one third-party static analyser
+([download](/examples/profiles/qu1cksc0pe.declaration.json)):
+
+```json
+{
+  "roles": ["static_analysis"],
+  "reads_staged_sample": false,
+  "tool_facts": {
+    "analyze_file": {
+      "kind": "file_analysis",
+      "arguments": {"path": "file_path"},
+      "timeout_seconds": 900,
+      "category": "analyze"
+    },
+    "detect_packer": {
+      "kind": "packer_detection",
+      "arguments": {"path": "file_path"},
+      "timeout_seconds": 600,
+      "category": "analyze"
+    },
+    "extract_iocs": {
+      "kind": "extracted_iocs",
+      "arguments": {"path": "file_path"},
+      "timeout_seconds": 300,
+      "category": "analyze"
+    }
+  }
+}
+```
+
+The keys go on the server's entry under `core.mcp.servers`, beside its
+transport fields:
+
+```json
+{
+  "core.mcp.servers": {
+    "qu1cksc0pe": {
+      "enabled": true,
+      "label": "Qu1cksc0pe",
+      "transport": "stdio",
+      "command": "<the server's launch command>",
+      "args": [],
+      "tools": null,
+      "roles": ["static_analysis"],
+      "tool_facts": { "analyze_file": { "kind": "file_analysis", "arguments": {"path": "file_path"} } }
+    }
+  }
+}
+```
+
+A server can also declare its tools itself, in each tool's `_meta` when it
+lists them. Malspark reads that as the declaration only for a server you mark
+as trusted (`trusts_served_declaration`). Every field is described in [What a
+server declares about its tools](/docs/configuration/#what-a-server-declares-about-its-tools).
+
+## Add a tool, step by step
+
+<Steps>
+
+<Step>
+
+Open **Settings → Setup guides → Add a tool server**, or add an entry under
+`core.mcp.servers` in **Settings → Configuration**.
+
+</Step>
+
+<Step>
+
+Say how to reach it: `command` and `args` for stdio, or `url` and
+`auth_token` for HTTP. A credential a stdio server needs comes from the
+worker's environment through `env_allow`, never through the visible `env`.
+
+</Step>
+
+<Step>
+
+Run the connection test. It lists the tools the server advertises, and which
+of them it says are unavailable on its host.
+
+</Step>
+
+<Step>
+
+Tick the tools to expose, or set `tools` to `null` for all of them.
+
+</Step>
+
+<Step>
+
+Give it to agents: by name in the entry's `agents`, or as a tool reference in
+an agent definition (`{"kind": "mcp", "server": "qu1cksc0pe"}`). See [Agents
+and teams](/docs/usage/teams/#writing-a-team-of-your-own).
+
+</Step>
+
+</Steps>
+
+## Static providers
+
+| `core.static.provider` | What it attaches | When it is missing |
+| :-- | :-- | :-- |
+| `ghidra` (the shipped value) | The Ghidra MCP server's tools; `core.static.ghidra.enabled` is off by default | A job whose team needs it is refused at submit, with the reason |
+| `r2` | r2mcp's tools | The run goes on and names what was missing |
+| `capa_yara` | Two deterministic passes whose results are written to the ledger | The run goes on and names what was missing |
+| `generic_mcp` | The tools of the `core.mcp.servers` entry named by `core.static.generic.server` | The run goes on and names what was missing |
+| `none` | Nothing | — |
+
+A job can pick its own with `static_provider`, a team can force one on every
+member, and an agent definition can name its own.
+
+## Built-in tools
 
 <Cards>
 
 <Card icon={<ScanSearch />} title="Ghidra" href="/docs/tools/ghidra/">
 
-The decompiler, as an MCP server in its own container. A team that needs
-it waits for it.
+The decompiler, as an MCP server in its own container.
 
 </Card>
 
 <Card icon={<SquareTerminal />} title="radare2" href="/docs/tools/radare2/">
 
-r2mcp over stdio, degrading cleanly when it is not installed.
+r2mcp over stdio.
 
 </Card>
 
 <Card icon={<ShieldCheck />} title="capa and YARA" href="/docs/tools/capa-yara/">
 
-Deterministic capability and rule matches, as a provider, as tools and in
-the triage pack.
+Capability and rule matches, as a provider, as tools and in the triage pack.
 
 </Card>
 
@@ -56,68 +201,40 @@ VirusTotal's own MCP server, registered with an agent token.
 
 <Card icon={<Fingerprint />} title="Identification servers" href="/docs/tools/identification/">
 
-Detect It Easy, ILSpy and GoReSym, one container each, shipped switched off,
-with their own pack steps.
+Detect It Easy, ILSpy and GoReSym.
 
 </Card>
 
 <Card icon={<FileSearch />} title="Rule and document servers" href="/docs/tools/rules-and-documents/">
 
-YARA-X over your own rule files, oletools over Office and RTF documents,
-webcrack over JavaScript droppers, one container each, shipped switched off,
-with their own pack steps.
+YARA-X, oletools and webcrack.
 
 </Card>
 
 <Card icon={<PackageOpen />} title="Container and Android servers" href="/docs/tools/containers-and-android/">
 
-unblob carving and extracting what a container or firmware image holds, JADX
-decompiling an APK's or dex file's code, one container each, shipped switched
-off, with their own pack steps.
+unblob and JADX.
 
 </Card>
 
 <Card icon={<Puzzle />} title="Analysis and knowledge sidecars" href="/docs/tools/sidecars/">
 
-The built-in tool servers: file analysis, ATT&CK knowledge, capture views
-and reputation.
+File analysis, ATT&CK knowledge, capture views and reputation.
 
 </Card>
 
 <Card icon={<Plug />} title="Generic MCP servers" href="/docs/tools/generic-mcp/">
 
-Any MCP server, attached to the agents you choose, with the tools you tick.
+Any MCP server as the static provider or as an agent's tools.
 
 </Card>
 
 </Cards>
 
-## Static providers at a glance
-
-| `core.static.provider` | What it attaches | When it is missing |
-| :-- | :-- | :-- |
-| `ghidra` (the shipped value) | The Ghidra MCP server's tools; `core.static.ghidra.enabled` is off by default | Does not degrade: a job whose team needs it is refused at submit |
-| `r2` | r2mcp's tools | Degrades: the run goes on and names what was missing |
-| `capa_yara` | No tools: two deterministic passes whose results are written to the ledger | Degrades |
-| `generic_mcp` | The tools of the `core.mcp.servers` entry named by `core.static.generic.server` | Degrades |
-| `none` | Nothing | — |
-
-A job can choose its own provider with `static_provider`, a team can force one
-on every member, and an agent definition can name its own. Which agents open a
-provider, and what happens when one fails, is in
-[Providers](/docs/architecture/#providers).
-
 ## Every tool says what it cannot do
 
 Each built-in sidecar answers `capabilities`: which of its tools need an
-optional library, a binary or a setting, and which of those are present on its
-host. The console's server card names the unavailable tools before a run, a
-tool marked unavailable is kept out of the list the model is given, and a tool
-that cannot answer returns an error with a code and a remedy rather than
-raising. See [Built-in tool servers](/docs/architecture/#built-in-tool-servers).
-
-## The measurement baseline
-
-The `measurement` team withholds every tool server and forces the static
-provider to `none`, so the same sample can be run with and without tools. See
-[Teams and profiles](/docs/usage/teams/#the-measurement-baseline).
+optional library, a binary or a setting, and which of those are present. The
+console names the unavailable tools before a run. A tool that cannot answer
+returns an error with a code and a remedy, and a run without a tool it needed
+is marked degraded and says why.

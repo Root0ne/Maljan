@@ -32,7 +32,7 @@ session and refuse a key with 403. A save, import or reset that changes the
 sign-in policy (the rate limiter, the login lockout, the trusted proxies, the
 token lifetimes)
 also needs `current_password`. The refresh token is an HttpOnly cookie scoped to `/api/v1/auth`
-and is never sent by hand. See [security.md](/docs/security/).
+and is never sent by hand. See [Security](/docs/security/).
 
 ## Router groups
 
@@ -50,9 +50,9 @@ and is never sent by hand. See [security.md](/docs/security/).
 | `/system` | Non-secret pipeline-mode flags for dashboards, and long-term-memory maintenance. |
 
 Outside the prefix: `GET /health` and `GET /healthz` (see
-[deployment.md](/docs/deployment/)), and the WebSocket at
+[Monitoring](/docs/monitoring/#health-checks)), and the WebSocket at
 `/ws/analysis/{job_id}`, which streams one analysis run's events and
-negotiates the `maljan.v1` subprotocol when the client asks for it.
+negotiates the `malspark.v1` subprotocol when the client asks for it.
 
 ### Jobs
 
@@ -119,7 +119,7 @@ not checked. The seal is also served in the run summary and the full report as
 
 `GET /jobs/{job_id}/package` downloads the job's verifiable package, a
 deterministic `.tar.gz` (`application/gzip`, served as
-`maljan-job-<job_id>.tar.gz`), under the same ownership rule: another
+`malspark-job-<job_id>.tar.gz`), under the same ownership rule: another
 account's job is not found. It holds the stored run in the replay export's
 layout under `run/` (the report row and document, the evidence ledger, the run
 summary, the judge's bundle, the events, the job row with the sample's hash
@@ -329,7 +329,7 @@ The diff is made on request from the two stored records — the report
 columns, the `MalwareReport` document, the run summary, the exported STIX
 bundle and the per-agent findings — and nothing else. It states what each
 record says; it does not say which run is right, does not merge them and
-writes into neither. The same function, `maljan.reporting.run_diff.diff_runs`,
+writes into neither. The same function, `malspark.reporting.run_diff.diff_runs`,
 can be called on any two records; it is linear in their sizes, and the route
 runs it and encodes its answer off the event loop.
 
@@ -346,7 +346,7 @@ each run's record cites for that row. Ids are read only from fields that hold
 ids — `family_evidence_ids`, a key finding's `evidence_ids`, a configuration
 item's, a command's and a C2 channel's `evidence_refs`, a persistence
 mechanism's and a claim's `evidence_ref`, a STIX object's
-`x_maljan_evidence_refs` — and never out of a quote, a note, a title or a
+`x_malspark_evidence_refs` — and never out of a quote, a note, a title or a
 sample's own strings. A row whose record holds no such field cites none; that
 is every ATT&CK mapping and every indicator.
 
@@ -431,7 +431,7 @@ severity, code, message, team, stage, field and the dotted `path` a refusal
 would be keyed by, errors first, and each team laid out as nodes with a row
 and a column and edges between them. It stores nothing; its errors are the
 refusals `PATCH /settings` makes, in the same words. See
-[configuration.md](/docs/configuration/).
+[Configuration](/docs/configuration/).
 `GET /settings/plugins` (admin) answers every installed provider plugin per
 kind (`llm`, `static`, `sandbox`, `memory`) with its entry-point group: each
 plugin's name, its `entry` as the allow-list writes it, its distribution and
@@ -477,4 +477,4 @@ the platform's.
 - **Correlation** — send `X-Request-ID` to tie your call to the server's log
   lines; the API echoes it back and generates one when it is absent.
 - **Rate limits** — requests are throttled per client address and path from the
-  settings store; see [operations.md](/docs/operations/).
+  settings store; see [Rate limits and login protection](/docs/operations/#rate-limits-and-login-protection).

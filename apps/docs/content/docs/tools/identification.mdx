@@ -79,7 +79,7 @@ and the worker. It publishes no
 port; a relay that mounts nothing and holds nothing publishes it on
 `BIND_ADDRESS` for a worker run on the host.
 
-A server reads a path only under the directories `MALJAN_SAMPLE_ROOTS` lists
+A server reads a path only under the directories `MALSPARK_SAMPLE_ROOTS` lists
 (the mount, in the image) and answers anything else `path_outside_roots`. A run
 past `TOOL_TIMEOUT_SECONDS` (unset: no bound of its own) is killed with every
 process it started and answered `timeout`; a call the platform gave up on kills
@@ -120,4 +120,4 @@ with one of their own, under any names, whose tools declare the same.
 Each `server.py` also serves over stdio (`python3 services/die-mcp/server.py
 --stdio`) for an operator who installs the program on the worker's host: point
 the block's `transport` at `stdio` and its `command` and `args` at the script,
-clear its `sample_mount`, and add `MALJAN_SAMPLE_ROOTS` to its `env_allow`.
+clear its `sample_mount`, and add `MALSPARK_SAMPLE_ROOTS` to its `env_allow`.

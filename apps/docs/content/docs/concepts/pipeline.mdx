@@ -1,0 +1,149 @@
+---
+title: "Pipeline"
+description: "What happens to a sample from upload to report: routing, the triage pack, the analysis stages, the debate, the verdict and the report."
+---
+
+A run is one **team** working on one **sample**. The team is a list of stages,
+and the pipeline runs them in order. Code does the deterministic work; agents
+make every decision.
+
+<div style={{ overflowX: 'auto', margin: '1.5rem 0' }}>
+<svg viewBox="0 0 680 600" role="img" aria-labelledby="pl-title" style={{ width: '100%', maxWidth: 680, minWidth: 460, height: 'auto', fontFamily: 'inherit' }}>
+  <title id="pl-title">The pipeline: upload and routing, the triage pack, the analysis stages, the debate, the verdict and the report, each writing to the evidence ledger</title>
+  <style>{`
+    .pl-box { fill: var(--color-fd-card, transparent); stroke: var(--color-fd-border, currentColor); stroke-width: 1.5; }
+    .pl-key { fill: var(--color-fd-accent, transparent); stroke: var(--color-fd-primary, currentColor); stroke-width: 1.5; }
+    .pl-code { fill: var(--color-fd-muted, transparent); stroke: var(--color-fd-border, currentColor); stroke-width: 1.5; stroke-dasharray: 5 3; }
+    .pl-t { fill: currentColor; font-size: 15px; font-weight: 600; }
+    .pl-s { fill: currentColor; opacity: 0.72; font-size: 12.5px; }
+    .pl-a { stroke: currentColor; opacity: 0.55; stroke-width: 1.5; fill: none; }
+    .pl-d { stroke: var(--color-fd-primary, currentColor); stroke-width: 1.3; fill: none; stroke-dasharray: 4 4; }
+  `}</style>
+  <defs>
+    <marker id="pl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" style={{ fill: 'currentColor', opacity: 0.55 }} />
+    </marker>
+  </defs>
+  <rect className="pl-code" x="20" y="10" width="420" height="62" rx="10" />
+  <text className="pl-t" x="36" y="36">1. Upload and routing</text>
+  <text className="pl-s" x="36" y="56">magic bytes give the file type; the sandbox detonates it</text>
+  <rect className="pl-code" x="20" y="102" width="420" height="62" rx="10" />
+  <text className="pl-t" x="36" y="128">2. Triage pack</text>
+  <text className="pl-s" x="36" y="148">code runs the fixed tools: hashes, rules, decoded strings</text>
+  <rect className="pl-box" x="20" y="194" width="420" height="84" rx="10" />
+  <text className="pl-t" x="36" y="220">3. Analysis stages</text>
+  <text className="pl-s" x="36" y="240">triage → static → reversing → detonation → network</text>
+  <text className="pl-s" x="36" y="260">each agent calls real tools and files claims</text>
+  <rect className="pl-box" x="20" y="308" width="420" height="62" rx="10" />
+  <text className="pl-t" x="36" y="334">4. Debate</text>
+  <text className="pl-s" x="36" y="354">mediator lists contradictions; named analysts revise</text>
+  <rect className="pl-box" x="20" y="400" width="420" height="62" rx="10" />
+  <text className="pl-t" x="36" y="426">5. Verdict</text>
+  <text className="pl-s" x="36" y="446">the judge decides; techniques checked; STIX 2.1 bundle</text>
+  <rect className="pl-box" x="20" y="492" width="420" height="62" rx="10" />
+  <text className="pl-t" x="36" y="518">6. Report</text>
+  <text className="pl-s" x="36" y="538">sections written from the claims, each citing ev_ ids</text>
+  <path className="pl-a" d="M230 72V98" markerEnd="url(#pl-arrow)" />
+  <path className="pl-a" d="M230 164V190" markerEnd="url(#pl-arrow)" />
+  <path className="pl-a" d="M230 278V304" markerEnd="url(#pl-arrow)" />
+  <path className="pl-a" d="M230 370V396" markerEnd="url(#pl-arrow)" />
+  <path className="pl-a" d="M230 462V488" markerEnd="url(#pl-arrow)" />
+  <rect className="pl-key" x="500" y="102" width="160" height="452" rx="10" />
+  <text className="pl-t" x="580" y="300" textAnchor="middle">Evidence</text>
+  <text className="pl-t" x="580" y="320" textAnchor="middle">ledger</text>
+  <text className="pl-s" x="580" y="344" textAnchor="middle">ev_0001 …</text>
+  <path className="pl-a" d="M440 133H496" markerEnd="url(#pl-arrow)" />
+  <path className="pl-a" d="M440 236H496" markerEnd="url(#pl-arrow)" />
+  <path className="pl-a" d="M440 339H496" markerEnd="url(#pl-arrow)" />
+  <path className="pl-a" d="M440 431H496" markerEnd="url(#pl-arrow)" />
+  <path className="pl-d" d="M496 523H444" markerEnd="url(#pl-arrow)" />
+  <text className="pl-s" x="452" y="516">cites</text>
+  <text className="pl-s" x="20" y="584">Dashed boxes are code only. Solid boxes are agents.</text>
+</svg>
+</div>
+
+## 1. Upload and routing
+
+The API stores the sample in the object store and its metadata in Postgres.
+Submitting a job queues it for the worker.
+
+The worker reads the sample's magic bytes into a file type and a platform.
+Everything after that routes on this answer: the sandbox package, the rules
+that apply, the tools an analyst gets and the ATT&CK domain. No sample is
+refused for its format. A format nothing recognises takes a neutral path, and
+the report says so.
+
+When a sandbox is configured, the sample is submitted to it at the start, and
+its report feeds the stages below.
+
+## 2. The triage pack
+
+Before any agent starts, the pipeline runs a fixed list of tools itself. A
+human analyst runs the same commands on every sample before opening a
+disassembler; the pack makes sure those facts are always there.
+
+Each result is an ordinary ledger entry under the agent `pipeline`. In the
+[benchmark run](/docs/benchmark/), the pack wrote the first 28 entries:
+
+| Entries | Tools |
+| :-- | :-- |
+| `ev_0001`–`ev_0006` | file identity, hashes, signature, PE structure, strings, indicators |
+| `ev_0007`–`ev_0011` | YARA, capa, Sigma over the sandbox events, API capabilities, LOLBin lookup |
+| `ev_0012`–`ev_0017` | the sandbox's processes, network, signatures, dropped files, channels, and the capture summary |
+| `ev_0018` | the VirusTotal report, through VirusTotal's own MCP server |
+| `ev_0019`–`ev_0028` | FLOSS, API hash resolution, decoded string blobs, crypto constants, anti-analysis scan, function index, code links |
+
+The pack is a list of steps declared as data. You can add your own steps, and
+a step can call any tool server's tool. See [The pack's
+steps](/docs/configuration/#the-packs-steps).
+
+## 3. The analysis stages
+
+Each analysis stage runs the agents it names. An agent gets its prompt, the
+pack's facts, the findings of the stages it depends on, and its tools. It then
+works in a loop: call a tool, read the answer, decide the next call. It stops
+when it has an answer, and files it as **claims**. Each claim carries a
+confidence and the `ev_` ids it rests on.
+
+A stage can carry a condition. The detonation stage of the shipped teams runs
+only when a sandbox report exists (`when: has_sandbox_report`); the Android
+stage only for an APK or DEX file. A stage that does not run says which
+condition failed.
+
+On a hosted API the analysts of a stage run in parallel. On a single-slot local
+server they run one after another, so they do not fight over the slot. The
+default, `auto`, picks per job.
+
+See [Agents and teams](/docs/usage/teams/) for how stages are written.
+
+## 4. The debate
+
+The mediator reads every analyst's claims and lists each contradiction still
+standing. The analysts it names revise, with the disputed ledger entries in
+front of them. The loop ends when nothing blocking is left, when a round
+changes nothing, or at the round limit. See [Debate and
+judge](/docs/concepts/debate-and-judge/).
+
+## 5. The verdict
+
+The judge reads the debate and the evidence and states the verdict, its
+confidence, the severity, the category and the family. Each ATT&CK technique
+it publishes is checked against the catalogue and the claims behind it; a
+technique without support is dropped, and the report says why. The judge's
+answer becomes the STIX 2.1 bundle.
+
+## 6. The report
+
+The reporter writes the report section by section from the claims in force,
+the verdict and the ledger. Every section names the entries it rests on. Code
+checks the sections against each other and against the ledger before the
+report is stored. See [Report](/docs/concepts/report/).
+
+When the run is stored, the ledger is sealed with a hash chain, so a later
+change to an entry or to the report shows.
+
+## Where to read more
+
+The [Architecture](/docs/architecture/) reference describes each step in full:
+the job lifecycle, the worker processes, every validation loop and every event
+the pipeline publishes.

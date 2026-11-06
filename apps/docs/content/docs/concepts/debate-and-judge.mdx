@@ -1,0 +1,152 @@
+---
+title: "Debate and judge"
+description: "How the analysts argue over their claims, when the debate ends, and how the judge reaches the verdict."
+---
+
+After the analysis stages, each analyst has filed its claims. They rarely
+agree on everything: one reads a routine as a mutex check, another as a
+licence check; one says a host is C2, another says it is a revocation lookup.
+The debate settles what it can with evidence, and the judge decides the rest.
+
+<div style={{ overflowX: 'auto', margin: '1.5rem 0' }}>
+<svg viewBox="0 0 700 430" role="img" aria-labelledby="dj-title" style={{ width: '100%', maxWidth: 700, minWidth: 480, height: 'auto', fontFamily: 'inherit' }}>
+  <title id="dj-title">The debate loop: analysts file claims, the mediator lists contradictions, the named analysts revise, and the loop ends in the judge's verdict</title>
+  <style>{`
+    .dj-box { fill: var(--color-fd-card, transparent); stroke: var(--color-fd-border, currentColor); stroke-width: 1.5; }
+    .dj-key { fill: var(--color-fd-accent, transparent); stroke: var(--color-fd-primary, currentColor); stroke-width: 1.5; }
+    .dj-t { fill: currentColor; font-size: 15px; font-weight: 600; }
+    .dj-s { fill: currentColor; opacity: 0.72; font-size: 12.5px; }
+    .dj-a { stroke: currentColor; opacity: 0.55; stroke-width: 1.5; fill: none; }
+  `}</style>
+  <defs>
+    <marker id="dj-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" style={{ fill: 'currentColor', opacity: 0.55 }} />
+    </marker>
+  </defs>
+  <rect className="dj-box" x="20" y="20" width="220" height="70" rx="10" />
+  <text className="dj-t" x="130" y="50" textAnchor="middle">Analysts</text>
+  <text className="dj-s" x="130" y="70" textAnchor="middle">claims with ev_ citations</text>
+  <rect className="dj-key" x="20" y="140" width="220" height="90" rx="10" />
+  <text className="dj-t" x="130" y="170" textAnchor="middle">Mediator</text>
+  <text className="dj-s" x="130" y="190" textAnchor="middle">reads claims and ledger</text>
+  <text className="dj-s" x="130" y="208" textAnchor="middle">lists contradictions</text>
+  <polygon className="dj-box" points="130,270 240,315 130,360 20,315" />
+  <text className="dj-t" x="130" y="312" textAnchor="middle">Anything</text>
+  <text className="dj-t" x="130" y="330" textAnchor="middle">blocking?</text>
+  <rect className="dj-box" x="400" y="270" width="270" height="90" rx="10" />
+  <text className="dj-t" x="535" y="300" textAnchor="middle">Named analysts revise</text>
+  <text className="dj-s" x="535" y="320" textAnchor="middle">with the disputed entries in front</text>
+  <text className="dj-s" x="535" y="338" textAnchor="middle">of them; may call tools again</text>
+  <rect className="dj-key" x="400" y="20" width="270" height="90" rx="10" />
+  <text className="dj-t" x="535" y="50" textAnchor="middle">Judge</text>
+  <text className="dj-s" x="535" y="70" textAnchor="middle">verdict, family, techniques</text>
+  <text className="dj-s" x="535" y="88" textAnchor="middle">checked, then STIX 2.1</text>
+  <path className="dj-a" d="M130 90V136" markerEnd="url(#dj-arrow)" />
+  <path className="dj-a" d="M130 230V266" markerEnd="url(#dj-arrow)" />
+  <path className="dj-a" d="M240 315H396" markerEnd="url(#dj-arrow)" />
+  <text className="dj-s" x="260" y="306">yes, and rounds left</text>
+  <path className="dj-a" d="M535 270V205H244" markerEnd="url(#dj-arrow)" />
+  <text className="dj-s" x="330" y="198">next round</text>
+  <path className="dj-a" d="M130 360V400H310V65H396" markerEnd="url(#dj-arrow)" />
+  <text className="dj-s" x="150" y="418">no, or a stop rule applies</text>
+</svg>
+</div>
+
+## The mediator
+
+The mediator runs on the judge's model. In each round it reads every
+analyst's report and its structured claims. It has tools of its own: it can
+read any ledger entry and ask an analyst a direct question. It decides what to
+read; nothing limits its calls.
+
+It ends its answer with a block that lists every contradiction still
+standing. Each line names the analysts who must answer it and says whether it
+blocks. Two lines from the first round of the [benchmark
+run](/docs/benchmark/):
+
+```
+CONTRADICTIONS:
+[analysts: TRIAGE ANALYST] Claim 7: routine 0x9484 builds some obfuscated strings on the
+stack at run time, contradicted by ALL_TOOLS_REVERSER claim 2 (0x9484 body, ev_0090:
+resolver records only, no string construction) and by ev_0019 (0 stack and 0 tight
+strings). [blocking: the stack-string attribution has no supporting decode and conflicts
+with the function body.]
+[analysts: ALL_TOOLS_STATIC_R2 ANALYST, STATIC ANALYST] Claim: the capture carries no DNS
+query names and lists addresses only (static_r2 claim 13; static claim 14), contradicted
+by ev_0113 (12 DNS query names) and ev_0114 (9 HTTP requests with Host headers), as
+NETWORK claim 12 corrects. [blocking: ...]
+```
+
+A last line, `agreement_confidence`, gives the mediator's agreement level.
+
+A contradiction can be between two analysts, or between an analyst and a
+ledger entry. Before it marks a line blocking, the mediator is asked to read
+the entry the line turns on.
+
+## Revision rounds
+
+Only the analysts a blocking line names revise. Each one sees the lines that
+name it and the stored text of the entries those lines cite. It may call its
+tools again. Every other analyst keeps its answer.
+
+The code watches each revision but never rewrites it:
+
+- A value a revision silently drops is recorded, so a claim cannot vanish
+  without trace.
+- A rise in agreement that no new evidence explains is flagged as possible
+  sycophancy. It is reported, not blocked.
+
+## When the debate ends
+
+| End | When | Consensus claimed |
+| :-- | :-- | :-- |
+| `consensus` | The agreement level reaches the threshold (`negotiation.consensus_threshold`, 0.85 by default) and no line blocks. | Yes |
+| `converged` | Every revision repeats the answer in force, or the agreement level stops moving with nothing blocking. | Yes |
+| `reworded` | Every revision states the same claims in other words. | No |
+| `contested_points_unchanged` | A round left every contested point as it was. | No |
+| `carried_without_new_evidence` | A point went through two rounds with nothing new to read. | No |
+| `hard_limit` | The round limit was reached (`negotiation.max_iterations`, 5 by default) with blocking lines left. | No |
+| `not_applicable` | Fewer than two analysts filed claims, so there was nothing to compare. | No |
+| `mediation_failed` | The mediator's call failed or timed out. | No |
+
+At the round limit, the mediator gets one more question: for each line still
+blocking, do the cited entries uphold it? Its ruling is written onto the
+claims the line names. No analyst is called again.
+
+The run summary records the reason as `negotiation.termination_reason`, with
+the agreement level after each round.
+
+## The judge
+
+The judge works after the debate, with the same tools. It reads the claims in
+force, the debate record and the evidence, and states:
+
+- the **verdict**: Malware, Suspicious or Benign, with a confidence;
+- the **severity** and the **category**;
+- the **family**, with its own confidence;
+- the **ATT&CK techniques** it publishes.
+
+The verdict is the judge's own words. The code never derives it from the shape
+of the STIX bundle or from a score.
+
+Each technique is checked before it is published. The id must exist in the
+ATT&CK catalogue for the sample's platform, and a claim behind it must
+describe the behaviour. A technique that fails is sent back to the judge with
+the reason, and one it cannot support is dropped. The report's ATT&CK section
+lists what was dropped and why. In the [benchmark run](/docs/benchmark/), the
+judge published 24 techniques and dropped two, including process injection,
+because no cross-process write or remote thread was located.
+
+The judge's answer is written as a STIX 2.1 bundle: the malware object, an
+attack pattern per technique, and indicators for the IOCs it publishes.
+
+## Settings
+
+| Setting | Default | Effect |
+| :-- | :-- | :-- |
+| `negotiation.max_iterations` | 5 | The round limit. A job can set its own with `max_iterations`. |
+| `negotiation.consensus_threshold` | 0.85 | The agreement level that counts as consensus when nothing blocks. |
+
+A team's debate stage can set how hard it argues; see [Agents and
+teams](/docs/usage/teams/). The mechanics in full, rule by rule, are in
+[Architecture](/docs/architecture/#the-pipeline).

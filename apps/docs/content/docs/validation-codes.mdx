@@ -210,7 +210,7 @@ No comment names its meaning, and `maljan.pipeline.validation:claim_does_not_des
 
 - **Raised at** `maljan.pipeline.validation:claim_does_not_describe_violation`
 - **Constant** `maljan.pipeline.validation:CLAIM_DOES_NOT_DESCRIBE_CODE`
-- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/docs/benchmark/scores/latrodectus-iteration6-default/)
+- **Docs** [Architecture](/docs/architecture/), [Validation and feedback](/docs/concepts/validation/)
 
 ### `attck.missing_id`
 
@@ -226,7 +226,7 @@ No comment names its meaning, and `maljan.pipeline.validation:validate_isr` pass
 
 - **Raised at** `maljan.pipeline.validation:validate_isr`, `maljan.pipeline.validation:validate_verdict_bundle`
 - **Constant** `maljan.pipeline.validation:PLATFORM_MISMATCH_CODE`
-- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 2, default model](/docs/benchmark/scores/latrodectus-iteration2-default/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `attck.unknown_id`
 
@@ -235,7 +235,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 - **Raised at** `maljan.pipeline.validation:validate_isr`
 - **Passes on** `maljan.agents.base_agent:BaseAnalyst._validation_turn`, `maljan.pipeline.nodes:make_judge_node.node_fn`
 - **Constant** `maljan.pipeline.validation:VALIDITY_CODE`
-- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/docs/benchmark/scores/latrodectus-iteration6-default/)
+- **Docs** [Architecture](/docs/architecture/), [Validation and feedback](/docs/concepts/validation/)
 
 ### `attck.weak_alignment`
 
@@ -279,7 +279,7 @@ A report section answer that writes one item again. Every list section's contrac
 
 - **Raised at** `maljan.pipeline.validation:repeated_item_violations`
 - **Constant** `maljan.pipeline.validation:REPEATED_ITEMS_CODE`
-- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 4, default model](/docs/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/), [Latrodectus score: iteration 6, default model](/docs/benchmark/scores/latrodectus-iteration6-default/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `composer.schema`
 
@@ -287,7 +287,7 @@ No comment names its meaning, and `maljan.pipeline.validation:schema_violations`
 
 - **Raised at** `maljan.pipeline.validation:schema_violations`, `maljan.reporting.composer:ReportComposer._invoke._validate`
 - **Constant** none: the code is written as a literal
-- **Docs** [Latrodectus score: iteration 4, default model](/docs/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/)
+- **Docs** none
 
 ## isr
 
@@ -305,7 +305,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:confide
 
 - **Raised at** `maljan.pipeline.validation:confidence_violation`
 - **Constant** `maljan.pipeline.validation:CLAIM_WITHOUT_CONFIDENCE_CODE`
-- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 2, default model with the r2 disassembler](/docs/benchmark/scores/latrodectus-iteration2-r2/)
+- **Docs** [Architecture](/docs/architecture/), [Validation and feedback](/docs/concepts/validation/)
 
 ### `isr.claims_repeated`
 
@@ -401,7 +401,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:validat
 
 - **Raised at** `maljan.pipeline.validation:validate_isr`
 - **Constant** `maljan.pipeline.validation:UNGROUNDED_TECHNIQUE_CODE`
-- **Docs** [Architecture](/docs/architecture/)
+- **Docs** [Architecture](/docs/architecture/), [Evidence ledger](/docs/concepts/ledger/)
 
 ### `isr.unparsed_answer`
 
@@ -409,7 +409,7 @@ No comment names its meaning, and `maljan.pipeline.validation:parse_violations` 
 
 - **Raised at** `maljan.pipeline.validation:parse_violations`
 - **Constant** `maljan.pipeline.validation:UNPARSED_ANSWER_CODE`
-- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 2, default model with the r2 disassembler](/docs/benchmark/scores/latrodectus-iteration2-r2/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ## narrative
 
@@ -427,7 +427,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:ungroun
 
 - **Raised at** `maljan.pipeline.validation:section_capability_violations`, `maljan.pipeline.validation:ungrounded_capabilities`
 - **Constant** `maljan.pipeline.validation:UNGROUNDED_CAPABILITY_CODE`
-- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 1, small model](/docs/benchmark/scores/latrodectus-iteration1-small/), [Latrodectus score: iteration 2, default model with the r2 disassembler](/docs/benchmark/scores/latrodectus-iteration2-r2/), [Latrodectus score: iteration 4, default model](/docs/benchmark/scores/latrodectus-iteration4-default/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `narrative.ungrounded_finding`
 
@@ -567,7 +567,7 @@ No comment names its meaning, and `maljan.pipeline.validation:wrong_entry_citati
 
 - **Raised at** `maljan.pipeline.validation:wrong_entry_citations`
 - **Constant** `maljan.pipeline.validation:CITATION_WRONG_ENTRY_CODE`
-- **Docs** [Architecture](/docs/architecture/)
+- **Docs** [Architecture](/docs/architecture/), [Evidence ledger](/docs/concepts/ledger/)
 
 ### `report.configuration_uncited`
 
@@ -647,7 +647,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:rule_ma
 
 - **Raised at** `maljan.pipeline.validation:rule_match_statement_violations`
 - **Constant** `maljan.pipeline.validation:RULE_MATCH_AS_ACTION_CODE`
-- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 4, default model](/docs/benchmark/scores/latrodectus-iteration4-default/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `report.technique_name`
 
@@ -697,7 +697,7 @@ No comment names its meaning; the message at `maljan.pipeline.validation:credit_
 
 - **Raised at** `maljan.pipeline.validation:credit_without_claim_violations`
 - **Constant** `maljan.pipeline.validation:CREDIT_WITHOUT_CLAIM_CODE`
-- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 5, default model](/docs/benchmark/scores/latrodectus-iteration5-default/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.duplicate_label`
 
@@ -905,7 +905,7 @@ One endpoint question, one code. A URL, a name and an address that fail the same
 
 - **Raised at** `maljan.reporting.renderers.stix_renderer:ExtendedSTIXRenderer._render`, `maljan.reporting.renderers.stix_renderer:_judge_indicator_problem`
 - **Constant** `maljan.reporting.renderers.stix_renderer:UNPUBLISHABLE_ENDPOINT_CODE`
-- **Docs** [Architecture](/docs/architecture/), [Latrodectus score: iteration 6, default model](/docs/benchmark/scores/latrodectus-iteration6-default/)
+- **Docs** [Architecture](/docs/architecture/)
 
 ### `stix.unpublishable_object`
 

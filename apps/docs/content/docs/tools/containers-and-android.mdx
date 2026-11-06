@@ -166,7 +166,7 @@ and its extractors for the server's Python (`pip install --require-hashes -r
 services/unblob-mcp/requirements.txt`, then `unblob
 --show-external-dependencies`), or JADX's `jadx` command on `PATH`. Point the
 block's `transport` at `stdio` and its `command` and `args` at the script, clear
-its `sample_mount`, and add `MALJAN_SAMPLE_ROOTS` (and `UNBLOB_CARVE_ROOT`,
+its `sample_mount`, and add `MALSPARK_SAMPLE_ROOTS` (and `UNBLOB_CARVE_ROOT`,
 `UPLOAD_MAX_BYTES`, `CARVED_KEEP_SECONDS`) to its `env_allow`. Run that way,
 unblob's files are on the host, under `UNBLOB_CARVE_ROOT` (a directory under
 the system's temporary directory unless set).

@@ -1,5 +1,6 @@
 ---
 title: "Architecture"
+sidebarTitle: "Architecture reference"
 description: "Components, the request and job lifecycle, teams as stages, agents and their tools, the evidence ledger, validation loops and report assembly."
 ---
 
@@ -12,6 +13,15 @@ operator can reconfigure.
 
 ![Malspark runtime components](/assets/architecture.svg)
 
+<Callout title="This is the full reference">
+
+It describes every rule the pipeline applies, in detail. For the ideas first,
+read the concept pages: [Pipeline](/docs/concepts/pipeline/), [Evidence
+ledger](/docs/concepts/ledger/), [Debate and
+judge](/docs/concepts/debate-and-judge/) and [Report](/docs/concepts/report/).
+
+</Callout>
+
 ## Components
 
 | Component | Role |
@@ -20,7 +30,7 @@ operator can reconfigure.
 | API (`apps/api/app`) | FastAPI application. Authentication, samples, jobs, reports, the audit trail, the settings store and the probes. |
 | Worker (`apps/api/app/worker`) | arq process. Takes an analysis job, runs the pipeline, writes the report and publishes progress events. One job at a time. |
 | Enrichment worker (`apps/api/app/worker/enrich_worker.py`) | A second arq process on a queue of its own, for the post-verdict reputation lookups. Two at a time by default, and off unless the deployment turns it on (see below). |
-| Core (`src/maljan`) | The analysis package: agents, the LangGraph pipeline, the deterministic evidence layers, the provider layer, memory and reporting. |
+| Core (`src/malspark`) | The analysis package: agents, the LangGraph pipeline, the deterministic evidence layers, the provider layer, memory and reporting. |
 | Postgres | Users, samples, jobs, reports, audit rows and the settings store. |
 | Redis | The arq queue, the per-job event stream, and rate-limit counters. |
 | MinIO | Sample bytes, in the bucket named by `MINIO_BUCKET`. |
@@ -59,7 +69,7 @@ operator can reconfigure.
    `/api/v1/reports/...` in every rendering the report service supports.
    A run that fails after its report was built keeps the report. The graph
    runs as a stream (`astream` in the modes `ainvoke` itself uses, so a run
-   that completes ends in the same state), and `MaljanApp.built_report` holds
+   that completes ends in the same state), and `MalsparkApp.built_report` holds
    what the report node returned, merged into the state it was built from,
    from the moment it returns. When the graph then raises — a later node, or
    LangGraph refusing the writes of the report's own step — the worker marks
@@ -175,7 +185,7 @@ another sample, a sandbox provider that cannot take one.
 ### Who owns a running job
 
 The worker that is running it says so, and keeps saying so. While
-`run_analysis` runs it holds `maljan:job-owner:<job id>` with its own id in it,
+`run_analysis` runs it holds `malspark:job-owner:<job id>` with its own id in it,
 for 90 seconds, refreshed every 30 by a task of its own; the key is dropped on
 success, failure and cancellation alike. A `running` row whose key is absent is
 a row nobody is working on.
@@ -208,7 +218,7 @@ writing a row races its own teardown — the heartbeat goes with it, so the next
 sweep pass marks the job failed within ten minutes.
 
 A cancel stops the run as well as marking it. Each job carries one
-cancellation (`maljan.core.cancellation`), bound for the whole run: every graph
+cancellation (`malspark.core.cancellation`), bound for the whole run: every graph
 node checks it on the way in, every LangChain model call the job makes — in a
 node, on the agent loop, in a thread started from either — checks it before
 anything is sent, and every call the job has in flight on the agent loop is
@@ -261,7 +271,7 @@ time.
 
 The platform never refuses a sample for its format. The first thing a job does
 is read the sample's magic bytes into a file type and a platform
-(`src/maljan/extractors/sample_identity.py`), and everything downstream routes
+(`src/malspark/extractors/sample_identity.py`), and everything downstream routes
 on that answer: which sandbox package or VM profile is asked for, which tools
 an analyst is given, which rules the Sigma and YARA layers keep,
 which ATT&CK domain a technique id belongs to, and which artefacts the analyst
@@ -272,7 +282,7 @@ work over whichever tools the operator connected for that format.
 
 ## The pipeline
 
-A LangGraph `StateGraph` over one shared state (`src/maljan/pipeline/`). The
+A LangGraph `StateGraph` over one shared state (`src/malspark/pipeline/`). The
 triage pack runs first; the analyst stage after it has two shapes, and the
 job's analyst mode (`llm.parallel_analysts`: `auto`, `true` or `false`)
 chooses between them for a stage that sets no mode of its own:
@@ -407,15 +417,15 @@ summary's `profile.analyst_mode` says what every stage and round ran in and why.
 ### The triage pack
 
 Before any analyst starts, the pipeline runs the deterministic tools itself
-(`src/maljan/pipeline/triage_pack.py`) and writes each result to the evidence
+(`src/malspark/pipeline/triage_pack.py`) and writes each result to the evidence
 ledger as an ordinary entry under `agent="pipeline"`, `server="pipeline"`. A
 human analyst runs the same dozen commands on every sample before opening a
 disassembler, and the live runs showed the local model rarely asks for any of
 them; a fact a model may or may not ask for is not a fact a run can rely on.
 
-The pack is a list of steps declared as data (`maljan.core.pack_steps`; an
+The pack is a list of steps declared as data (`malspark.core.pack_steps`; an
 operator lays their own over it in `triage.steps`, see *The pack's steps* in
-[configuration.md](/docs/configuration/)): each step names its tool and server, an
+[Configuration](/docs/configuration/)): each step names its tool and server, an
 argument template, the routed formats it runs for, its budget, whether it
 starts beside the others and beside which, the renderer of its pack line and
 the kind of answer it records. A step with a server is any tool server's tool,
@@ -469,7 +479,7 @@ hashes functions is present; and, last, for a PE, `floss`: FLOSS's decoded, stac
 strings, recovered by emulation (the sample is never executed) through the
 same `tools.emulated_strings` function the sidecar's `floss` tool serves — its
 pinned build, 600 s wall clock and 4 GiB address-space limit — with the
-`analysis` server's environment (so `MALJAN_FLOSS_PATH` there is honoured) and
+`analysis` server's environment (so `MALSPARK_FLOSS_PATH` there is honoured) and
 a directory inside the job's staging directory that the job's teardown
 removes. The entry keeps up to 200 rows. It is last so the ids issued before it
 are the ids they were before it existed. Without a build the entry says so,
@@ -1269,8 +1279,8 @@ turn, as before.
 
 Agents exchange structured `AgentISR` objects — claims with an `evidence_ref`
 and a confidence — rather than raw text. Objects are built and cached in one
-composition root (`src/maljan/core/container.py`), and agents are discovered
-through the `@register_agent` decorator in `src/maljan/agents/registry.py`.
+composition root (`src/malspark/core/container.py`), and agents are discovered
+through the `@register_agent` decorator in `src/malspark/agents/registry.py`.
 
 The organising rule is that the agent decides and the code says what is wrong
 with the decision. No component rewrites a claim, a technique id, a confidence,
@@ -1281,7 +1291,7 @@ this by scanning the source for the writes it forbids.
 
 ## Validation loops
 
-`src/maljan/pipeline/validation.py` is where a wrong answer is dealt with. A
+`src/malspark/pipeline/validation.py` is where a wrong answer is dealt with. A
 `Violation` carries a code, a message written for the producer to read, and the
 path it applies to. `retry_with_feedback` appends the model's own answer plus
 "Your previous answer had these problems: … Fix them and answer again in the
@@ -1554,7 +1564,7 @@ Two producers use it:
 
 * **A judge that did not answer with a bundle** — the pipeline builds one from
   whatever text there was, and that bundle states its verdict in
-  `x_maljan_fallback_verdict` rather than implying it through its objects. The
+  `x_malspark_fallback_verdict` rather than implying it through its objects. The
   verdict is `extracted` when it was read out of the judge's own text and
   `pipeline` when there was nothing to read, which is what a timeout leaves; a
   verdict that is not Malware carries no `malware` object, and the record of
@@ -1569,10 +1579,10 @@ Two producers use it:
 
 ### The verdict is what the judge states
 
-`x_maljan_assessment.verdict` is the judge's answer to the question the report
+`x_malspark_assessment.verdict` is the judge's answer to the question the report
 leads with, in the vocabulary `schemas/judgement.VERDICT_VALUES` fixes:
 Malware, Suspicious or Benign. `pipeline.outcome.decide_from_bundle` reads it,
-after `x_maljan_fallback_verdict` and before anything else. The object set of a
+after `x_malspark_fallback_verdict` and before anything else. The object set of a
 bundle illustrates the decision; it does not make it.
 
 It used to. A signed, 0/74-clean PuTTY was published as `Malware, confidence
@@ -1584,7 +1594,7 @@ benign"*. The contradiction was detected, fed back once, survived — and the
 shape-derived verdict was published over the judge's own words.
 
 The judge is shown the whole answer as a skeleton, with
-`x_maljan_assessment` beside `objects` and the three accepted words written
+`x_malspark_assessment` beside `objects` and the three accepted words written
 where the verdict is asked for. It used to be asked for in a bullet among ten
 others, with the STIX bundle framing around it and *"Return ONLY a valid JSON
 STIX 2.1 Bundle"* last — and a bundle is `{type, id, objects}`, so a model that
@@ -1699,7 +1709,7 @@ Four rules follow from the statement:
   note's and a report's `object_refs` and forbids an empty one, and a bundle
   that breaks that is rejected whole rather than in part.
 
-The published confidence is `x_maljan_assessment.confidence`, the judge's own
+The published confidence is `x_malspark_assessment.confidence`, the judge's own
 number for the verdict the judge itself stated, and nothing else. It is
 published only *with* such a verdict: on the two other paths the verdict is not
 the judge's, and the number is about something else. Replaying the PuTTY run's
@@ -1712,7 +1722,7 @@ not borrowed for a decision they did not reach.
 
 ### A misplaced extension does not cost the bundle
 
-The prompt asks for `x_maljan_assessment` beside `objects`. A model that writes
+The prompt asks for `x_malspark_assessment` beside `objects`. A model that writes
 it *inside* the list used to fail `Bundle.model_validate` outright, and one live
 run lost all twenty-five of its objects to a text-extracted verdict twice over.
 `agents/judge_postprocess.lift_misplaced_extensions` runs before validation: the
@@ -1821,7 +1831,7 @@ export before this carried `software` and `malware-analysis`, neither of them
 in its vocabulary, and an identity no object named.
 
 An exported object carries the ledger entries the run's record ties to it, as
-`x_maljan_evidence_refs`: `ev_` ids, each once, in ledger order. The sample's
+`x_malspark_evidence_refs`: `ev_` ids, each once, in ledger order. The sample's
 `uses` edge to a technique carries the entries an analyst finding naming that
 technique cites (`evidence_ids`) and the entries of the asserting tools (capa,
 Sigma, YARA, LOLBin, sandbox signatures) whose structured output names it
@@ -1850,7 +1860,7 @@ export.
 
 The validator gate is no new error and no new warning kind. The property
 draws the validator's \{401\} best-practice note that a custom property should
-be declared through an extension definition, as every `x_maljan_` property
+be declared through an extension definition, as every `x_malspark_` property
 does; moving all of them to an extension definition is a bundle-wide change of
 its own.
 
@@ -1860,9 +1870,9 @@ per node (pid, command line, `child_refs`), the image each ran from as a
 by `object_refs` with `number_observed: 1` — one run is one observation. Every
 process the sandbox listed stays, in its place in the tree; one the sample's
 lineage rule (`sample_process_tree`) leaves out of the sample's tree says so: a
-process outside it carries `x_maljan_sample_process_tree: false` (the desktop's
+process outside it carries `x_malspark_sample_process_tree: false` (the desktop's
 explorer.exe under sihost.exe), and one the two lineage facts dispute carries
-`x_maljan_lineage_disputed` with the fact that alone names it (`marked` or
+`x_malspark_lineage_disputed` with the fact that alone names it (`marked` or
 `file`), as the report's network rows say it of a flow's process. A process of
 the tree carries neither, and a judge's object never does. The
 2.0 form it replaced embedded unnamed processes carrying a `name` 2.1 does not
@@ -2268,8 +2278,8 @@ decides.
    the feedback names the technique, its domain and platforms and the
    sample's. `CapabilityCell` carries `domain` and `platforms` from the
    catalogue and the FP linter's C1 reads them.
-3. **Alignment** (`attck.weak_alignment`, the paper's gate, heuristic, and the
-   only part that is off by default). For every technique an analyst keeps, the
+3. **Alignment** (`attck.weak_alignment`, a heuristic gate, and the only part
+   that is off by default). For every technique an analyst keeps, the
    claim text is ranked against the hybrid ATT&CK index; the claimed id's own
    TF-IDF gate score and the index's candidates — narrowed to the sample's own
    ATT&CK domain and platforms, so nothing out of scope is ever proposed — are
@@ -2347,22 +2357,22 @@ decides.
    `retired in ATT&CK 19.2` in the table. Two flat lists in
    `run_summary.corroboration`, rendered as a table in the report and shown
    on the console's technique cards. No weights, no score; a technique
-   nothing asserted keeps its row with the empty list showing, which is the
-   firing-rate reading the paper argues for.
+   nothing asserted keeps its row with the empty list showing: a firing-rate
+   reading, not a score.
 
 What the check questioned and the analyst kept reaches the judge as a
 `TECHNIQUE CHECK` block beside the evidence summary, and the report's
 validation section lists the unresolved rows with their messages.
 What the judge decides is the judge's: `severity` (with its rationale),
 `malware_category` and `family` come back on the bundle under
-`x_maljan_assessment` and the report prints them as answered. A severity nobody
+`x_malspark_assessment` and the report prints them as answered. A severity nobody
 assessed prints as "not assessed" rather than defaulting to Informational; a
 family the judge could not cite evidence for is kept and flagged unverified
 rather than silently zeroed.
 
 A verdict no judge decided carries no confidence. The judge node writes
 `verdict_fallback` on the state whenever its own body raised, or the bundle
-being reported carries `x_maljan_fallback_verdict` — which is what a bundle
+being reported carries `x_malspark_fallback_verdict` — which is what a bundle
 this pipeline built out of text says about itself, however the round ended;
 the report node reads that one channel and
 sets `overall_confidence` to `None` rather than deriving a number from the
@@ -2397,7 +2407,7 @@ write the same bundle again. The retry is the first prompt and that question:
 the cut answer is described, not sent back. Sent back, it made the retry's
 prompt larger by exactly the cap, and at temperature 0 a benign control's judge
 answered with a response one byte shorter than the one it was asked about. When the retry is still not a bundle, the fallback reads the
-`x_maljan_assessment` object the answer wrote whole, if it did, through the
+`x_malspark_assessment` object the answer wrote whole, if it did, through the
 reader a whole answer goes through and `JudgeAssessment`, and keeps it only
 when its verdict is one of the three words. The run then publishes that
 verdict with the judge's own confidence, severity and family, still read as
@@ -2413,11 +2423,11 @@ is not Malware has no malware object, so its record — the degraded path and
 the technique ids only the raw text named — goes on a note about the objects
 the fallback bundle holds; STIX requires a note to name at least one, and a
 fallback that holds none writes no note, and keeps the judge's text on the
-bundle's own `x_maljan_fallback_verdict.reasoning` instead. The judge's text
+bundle's own `x_malspark_fallback_verdict.reasoning` instead. The judge's text
 is kept whole and as written wherever the fallback stores it (it was cut to
 2,000 characters with its line breaks folded), and so is the mediator's text
 where the text path makes it the mediation summary (it was cut to 500). The ids are on
-`x_maljan_fallback_verdict.model_only_technique_ids` on every fallback. The
+`x_malspark_fallback_verdict.model_only_technique_ids` on every fallback. The
 export declines, with a record, any note, opinion, grouping or report left
 naming nothing, and the integrity pass lists each reference once: a reference
 fallback exported a note with no `object_refs` and a report object naming the
@@ -3235,7 +3245,7 @@ stop matching the teams, so a stage that moves cannot leave the page behind.
 
 The three generic agents these teams are built from — `triage`,
 `android_static` and `reverser` — and the `lead` are seeded definitions like
-any other, with their prompts in `src/maljan/agents/prompts/`. A generic agent
+any other, with their prompts in `src/malspark/agents/prompts/`. A generic agent
 is a definition and a prompt and nothing else, which is what makes a team
 something an operator can write rather than something that needs a class.
 
@@ -3460,7 +3470,7 @@ Where an operator's server offers a tool under a name one of those already
 holds, it is the operator's tool that is offered as `<server>__<tool>`, beside
 the agent's own, never in its place.
 
-The implementations live in `src/maljan/tools/` as plain functions — explicit
+The implementations live in `src/malspark/tools/` as plain functions — explicit
 arguments, JSON-serialisable returns, no `Settings` access — so the sidecar is
 a `@mcp.tool()` wrapper and nothing more, and the same code backs an in-process
 caller. Two rules hold across all of them: they report facts rather than
@@ -3479,13 +3489,13 @@ one is offering a step that can only fail — unless the manifest says what the
 tool still answers without its library, in which case it is offered and the
 reason says what is missing from its answer. A tool that cannot answer
 returns an error with a code and an authored remediation
-(`maljan.tools.errors`) rather than raising, and the sidecars' guards rewrite
+(`malspark.tools.errors`) rather than raising, and the sidecars' guards rewrite
 an implementation's flat error into that shape. See *Writing a tool server* in
-[configuration.md](/docs/configuration/).
+[Configuration](/docs/configuration/).
 
 The `dynamic` analyst's tools are the exception: its sandbox report is already
 in the worker's memory, so `ToolRef(kind="sandbox")` resolves to in-process
-tools over that report (`src/maljan/providers/sandbox_tools.py`) with no
+tools over that report (`src/malspark/providers/sandbox_tools.py`) with no
 transport to open — the process tree, the network activity, the sandbox's own
 signatures, the files written, the registry keys touched, the API-call
 histogram, the mutexes held, the services and scheduled tasks arranged, the
@@ -3494,7 +3504,7 @@ platform channels, and a bounded reader for any section the rest do not model.
 A tool server reached over HTTP does not share the worker's filesystem, so it
 is handed the sample rather than a path to it; a stdio sidecar is handed the
 path. See the remote-delivery section of
-[configuration.md](/docs/configuration/).
+[Configuration](/docs/configuration/).
 
 **The sample's path is not the model's to give.** On the three built-in
 sidecars, an argument whose name means the file under analysis — `path`,
@@ -3546,9 +3556,9 @@ malware, either, since an operator submits a suspicious document that may hold
 somebody's data.
 
 **Staging is per job, and that is what makes the bound the directory rather
-than the tree.** `MALJAN_STAGING_DIR` stays the operator's base; the process
+than the tree.** `MALSPARK_STAGING_DIR` stays the operator's base; the process
 that spawns a sidecar composes one leaf inside it per job and passes it as
-`MALJAN_STAGING_JOB`, which the sidecar joins to the base itself — two
+`MALSPARK_STAGING_JOB`, which the sidecar joins to the base itself — two
 variables, because `child_env` applies a server's own `env` map last and a
 composed path would either lose to the operator's value or overwrite it. The
 job's owner removes that directory on every way out of the run, and the TTL
@@ -3575,7 +3585,7 @@ without the pair of `"`, `'` or `` ` `` that encloses the whole value (the same
 character at both ends and nowhere between) — `pattern` on `strings` and
 `floss`; `text`, `technique_id`, `ids`, `api_names` and `query` on the
 knowledge lookups; `ip_address`, `domain` and `file_hash` on `threatintel` —
-by `maljan.tools.arguments`, with nothing else rewritten and a value without a
+by `malspark.tools.arguments`, with nothing else rewritten and a value without a
 surrounding pair passed through exactly. The repair is recorded the way
 `carved_path`'s is: the ledger keeps the arguments as the model wrote them, and
 a structured answer carries `read_as` first, the value each argument was read
@@ -3606,7 +3616,7 @@ same argument serves it.
 
 ## Providers
 
-The provider layer (`src/maljan/providers/`) puts one interface in front of
+The provider layer (`src/malspark/providers/`) puts one interface in front of
 each class of external tool, so the choice is configuration rather than code.
 
 - **LLM** — `openai`, `anthropic`, `ollama`, `gemini`. Each has its own
@@ -3645,7 +3655,7 @@ tab. A recorded fixture is said to be one — the same entry, then the sandbox
 views as before. A live sandbox's report is read as it always was.
 
 Every provider that can be reached over the network has a probe behind a Test
-button in the console; see [configuration.md](/docs/configuration/).
+button in the console; see [Configuration](/docs/configuration/).
 
 ### Which agents open a static provider
 
@@ -3668,7 +3678,7 @@ gets the ranked priority functions, followed by its own sentence on what to
 do with them (`priority_follow_up`), while one that reads none gets no hint;
 and submitting a job checks every such
 provider that does not degrade (*A team that needs Ghidra waits for it* in
-[configuration.md](/docs/configuration/)). A provider that degrades and does not
+[Configuration](/docs/configuration/)). A provider that degrades and does not
 attach — an r2mcp that is nowhere to be found — lets the static analyst run
 without it, and the run summary names it as `static provider '<id>'
 unavailable: …` with the remedy.
@@ -3721,13 +3731,13 @@ program the triage pass had analysed. The fix is not Ghidra's: any server whose
 open resets its analysis declares, as data in its settings block
 (`sample_open`), which tool opens a sample and optionally which selects one
 already open and which runs its analysis, and the general opener
-(`maljan.providers.sample_open`) keeps a note per job and per server of each
+(`malspark.providers.sample_open`) keeps a note per job and per server of each
 path opened. A later open of the same path, by a model, the load before the
 loop, the triage pass or the function-hash pass, is answered from the note
 after the declared select; a select the server refuses opens and analyses the
 path afresh. Ghidra's block ships declaring `load_program`, `switch_program`
 and `run_analysis` (*A server whose open resets its analysis* in
-[configuration.md](/docs/configuration/)).
+[Configuration](/docs/configuration/)).
 
 What stays in the Ghidra adapter is Ghidra's own transport and its own
 failures: the REST client (each tool is an endpoint, and the client makes a
@@ -3740,7 +3750,7 @@ arguments the call sent.
 
 **A model that fails as a provider.** An agent's entry under `llm.agents` may
 name an ordered list of models (`fallbacks`), held as one model object
-(`maljan.llm.fallback.FallbackChatModel`). The next model is asked only when
+(`malspark.llm.fallback.FallbackChatModel`). The next model is asked only when
 the one before failed *as a provider* — a refused or dropped connection, a
 timeout, an HTTP 5xx, 408 or 429, a model the server does not have, a refused
 credential, or a refusal the provider reports as an error. A timeout is real
@@ -3779,8 +3789,8 @@ validation loop rejects goes back, with the feedback, to the model that wrote
 it, because asking another model would be the platform choosing a different
 answer (`tests/unit/test_no_silent_overrides.py` holds a case for exactly
 this). Every answer carries the model that gave it in `response_metadata`
-(`maljan_model`) and, when a fallback gave it, the reason in words
-(`maljan_fallback`) — on the turn the list moved, once per switch; that is what
+(`malspark_model`) and, when a fallback gave it, the reason in words
+(`malspark_fallback`) — on the turn the list moved, once per switch; that is what
 the ledger entry, the `model_fallback` event and the run summary read. Every model on the list passes the probe gate the first one
 does, and the context-window budget counts every model on every list — the
 smallest window governs.
@@ -3818,7 +3828,7 @@ one.
 
 **A tool server that keeps failing.** Each tool server the job's registry
 attaches — the built-in sidecars and every operator-configured server — has one
-guard (`maljan.providers.server_guard`), shared by every handle the registry
+guard (`malspark.providers.server_guard`), shared by every handle the registry
 opens for it. The Ghidra static provider and the CAPE sandbox provider build
 their own toolkits outside the registry and are not guarded; bringing them
 under it is a recorded follow-up. `core.mcp.breaker.failures_to_open` calls in a row the server
@@ -3826,7 +3836,7 @@ did not answer — a timeout, a refused connection, the server's process gone, o
 a call that did not finish within its caller's budget — rest the server
 for `core.mcp.breaker.cooldown_seconds`. A call made while it rests is not
 sent; the platform answers it with a tool error in the structured shape
-(`maljan.tools.errors`, code `server_resting`) naming the server, that it is
+(`malspark.tools.errors`, code `server_resting`) naming the server, that it is
 resting and when it will be tried again. A timeout counts: every call is sent
 with a deadline — the larger of the tool's budget in the server's own
 `capabilities` manifest and the server's own budget (`call_timeout_seconds`
@@ -3846,14 +3856,14 @@ sidecar. Each rest is published as `tool_server_rested` and kept in
 ## Memory
 
 Past analyses and family fingerprints are vectorised and stored in Qdrant, and
-retrieved by similarity during a run (`src/maljan/memory/`). The collections,
+retrieved by similarity during a run (`src/malspark/memory/`). The collections,
 the neighbour count and the Qdrant endpoint are settings. The ATT&CK corpus and
 its embeddings are cached on disk; on the compose stack that cache is a named
 volume, because rebuilding it costs the judge node about a gigabyte of resident
 memory and a minute and a half on the first analysis.
 
 One factory builds the store `memory.backend` selects
-(`maljan.memory.store_factory.build_memory_store`), and every caller uses it:
+(`malspark.memory.store_factory.build_memory_store`), and every caller uses it:
 the analysis container (the store a run writes its case to), the enrichment
 worker, the API's purge and its dry run, `/health?deep=true`,
 the function-hash attribution steps and the command line. No caller names a
@@ -3881,7 +3891,7 @@ long-term memory as it does when any store cannot be built. Each backend's own s
 `memory.qdrant.function_hash_collection`, `memory.qdrant.api_key`); the
 console's memory guide asks for the keys under the selected backend's id and
 tests them with the probe those keys declare. A backend from an installed
-package registers through the `maljan.memory_backends` entry-point group — an
+package registers through the `malspark.memory_backends` entry-point group — an
 entry point named after the backend id, naming a callable that calls
 `register_memory_backend(id, builder, settings_model=..., annotations=...)` —
 loaded once the plugin allow-list names it (`memory:<id>` in
@@ -3914,7 +3924,7 @@ under the judge's family in the attribution corpus, are decided by the judge
 and written once, after the job is recorded as completed: the judge holds both
 on the container (`pending_memory_case`, `pending_function_hashes`), and the
 worker, once the completed row is committed and the `completed` event is
-published, calls `MaljanApp.remember_the_run`, as the command line does once
+published, calls `MalsparkApp.remember_the_run`, as the command line does once
 its run returns. A job that fails after its judge — a later node, or the worker
 storing its report — leaves neither, so a verdict nobody kept does not reach
 the next run's few-shot prior block or its family matches. The judge builds
@@ -3956,7 +3966,7 @@ earlier run's ledger, and never its category, an earlier verdict's word no
 tool can check. The report writer is not shown it. It is no ledger entry, so
 it has no evidence id, no claim can cite it and it adds no source to any
 technique's corroboration row. The judge's bundle records what was shown
-(`x_maljan_earlier_run`, set by the platform on every bundle, never
+(`x_malspark_earlier_run`, set by the platform on every bundle, never
 exported), as a fact that decides nothing: the capability matrix publishes
 by the same rules as without it, so a run publishes the same set whether or
 not an earlier run is recorded, and a run repeated on one sample does not
@@ -3968,7 +3978,7 @@ of this run stands behind it". A job with no earlier case, or whose store
 cannot be read, is briefed as before.
 
 A job submitted with `ignore_earlier_runs` (the job option, or
-`maljan analyze --ignore-earlier-runs`) starts without any earlier run's
+`malspark analyze --ignore-earlier-runs`) starts without any earlier run's
 memory of its sample: `long_term_memory.earlier_case_of` answers no case for
 it without asking the store, so no prompt carries the block and the bundle
 records no earlier run. The similarity reads are not affected, since they
@@ -4027,8 +4037,8 @@ sha256, so every verdict prompt of the job shows the same cases; a read that
 fails is not kept). A technique such a case carried can reach the verdict, or
 an analyst claim the judge keeps, with no source of this run behind it, so the
 judge's bundle records which cases' techniques its verdict prompt carried
-(`x_maljan_similar_cases`, each case's sample id and technique ids, set by the
-platform on every bundle). Both this record and `x_maljan_earlier_run` name
+(`x_malspark_similar_cases`, each case's sample id and technique ids, set by the
+platform on every bundle). Both this record and `x_malspark_earlier_run` name
 other runs' samples, so they are in no STIX export and not in the report's
 bundle (the judge's draft stored as the report's when no export was made is
 written without them, `stix_models.JUDGE_ONLY_PROPERTIES`); they are kept on
@@ -4052,7 +4062,7 @@ once the report node has built the export, on the state's summary and on
 count in both.
 
 A cached vector records what produced it, and is reused only by the same
-thing. `maljan.memory.embeddings` has two backends — the sentence model and a
+thing. `malspark.memory.embeddings` has two backends — the sentence model and a
 bag-of-words projection it falls back to when the model cannot be loaded, on
 an air-gapped install or in a container that is briefly out of memory — and
 the fallback projects into the model's own 384 dimensions so the vector
@@ -4234,7 +4244,7 @@ generation call — and where nothing answered, nothing is derived: the
 documented 6,000-character cap applies and every surface says the window is
 unknown. `run_summary.truncation` records which of the four applied and the
 smallest and largest cap the run used. The whole arithmetic and the probe are
-`maljan.llm.context_window`; the job's budget travels with every attach the way
+`malspark.llm.context_window`; the job's budget travels with every attach the way
 the truncation ledger does, the run-state refresher tells it what the loop's
 conversation weighs before every model turn, and what it hands out is charged
 as it goes so a turn that calls several tools spends one turn's room between
@@ -4313,7 +4323,7 @@ last offered. Each clear is in the agent's log and is published as
 `tool_answers_cleared` (agent, turn, answers, characters before and after, and
 `refused`, `window` or `tier`). The judge's tool loop clears the same way, with the
 same `read_evidence` tool, which it offers from its first turn. The code is
-`maljan.agents.tool_answer_clearing`.
+`malspark.agents.tool_answer_clearing`.
 
 **The calls outside a tool loop read the ledger too.** The judge's verdict and
 its technique question, the mediation's block question, the report composer's
@@ -4356,7 +4366,7 @@ always was, with no tool, and the run's degradation reasons say so once per
 agent. The reporter's calls share one definition, so the composer's shared
 header and the prefix its sections read from the cache are unchanged; priced
 offline on haiku7's 25 such requests with no read made, the definitions add
-about 0.003 USD to the run. The code is `maljan.agents.ledger_reads`.
+about 0.003 USD to the run. The code is `malspark.agents.ledger_reads`.
 
 The mediator's own loop reads the run's ledger the same way: the debate node
 hands each round the ledger, and the loop's `read_evidence` reads an entry any
@@ -4547,7 +4557,7 @@ time, which is honest about being the batch's.
 ## Events
 
 A run narrates itself. Every node, every tool wrapper and every retry loop
-emits events through one sink (`src/maljan/pipeline/events.py`), the worker
+emits events through one sink (`src/malspark/pipeline/events.py`), the worker
 publishes them (`_publish_event` in `apps/api/app/worker/analysis_worker.py`),
 and the console draws the running analysis from them.
 
@@ -4591,7 +4601,7 @@ as the question allows (which unread callees it chose to read,
 chose; the console draws it apart from a fix and from a failure.
 
 **Sequence.** The publisher stamps every event with `seq`, a per-job counter
-taken from a Redis `INCR`. Nothing in `src/maljan` numbers anything: the core
+taken from a Redis `INCR`. Nothing in `src/malspark` numbers anything: the core
 does not know which job it is running under, and a second counter would order
 one conversation two ways. `seq` is the ordering key, the dedupe identity and
 the cursor a client resumes from — `?since=<seq>` on `/ws/analysis/{id}` and
@@ -4711,7 +4721,7 @@ server's own tab is drawn under that label; its key stays the id everywhere
 
 ## The findings block
 
-An analyst may end its answer with a fenced `maljan-findings` block holding
+An analyst may end its answer with a fenced `malspark-findings` block holding
 JSON: `artifacts` (a kind, a label, and either a value or columns and rows) and
 `findings` (a title, techniques, a confidence), each naming the ledger ids it
 came from. It is optional in both directions — an analyst that emits nothing
@@ -4773,7 +4783,7 @@ evidence id it could cite for evidence that did not exist.
 
 ## Reporting
 
-Every run emits a structured `MalwareReport` (`src/maljan/reporting/`), and it
+Every run emits a structured `MalwareReport` (`src/malspark/reporting/`), and it
 is assembled from what the run gathered rather than recomputed beside it:
 
 * `reporting/ledger_report.py` turns the ledger into `report.sections` — a
@@ -4789,14 +4799,14 @@ is assembled from what the run gathered rather than recomputed beside it:
   routing minimum (format, platform, and hashes the builder computes) when they
   did not.
 * Severity, malware category and family attribution are the judge's, read off
-  `x_maljan_assessment` on its bundle. Nothing in the builder computes a
+  `x_malspark_assessment` on its bundle. Nothing in the builder computes a
   replacement — the CVSS-shaped sum that used to print a score out of ten was
   arithmetic over constants chosen in the builder, by code that had read no
   evidence.
 * The capability matrix is a projection of the judge's technique list and the
   analysts' claims, carrying each source's own confidence unadjusted. A judge
   relationship's technique is the attack-pattern it points at
-  (`x_maljan_technique_id` wins where written, which the judge never does), so
+  (`x_malspark_technique_id` wins where written, which the judge never does), so
   the number the judge put on it is the judge's number; reading the property
   alone published all twenty judge-only techniques in the stored runs at 0.0.
   A relationship with no number adds none, and a number off the 0–1 scale is
@@ -4891,8 +4901,8 @@ is assembled from what the run gathered rather than recomputed beside it:
   export carry alike; a row short of two independent sources adds "they cite
   1 independent source, each counted once". The export keeps `uses` and marks
   this run's `uses` edge to the technique, a judge-made one included, with
-  `x_maljan_support` (`capability` or `unobserved`) and
-  `x_maljan_support_note` (the sentence): on the edge, not on the
+  `x_malspark_support` (`capability` or `unobserved`) and
+  `x_malspark_support_note` (the sentence): on the edge, not on the
   attack-pattern whose id every export shares; the judge may not write
   either (`PLATFORM_ONLY_PROPERTIES`). The matrix carries the decision on
   every cell (`CapabilityCell.is_corroborated`, `support`, `sources`,
@@ -5075,7 +5085,7 @@ is assembled from what the run gathered rather than recomputed beside it:
   is shown as stored (`question_evidence`), with its tool, and marked when the
   run holds only part of it or only its lower-cased search copy. An id the catalogue rejects or the sample cannot host is not asked and
   is recorded in `not_asked`. The answer is kept on the judge's bundle
-  (`x_maljan_technique_review`, never exported) and the matrix publishes per
+  (`x_malspark_technique_review`, never exported) and the matrix publishes per
   it: a dropped technique is not published and reads "the judge dropped it
   (\<reason>)", a kept one is published — a finding's technique included — with
   "kept by the judge when asked (\<reason>)" on its row. The record keeps the
@@ -6395,7 +6405,7 @@ configured URL's password of any length, a token in its username slot and its
 `api_key`, `apikey`, `access_token`, `token` and `key` values. With nothing
 registered, or a scope whose values could not be read, a row is held to the
 whole event scrub; outside the worker (the test suite, the command line, the
-`MaljanApp` facade before it registers) rows therefore keep the event scrub's
+`MalsparkApp` facade before it registers) rows therefore keep the event scrub's
 masking. The scrub never masks a technique or tactic name of the vendored
 ATT&CK table: after `Bearer`, `Basic` or `token` it keeps the next word of such
 a name as written ("Access Token Manipulation"), each alternative of a

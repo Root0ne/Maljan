@@ -1,0 +1,92 @@
+---
+title: "Upgrades"
+description: "Pulling a new release: migrations, rebuilding the images, and what changes on disk."
+---
+
+An upgrade is a pull, a migration and a restart. Run them in that order.
+
+<Steps>
+
+<Step>
+
+**Back up first.** See [Backups](/docs/backups/).
+
+</Step>
+
+<Step>
+
+**Pull and rebuild.**
+
+```bash
+git pull
+make external          # the pinned third-party trees and rule corpora
+make docker-build
+```
+
+</Step>
+
+<Step>
+
+**Migrate.** On the compose stack the one-shot `migrate` service applies any
+new revision on the next `up`, and exits at once when there is nothing to do:
+
+```bash
+cd docker && docker compose up migrate
+```
+
+</Step>
+
+<Step>
+
+**Restart.**
+
+```bash
+make docker-up
+```
+
+</Step>
+
+</Steps>
+
+## Migrations
+
+The API does not migrate on startup unless `RUN_MIGRATIONS_ON_STARTUP` is set,
+which it should not be in production.
+
+- On the compose stack the `migrate` service reruns on the next `up` and exits
+  immediately when there is nothing to apply.
+- Elsewhere, `make migrate` from the repository root. It sources
+  `bootstrap.env` when present and runs `alembic upgrade head` from
+  `apps/api`; `DATABASE_URL` must be reachable from where you run it, so the
+  compose-internal `postgres:5432` will not do.
+
+## Picking up a source edit
+
+After a pull that adds a revision, migrate before restarting the services. The
+production stack bakes the frontend into an image and runs the worker under
+plain `arq`, so neither picks up a source edit on its own: `make fe-rebuild`
+rebuilds and replaces the frontend container, and `make worker-restart`
+restarts the worker.
+
+## MinIO, now built from source
+
+A stack that ran the pulled MinIO image (`minio/minio:RELEASE.2025-09-07T16-13-09Z`)
+builds `malspark-minio` on its next `up` and starts it on the same `minio_data`
+volume, under the same service and container name, ports, credentials and
+command. Nothing needs migrating: the release built is the one after it, which
+changes no on-disk format, so buckets, objects, versions, policies and object
+lock settings read as before. `docker compose build minio` builds it ahead of
+the restart.
+
+## From an environment-file deployment
+
+There is no automatic import of a previous `.env` deployment. An instance
+upgrading from one enters its settings once in Settings → Configuration, or
+imports a JSON export from another instance.
+
+## Staged samples after an upgrade
+
+The flat uploads and the single `carved/` tree an older release left in the
+staging directory stay where they are, and the sidecars sweep them on the
+staging TTL. Nothing has to be moved. See [Staged
+samples](/docs/operations/#staged-samples).

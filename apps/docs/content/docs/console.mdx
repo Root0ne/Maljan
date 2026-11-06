@@ -225,7 +225,7 @@ One socket per job, opened by the store on the first reader. The store reads
 the recorded feed from `GET /api/v1/jobs/{id}/events` first, then attaches the
 socket with `?since=<the last seq it holds>`, so a resume costs the events it
 missed rather than a re-read of the window. The access token travels as the
-`maljan.v1.<token>` subprotocol and never in the URL.
+`malspark.v1.<token>` subprotocol and never in the URL.
 
 What the conversation draws as prose — a message's text and its report, a
 correction, a tool call's arguments and its result — is scrubbed by the
@@ -447,7 +447,7 @@ an address, a URL, a process and so on), an object no relationship names
 included. An edge is one of its `relationship` objects, labelled with its
 `relationship_type`, or a `sighting` drawn from what was sighted to each place
 and observation it names. An edge prints a confidence only where the bundle
-states one: `x_maljan_confidence` on its 0–1 scale, or the standard's
+states one: `x_malspark_confidence` on its 0–1 scale, or the standard's
 `confidence` as `n/100`. A word, a value off its scale or nothing prints
 nothing, never a zero or a half. Colour says which STIX type a node is, from
 the console's own tokens and flat, and the legend says the same in words;
@@ -464,7 +464,7 @@ validation findings name it.
 
 Selecting a node or an edge by pointer, or a node with Enter or Space, shows
 its STIX JSON, its relationships, and the evidence-ledger ids it carries in
-`x_maljan_evidence_refs` as links into EVIDENCE; the Relationships table lists
+`x_malspark_evidence_refs` as links into EVIDENCE; the Relationships table lists
 them too. Nodes take keyboard focus and edges do not: a selected node lists
 each of its relationships as a button, which is how the keyboard reaches an
 edge, and a bundle with hundreds of edges does not put hundreds of stops in
