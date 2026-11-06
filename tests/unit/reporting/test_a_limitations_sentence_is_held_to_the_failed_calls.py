@@ -37,6 +37,7 @@ from maljan.reporting.section_agreement import (
     DROPPED_CODE,
     FACT,
     FAILURE_REDONE_CODE,
+    HELD_KEPT_CODE,
     REWRITTEN_CODE,
     _sentences_of,
     ask_section_agreement,
@@ -153,8 +154,18 @@ def _with_held(
         if isinstance(answer, dict) and source is not None:
             rows = list(answer.get("sentences") or [])
             listed = {str(row.get("sentence")) for row in rows}
+            # A closing sentence is kept on the reason no source speaks of it: a keep
+            # on a source quotes its words, or is left out (T-568).
             rows.extend(
-                {"passage": p.id, "sentence": held, "sources": [source], "decision": "keep"}
+                {
+                    "passage": p.id,
+                    "sentence": held,
+                    "sources": [],
+                    "decision": "keep",
+                    "reason": "x",
+                }
+                if p.closing
+                else {"passage": p.id, "sentence": held, "sources": [source], "decision": "keep"}
                 for p in passages
                 for held in p.held
                 if held not in listed
@@ -346,16 +357,18 @@ def test_a_paragraph_is_left_as_written_where_no_call_failed() -> None:
 )
 def test_a_rewrite_citing_the_call_that_redid_it_is_put_in(rewrite: str) -> None:
     report = _report()
-    # The other sentence denies an observation: it is held too (T-562), and kept.
-    kept = {"passage": "limitations", "sentence": OTHER, "sources": ["failed.1"]}
+    # The other sentence denies an observation no source speaks of: every closing
+    # sentence is answered (T-568), and it is kept with the reason.
+    kept = {"passage": "limitations", "sentence": OTHER, "sources": [], "reason": "not in a fact"}
     rows = [_row(FALSE, ["failed.1"], rewrite), {**kept, "decision": "keep"}]
-    done, _ = _ask(report, _ledger(), {"sentences": rows})
+    done, reporter = _ask(report, _ledger(), {"sentences": rows})
+    assert len(reporter.asked) == 1
     body = report.technical_analysis.analyst_limitations.body
     assert body == f"{rewrite} {OTHER}"
     assert report.technical_analysis.analyst_limitations.evidence_refs == ["ev_0001", "ev_0003"]
     assert done.summary["rewritten"] == 1
-    # Kept on a fact or a section 5 passage: counted, not recorded (T-562).
-    assert [r["code"] for r in done.tally.unresolved] == [REWRITTEN_CODE]
+    # Every kept closing sentence is counted and recorded with its reason (T-568).
+    assert [r["code"] for r in done.tally.unresolved] == [HELD_KEPT_CODE, REWRITTEN_CODE]
     assert done.summary["held_kept"] == 1
 
 
@@ -536,8 +549,10 @@ def _stored_names() -> list[str]:
 
 # The runs whose limitations say a call failed that a later call redid: haiku8's
 # reversing tools, and haiku10's "A batch emulation step did not complete", whose
-# emulation by a comma text was asked again with the list (T-562).
-_HELD_TO_FAILED_CALLS = ("haiku8", "haiku10")
+# emulation by a comma text was asked again with the list (T-562); and haiku12's
+# "The decompiler and disassembler calls for several functions failed", all six redone
+# (T-568).
+_HELD_TO_FAILED_CALLS = ("haiku8", "haiku10", "haiku12")
 
 
 @pytest.mark.parametrize("name", _stored_names())
@@ -600,6 +615,20 @@ def test_the_stored_run_s_reversing_tools_sentence_is_asked() -> None:
     assert any("Which RC4 key" in t and "ev_0187" in t and "ev_0191" in t for t in marked)
 
 
+def _left_out_alone(report: MalwareReport, done: Any, body: str) -> None:
+    """haiku8's failure sentence is left out on its rewrite and recorded; every other
+    sentence left out is one this test's answer kept on no source the round accepts
+    (T-568), recorded too: none is left out silently."""
+    now = report.technical_analysis.analyst_limitations.body
+    assert HAIKU8_SENTENCE not in now
+    gone = [s for s in _sentences_of(body) if s not in now]
+    dropped = [r for r in done.tally.unresolved if r["code"] == DROPPED_CODE]
+    assert len(dropped) == done.summary["dropped"]
+    records = [r["message"] for r in dropped if r.get("subject") == "limitations"]
+    assert len(records) == len(gone)
+    assert any(HAIKU8_SENTENCE[:60] in m and "no rewrite of it passed" in m for m in records)
+
+
 def test_the_stored_run_s_false_rewrite_is_not_put_in_and_a_true_one_is() -> None:
     report, ledger = _haiku8()
     body = report.technical_analysis.analyst_limitations.body
@@ -618,8 +647,8 @@ def test_the_stored_run_s_false_rewrite_is_not_put_in_and_a_true_one_is() -> Non
     row = _row(HAIKU8_SENTENCE, [batch], false)
     done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
     # Not put in, and not kept: the closing paragraph leaves the sentence out (T-554).
-    assert report.technical_analysis.analyst_limitations.body == _left_out(body, HAIKU8_SENTENCE)
-    assert done.summary["not_applied"] == 0 and done.summary["dropped"] == 1
+    _left_out_alone(report, done, body)
+    assert done.summary["not_applied"] == 0
     # The same claim covered by the emulation call that stands is not put in either.
     covered = (
         "The reversing tools for emulation, batch decompilation and disassembly failed, so the "
@@ -629,8 +658,7 @@ def test_the_stored_run_s_false_rewrite_is_not_put_in_and_a_true_one_is() -> Non
     report, ledger = _haiku8()
     row = _row(HAIKU8_SENTENCE, [emulation, batch], covered)
     done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
-    assert report.technical_analysis.analyst_limitations.body == _left_out(body, HAIKU8_SENTENCE)
-    assert done.summary["dropped"] == 1
+    _left_out_alone(report, done, body)
     report, ledger = _haiku8()
     # The clause that names the batch decompile cites the call that redid it: it
     # accounts for decompiling, and names no other decompile.
@@ -648,8 +676,7 @@ def test_the_stored_run_s_false_rewrite_is_not_put_in_and_a_true_one_is() -> Non
     row = _row(HAIKU8_SENTENCE, [emulation], covered)
     report, ledger = _haiku8()
     done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
-    assert report.technical_analysis.analyst_limitations.body == _left_out(body, HAIKU8_SENTENCE)
-    assert done.summary["dropped"] == 1
+    _left_out_alone(report, done, body)
 
 
 @pytest.mark.parametrize(
@@ -699,7 +726,7 @@ def test_a_denial_of_its_own_is_about_the_call_before_it(rewrite: str) -> None:
     body = report.technical_analysis.analyst_limitations.body
     row = _row(HAIKU8_SENTENCE, ["failed.3"], rewrite)
     done, _ = _ask(report, ledger, {"sentences": [row]}, {"sentences": [row]})
-    assert report.technical_analysis.analyst_limitations.body == _left_out(body, HAIKU8_SENTENCE)
+    _left_out_alone(report, done, body)
     assert FAILURE_REDONE_CODE in [r["code"] for r in done.tally.unresolved]
 
 

@@ -32,8 +32,10 @@ from maljan.reporting.models import (
 )
 from maljan.reporting.section_agreement import (
     _CLAUSE_JOIN,
+    ABSENCE_KEPT_CODE,
     FACT,
     LISTED_CODE,
+    QUALIFIED_CODE,
     REWRITE_UNGROUNDED_CODE,
     REWRITTEN_CODE,
     UNKNOWN_SOURCE_CODE,
@@ -429,24 +431,43 @@ NAMELESS = "The mutex name is not established."
         "The mutex is unnamed [ev_0107].",
     ],
 )
-def test_a_bound_value_is_added_in_the_platform_s_words(model_words: str) -> None:
+def test_a_bound_value_is_added_in_the_platform_s_words_only_when_no_rewrite_passes(
+    model_words: str,
+) -> None:
+    # A denial the fact contradicts is answered in the model's words (T-568): words
+    # stating the denial again are refused, and the retry's too, so the platform
+    # adds the fact's clause, as it did before, and records it.
     report = _bound_report(f"{GATED} {NAMELESS}")
     row = _row("evasion_antiforensics", NAMELESS, ["bound.1"], model_words)
-    done = _ask(report, _Reporter({"sentences": [row]}), _ledger())
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
     assert report.technical_analysis.evasion_antiforensics.body == (
         f'{GATED} The mutex name is not established; the code passes "qorvel-77" to '
         "CreateMutexW as argument 3 (lpName) [ev_0107]."
     )
-    assert done.summary["rewritten"] == 1
+    assert done.summary["rewritten"] == 0 and done.summary["qualified"] == 1
+    assert done.tally.by_code[ABSENCE_KEPT_CODE] == 2
+    assert QUALIFIED_CODE in {r["code"] for r in done.tally.unresolved}
+
+
+def test_a_denial_a_bound_value_contradicts_is_rewritten_in_the_model_s_words() -> None:
+    report = _bound_report(f"{GATED} {NAMELESS}")
+    words = 'The code passes "qorvel-77" to CreateMutexW as the mutex name [ev_0107].'
+    row = _row("evasion_antiforensics", NAMELESS, ["bound.1"], words)
+    done = _ask(report, _Reporter({"sentences": [row]}), _ledger())
+    assert report.technical_analysis.evasion_antiforensics.body == f"{GATED} {words}"
+    assert done.summary["rewritten"] == 1 and done.summary["qualified"] == 0
 
 
 def test_a_bound_value_qualifies_no_passage_that_names_neither_it_nor_its_call() -> None:
-    report = _bound_report(f"The gate exits early [ev_0107]. {NAMELESS}")
+    # A sentence no shape holds: "not established" would be a whole-code absence,
+    # the model's to answer in its own words on any fact it cites (T-562, T-568).
+    still_open = "The mutex name stays open."
+    report = _bound_report(f"The gate exits early [ev_0107]. {still_open}")
     row = _row(
-        "evasion_antiforensics", NAMELESS, ["bound.1"], 'Not established; "qorvel-77" [ev_0107].'
+        "evasion_antiforensics", still_open, ["bound.1"], 'Not established; "qorvel-77" [ev_0107].'
     )
     done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
-    assert report.technical_analysis.evasion_antiforensics.body.endswith(NAMELESS)
+    assert report.technical_analysis.evasion_antiforensics.body.endswith(still_open)
     assert done.tally.by_code[REWRITE_UNGROUNDED_CODE] == 2
     assert done.summary["rewritten"] == 0
 
@@ -524,9 +545,10 @@ def test_a_bound_value_in_the_platform_s_clause_cites_nothing_and_is_no_token(
 
     report = _bound_report(f"{GATED} {NAMELESS}", value)
     row = _row("evasion_antiforensics", NAMELESS, ["bound.1"], "x")
-    done = _ask(report, _Reporter({"sentences": [row]}), _ledger())
+    # Words citing nothing pass no check, twice: the platform adds the fact's clause.
+    done = _ask(report, _Reporter({"sentences": [row]}, {"sentences": [row]}), _ledger())
     body = report.technical_analysis.evasion_antiforensics.body
-    assert done.summary["rewritten"] == 1
+    assert done.summary["qualified"] == 1
     assert forged not in body
     # The sentence's own and the fact's citations only.
     assert entry_ids_in(body) == {"ev_0107"}

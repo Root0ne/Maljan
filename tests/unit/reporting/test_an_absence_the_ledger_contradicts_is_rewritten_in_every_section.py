@@ -334,7 +334,9 @@ def test_without_a_listed_routine_nothing_is_held_and_the_prompt_is_as_before() 
     )
     passages = passages_of(report, entries=_ledger())
     assert not any(p.lists_code for p in passages)
-    assert all(not p.held and not p.unread_listed for p in passages)
+    # Only the closing sentence is held: every one is answered (T-568).
+    assert all(not p.held and not p.unread_listed for p in passages if not p.closing)
+    assert [p.held for p in passages if p.closing] == [("None [ev_0002].",)]
     assert "list each of these sentences" not in prompt_text(passages)
 
 
@@ -507,9 +509,21 @@ def test_a_whole_code_absence_is_held_in_every_passage_by_its_shape() -> None:
     assert whole_code_absences("No flag read of 0x2800 appears in the code [ev_0002].") == ()
 
 
+def _scope_kept(sentence: str = "Nothing else is open [ev_0002].") -> dict[str, Any]:
+    """A closing sentence no source speaks of, kept with the reason (T-568)."""
+    return {
+        "passage": "limitations",
+        "sentence": sentence,
+        "sources": [],
+        "decision": "keep",
+        "reason": "no source speaks of what else is open",
+    }
+
+
 def test_a_section_5_whole_code_absence_is_rewritten_on_section_5_in_the_model_s_words() -> None:
     report = _whole_report()
-    done, reporter = _ask(report, {"sentences": [_whole_row(["string_resolution"])]})
+    rows = [_whole_row(["string_resolution"]), _scope_kept()]
+    done, reporter = _ask(report, {"sentences": rows})
     assert len(reporter.asked) == 1
     ta = report.technical_analysis
     assert ta is not None and ta.evasion_antiforensics is not None
@@ -532,26 +546,37 @@ def test_a_whole_code_rewrite_rests_on_no_claim_and_cites_its_source() -> None:
         assert codes & {UNKNOWN_SOURCE_CODE, REWRITE_UNGROUNDED_CODE}, (sources, codes)
 
 
-def test_a_closing_negation_is_held_and_a_kept_one_is_counted() -> None:
+def test_a_closing_negation_no_source_could_contradict_is_kept_and_recorded() -> None:
     denial = "The flag read was not attributed to a routine [ev_0002]."
     report = _whole_report(limitations=denial)
     passages = {p.id: p for p in passages_of(report, entries=_ledger())}
     assert denial in passages["limitations"].held
-    kept = {
+    # Kept on a section 5 passage without words of it that state the denial: asked
+    # once more (T-568); then kept with the reason no source speaks of it.
+    unquoted = {
         "passage": "limitations",
         "sentence": denial,
         "sources": ["string_resolution"],
         "decision": "keep",
+        "quote": "reads the flag at the second byte",
     }
-    done, reporter = _ask(report, {"sentences": [_whole_row(["string_resolution"]), kept]})
-    assert len(reporter.asked) == 1
-    # Backed by a section 5 passage: counted, not recorded as unresolved.
-    assert done.summary["held_kept"] == 1
-    assert HELD_KEPT_CODE not in [r["code"] for r in done.tally.unresolved]
+    reasoned = {**_scope_kept(denial), "reason": "no source names the routine"}
+    done, reporter = _ask(
+        report,
+        {"sentences": [_whole_row(["string_resolution"]), unquoted]},
+        {"sentences": [_whole_row(["string_resolution"]), reasoned]},
+    )
+    assert len(reporter.asked) == 2
+    assert "its quote states no absence" in str(reporter.asked[1][-1].content)
+    # Kept on no source: section 5 shares one word of what it denies ("flag"), so no
+    # source could say otherwise of it (review r4); it stands, recorded with its reason.
+    assert done.summary["held_kept"] == 1 and done.summary["dropped"] == 0
+    (record,) = [r for r in done.tally.unresolved if r["code"] == HELD_KEPT_CODE]
+    assert "no source names the routine" in record["message"] and denial in record["message"]
 
 
-def test_a_closing_negation_kept_on_a_debate_round_alone_is_recorded() -> None:
-    denial = "The flag read was not attributed to a routine [ev_0002]."
+def test_a_closing_negation_kept_on_a_quoted_debate_round_is_counted_not_recorded() -> None:
+    denial = "The flag byte was not attributed to a routine [ev_0002]."
     closing = Passage(
         id="limitations",
         label="11. Limitations",
@@ -562,11 +587,28 @@ def test_a_closing_negation_kept_on_a_debate_round_alone_is_recorded() -> None:
         closing=True,
         held=(denial,),
     )
-    debate = Passage(id="debate.1", label="debate round 1", text="x", kind=DEBATE)
-    row = {"passage": "limitations", "sentence": denial, "sources": ["debate.1"]}
+    debate = Passage(
+        id="debate.1",
+        label="debate round 1",
+        text="The flag byte was not attributed to any routine this round.",
+        kind=DEBATE,
+    )
+    row = {
+        "passage": "limitations",
+        "sentence": denial,
+        "sources": ["debate.1"],
+        "quote": "The flag byte was not attributed to any routine",
+    }
     counts, found = apply_rows({"sentences": [{**row, "decision": "keep"}]}, [debate, closing])
+    # A quote that passes every check: counted, not recorded (T-568 review ruling).
+    assert counts["held_kept"] == 1
+    assert found == []
+    # Kept on no source: recorded with its reason.
+    reasoned = {**row, "sources": [], "quote": "", "reason": "no round names it"}
+    counts, found = apply_rows({"sentences": [{**reasoned, "decision": "keep"}]}, [debate, closing])
     assert counts["held_kept"] == 1
     assert [v.code for v in found] == [HELD_KEPT_CODE]
+    assert "no round names it" in found[0].message
 
 
 @pytest.mark.parametrize(

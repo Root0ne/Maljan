@@ -37,7 +37,19 @@ from maljan.pipeline.validation import (
     absence_holders_note,
     ledger_absence_contradictions,
 )
+from maljan.reporting.absence_answers import (
+    FailureCounts,
+    count_disagrees,
+    denied_subject,
+    denies_an_observation,
+    failure_counts,
+    kept_absence,
+    negated_clauses,
+    quote_stands,
+    reading_denied_in,
+)
 from maljan.reporting.section_agreement import (
+    _candidates,
     _reports_a_claim,
     _said_unread,
     _unread_addresses,
@@ -53,6 +65,9 @@ UNIT = "T1234 Native words T1106 more is not read 0x1400 which that 12 hits Web 
 SMALLEST = 20_000
 LEAST_SECONDS = 0.01
 LARGEST = 1_280_000
+
+
+_COUNTS = FailureCounts(failed=2, redone=1, by_name={"decompil": (1, 1)})
 
 
 def _hostile(size: int) -> str:
@@ -251,6 +266,78 @@ LISTED = [SimpleNamespace(addresses=frozenset({0x1400}), id="listed.1")]
         pytest.param(whole_code_absences, id="whole-code absences"),
         pytest.param(closing_negations, id="closing negations"),
         pytest.param(_reports_a_claim, id="a reported claim"),
+        pytest.param(
+            lambda t: whole_code_absences(t, unsettled=True), id="unsettled section 5 absences"
+        ),
+        pytest.param(negated_clauses, id="negated clauses"),
+        pytest.param(
+            lambda t: denied_subject("and, " * (len(t) // 5) + " not known"),
+            id="the items of what a sentence denies",
+        ),
+        pytest.param(
+            lambda t: reading_denied_in("no " * (len(t) // 3) + "0x1400 was not read."),
+            id="the clause denying a reading",
+        ),
+        pytest.param(
+            lambda t: denies_an_observation("not " + "that word " * (len(t) // 10)),
+            id="a denied observation",
+        ),
+        pytest.param(
+            lambda t: denied_subject("that set " * (len(t) // 9) + "was not known"),
+            id="nouns a demonstrative points back with",
+        ),
+        pytest.param(lambda t: kept_absence(negated_clauses(t), t), id="an absence kept"),
+        pytest.param(
+            lambda t: kept_absence(
+                ["the mutex name is not passed in that call"], "name is not, " * (len(t) // 13)
+            ),
+            id="an absence kept among many clauses",
+        ),
+        pytest.param(
+            lambda t: kept_absence(
+                negated_clauses(
+                    "; ".join(f"wordx{i} alphax{i} is not known" for i in range(len(t) // 30))
+                ),
+                "; ".join(f"betay{i} gammay{i} is not shown" for i in range(len(t) // 30)),
+            ),
+            id="an absence kept among distinct clauses on both sides",
+        ),
+        pytest.param(
+            lambda t: kept_absence(
+                negated_clauses(
+                    "; ".join(f"name{i} mutex is not known" for i in range(len(t) // 26))
+                ),
+                "; ".join(f"name mutex{i} is not shown" for i in range(len(t) // 26)),
+            ),
+            id="an absence kept among clauses sharing its words",
+        ),
+        pytest.param(lambda t: quote_stands(t[: len(t) // 2], [t]), id="a kept sentence's quote"),
+        pytest.param(
+            lambda t: _candidates(
+                "The more words of 0x1400 are not read.",
+                {
+                    "s": SimpleNamespace(
+                        id="s",
+                        kind="section 5",
+                        text=t,
+                        cites=frozenset(),
+                        addresses=frozenset(),
+                        write=print,
+                        lists_code=False,
+                        label="5",
+                    )
+                },  # type: ignore[dict-item]
+            ),
+            id="a refused keep's candidate sources",
+        ),
+        pytest.param(
+            lambda t: failure_counts("4 of 158 calls " * (len(t) // 15) + "failed"),
+            id="failure counts",
+        ),
+        pytest.param(
+            lambda t: count_disagrees("3 tool calls failed and " * (len(t) // 24), _COUNTS),
+            id="a failure count held to the ledger",
+        ),
     ],
 )
 def test_four_times_the_hostile_line_stays_under_the_ratio(read: Callable[[str], object]) -> None:

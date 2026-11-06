@@ -34,11 +34,13 @@ from maljan.reporting.models import (
 from maljan.reporting.section_agreement import (
     CLAIM_LED,
     DROPPED_CODE,
+    HELD_KEPT_CODE,
     HELD_UNLISTED_CODE,
     REWRITE_CITES_ELSEWHERE_CODE,
     REWRITTEN_CODE,
     SECTION_5,
     UNKNOWN_SOURCE_CODE,
+    _sentences_of,
     ask_section_agreement,
     closing_negations,
     held_closing_sentences,
@@ -126,6 +128,31 @@ def _ask(report: MalwareReport, *answers: Any) -> tuple[Any, _Reporter]:
     return done, reporter
 
 
+def _every_other_kept(report: MalwareReport, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows, and one keeping with the reason each closing sentence they leave out:
+    every closing sentence is answered (T-568)."""
+    ta = report.technical_analysis
+    assert ta is not None
+    answered = {(row["passage"], row["sentence"]) for row in rows}
+    kept: list[dict[str, Any]] = []
+    for pid, sub in (
+        ("conclusion", ta.analyst_conclusion),
+        ("limitations", ta.analyst_limitations),
+    ):
+        for sentence in _sentences_of(sub.body if sub is not None else ""):
+            if (pid, sentence) not in answered:
+                kept.append(
+                    {
+                        "passage": pid,
+                        "sentence": sentence,
+                        "sources": [],
+                        "decision": "keep",
+                        "reason": "no source speaks of it",
+                    }
+                )
+    return [*rows, *kept]
+
+
 def test_both_closing_sections_are_asked_as_passages_written_without_the_code() -> None:
     # Under the shipped settings, as the worker reads which section reads code.
     previous = get_settings()
@@ -157,16 +184,25 @@ def test_a_report_without_them_asks_as_before() -> None:
 def test_a_closing_sentence_a_source_contradicts_is_rewritten() -> None:
     report = _report()
     rewrite = "The mutex the gate routine creates is named 'alphaname' [ev_0002][ev_0004]."
-    # The gate sentence denies what the body may state: held too (T-562), and kept.
-    gate = {"passage": "limitations", "sentence": OPEN_GATE, "sources": ["evasion_antiforensics"]}
-    rows = [_row("limitations", OPEN_MUTEX, ["bound.1"], rewrite), {**gate, "decision": "keep"}]
-    done, _ = _ask(report, {"sentences": rows})
+    # The gate sentence: section 5 speaks of the environment read, so it is no
+    # sentence no source speaks of (T-568); rewritten on it.
+    gate = "The environment read at 0x1200 returns -1 and stops the start-up [ev_0006]."
+    rows = _every_other_kept(
+        report,
+        [
+            _row("limitations", OPEN_MUTEX, ["bound.1"], rewrite),
+            _row("limitations", OPEN_GATE, ["evasion_antiforensics"], gate),
+        ],
+    )
+    done, reporter = _ask(report, {"sentences": rows})
+    assert len(reporter.asked) == 1
     body = report.technical_analysis.analyst_limitations.body  # type: ignore[union-attr]
-    assert body == f"{rewrite} {OPEN_GATE} {KEPT}"
-    assert done.summary["rewritten"] == 1 and done.summary["dropped"] == 0
-    # Kept on a fact or a section 5 passage: counted, not recorded (T-562).
-    assert [r["code"] for r in done.tally.unresolved] == [REWRITTEN_CODE]
-    assert done.summary["held_kept"] == 1
+    assert body == f"{rewrite} {gate} {KEPT}"
+    assert done.summary["rewritten"] == 2 and done.summary["dropped"] == 0
+    # Every closing sentence kept on no source is counted and recorded with its reason.
+    codes = [r["code"] for r in done.tally.unresolved]
+    assert codes.count(REWRITTEN_CODE) == 2 and codes.count(HELD_KEPT_CODE) == len(rows) - 2
+    assert done.summary["held_kept"] == len(rows) - 2
 
 
 def test_a_closing_sentence_whose_rewrite_fails_is_left_out_and_recorded() -> None:
@@ -267,9 +303,10 @@ def test_the_stored_runs_hold_exactly_these_closing_sentences(name: str) -> None
         held = held_closing_sentences(passage.text, [*passages.values()])
         assert len(held) == len(openings), (pid, held)
         assert all(h.startswith(o) for h, o in zip(held, openings, strict=True)), (pid, held)
-        # Beside them, every negation the body may state otherwise of is held (T-562).
-        expected = dict.fromkeys([*held, *closing_negations(passage.text)])
-        assert passage.held == tuple(expected), (pid, passage.held)
+        # Beside them, every negation the body may state otherwise of is held (T-562),
+        # and every other sentence: each closing sentence is answered (T-568).
+        assert {*held, *closing_negations(passage.text)} <= set(passage.held), pid
+        assert passage.held == tuple(dict.fromkeys(_sentences_of(passage.text))), pid
 
 
 def test_a_sentence_naming_no_address_is_held_only_where_it_names_the_run_s_reading() -> None:
@@ -283,8 +320,8 @@ def test_a_sentence_naming_no_address_is_held_only_where_it_names_the_run_s_read
     reading += "behaviour is not established."
     sources = list(passages_of(report))
     assert held_closing_sentences(passage.text, sources) == (reading,)
-    # The other one is held as a negation the body may state otherwise of (T-562).
-    assert passage.held == (reading, "APIs outside that set are not established as absent.")
+    # The other one is held too: every closing sentence is answered (T-568).
+    assert set(passage.held) == {reading, "APIs outside that set are not established as absent."}
 
 
 def test_haiku10_s_closing_sentences_are_shown_beside_what_states_otherwise() -> None:
@@ -335,22 +372,33 @@ def _keep(sentence: str, sources: list[str]) -> dict[str, Any]:
 
 def test_a_closing_sentence_calling_a_stated_value_open_is_held_and_shown_so() -> None:
     passages = {p.id: p for p in passages_of(_held_report())}
-    assert passages["limitations"].held == (HELD,)
-    assert passages["conclusion"].held == ()
+    sources = list(passages.values())
+    assert held_closing_sentences(passages["limitations"].text, sources) == (HELD,)
+    assert held_closing_sentences(passages["conclusion"].text, sources) == ()
+    # Every closing sentence is answered (T-568): the passage is not quoted twice.
+    assert passages["limitations"].held == (HELD, KEPT)
     prompt = prompt_text(list(passages.values()))
-    assert '[limitations] list each of these sentences: "' in prompt
-    # A report holding nothing asks as before: no such line.
-    assert "list each of these sentences" not in prompt_text(passages_of(_held_report(KEPT)))
+    assert "[limitations] answer every sentence of this passage, one row each (2 sentences)" in (
+        prompt
+    )
+    assert "Besides, answer EVERY sentence of [conclusion], [limitations]" in prompt
+    assert "list each of these sentences" not in prompt
 
 
 def test_a_held_sentence_left_unlisted_is_asked_once_more_and_then_kept() -> None:
     report = _held_report()
-    done, reporter = _ask(report, {"sentences": []}, {"sentences": [_keep(HELD, ["bound.1"])]})
+    kept = {**_keep(HELD, []), "reason": "the decoded name is not tied to this mutex here"}
+    done, reporter = _ask(
+        report, {"sentences": []}, {"sentences": _every_other_kept(report, [kept])}
+    )
     assert len(reporter.asked) == 2
     assert HELD_UNLISTED_CODE in str(reporter.asked[1][-1].content)
-    # Kept on the model's reading: never left out on the platform's read alone.
-    assert _limitations(report) == f"{HELD} {KEPT}"
-    assert done.summary["kept"] == 1 and done.summary["dropped"] == 0
+    # Kept on no source while the bound value's fact speaks of it: no source backs
+    # it, so it is left out and recorded with the refused keep's reason (T-568).
+    assert _limitations(report) == KEPT
+    assert done.summary["kept"] == 4 and done.summary["dropped"] == 1
+    (dropped,) = [r for r in done.tally.unresolved if r["code"] == DROPPED_CODE]
+    assert HELD in dropped["message"] and "not tied to this mutex here" in dropped["message"]
     assert HELD_UNLISTED_CODE not in [r["code"] for r in done.tally.unresolved]
 
 
