@@ -1,0 +1,58 @@
+# ── MinIO, built from source ─────────────────────
+# The object store's server (AGPLv3), compiled from the pinned upstream release
+# tag. MinIO publishes its releases as source only and its images are no
+# longer pulled from a registry, so compose builds this one
+# (docker/docker-compose.yml, service `minio`). The tag is cloned and its
+# commit must be MINIO_COMMIT, or the build stops. Keep MINIO_RELEASE in step
+# with the image tag compose names; a test holds the two together.
+#
+# The Go stage runs on the build host's platform and cross-compiles for the
+# target's architecture (TARGETARCH, set by BuildKit for each platform asked
+# of `docker buildx build --platform` or of compose), so one Dockerfile builds
+# linux/amd64 and linux/arm64 without emulating the compiler. It needs
+# BuildKit: compose and buildx use it; the deprecated legacy builder does not
+# set BUILDPLATFORM.
+FROM --platform=$BUILDPLATFORM golang:1.24.13-alpine3.23@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191 AS build
+ARG MINIO_RELEASE=RELEASE.2025-10-15T17-29-55Z
+ARG MINIO_COMMIT=9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+ARG TARGETARCH
+# The release's go.mod asks for Go 1.24 (toolchain go1.24.8); this image's
+# 1.24 is used as it is, never a toolchain fetched at build time.
+ENV CGO_ENABLED=0 \
+    GOTOOLCHAIN=local \
+    GOFLAGS=-trimpath
+RUN apk add --no-cache git
+WORKDIR /src
+RUN git clone --quiet --depth 1 --branch "${MINIO_RELEASE}" https://github.com/minio/minio.git . && \
+    commit="$(git rev-parse HEAD)" && \
+    if [ "${commit}" != "${MINIO_COMMIT}" ]; then \
+        echo "minio: ${MINIO_RELEASE} is commit ${commit}, expected ${MINIO_COMMIT}" >&2; exit 1; \
+    fi
+# The version flags upstream's own release build stamps (buildscripts/
+# gen-ldflags.go, run for the build host), so `minio --version` and the
+# server's own release checks read this release. The binary is then built for
+# the target's architecture, the build host's when TARGETARCH is unset.
+RUN version="$(echo "${MINIO_RELEASE#RELEASE.}" | sed -E 's/T([0-9]{2})-([0-9]{2})-([0-9]{2})Z$/T\1:\2:\3Z/')" && \
+    ldflags="$(MINIO_RELEASE=RELEASE go run buildscripts/gen-ldflags.go "${version}")" && \
+    GOOS=linux GOARCH="${TARGETARCH:-$(go env GOARCH)}" \
+        go build -tags kqueue -ldflags "${ldflags}" -o /out/minio . && \
+    mkdir -p /out/licenses && cp LICENSE CREDITS /out/licenses/
+
+# The runtime: the server and its licence on Alpine, whose busybox wget is
+# what the compose healthcheck calls. It runs as root, as the pulled image did:
+# the files in an existing minio_data volume were written by root, and a
+# server under another uid could not write them.
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+ARG MINIO_RELEASE=RELEASE.2025-10-15T17-29-55Z
+ARG MINIO_COMMIT=9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+LABEL org.opencontainers.image.title="minio" \
+      org.opencontainers.image.version="${MINIO_RELEASE}" \
+      org.opencontainers.image.revision="${MINIO_COMMIT}" \
+      org.opencontainers.image.source="https://github.com/minio/minio" \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
+COPY --from=build /out/minio /usr/bin/minio
+COPY --from=build /out/licenses /licenses
+EXPOSE 9000 9001
+VOLUME ["/data"]
+ENTRYPOINT ["/usr/bin/minio"]
+CMD ["server", "/data"]
