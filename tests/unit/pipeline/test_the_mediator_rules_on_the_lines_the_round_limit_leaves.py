@@ -101,12 +101,32 @@ class TestTheAnswerIsRead:
             2: Ruling(2, False, "ev_0143 is a different routine."),
         }
 
-    def test_the_first_ruling_of_a_line_is_read_and_a_number_outside_the_block_is_none(
+    def test_two_different_rulings_give_none_and_a_number_outside_the_block_is_stated(
         self,
     ) -> None:
-        answer = "L1: NOT UPHELD: first\nL1: UPHELD: second\nL3: UPHELD: no such line"
+        answer = (
+            "L1: NOT UPHELD: first\nL1: UPHELD: second\nL2: UPHELD: a\nL2: UPHELD: again\n"
+            "L3: UPHELD: no such line\nL0: UPHELD"
+        )
 
-        assert read_rulings(answer, 2) == {1: Ruling(1, False, "first")}
+        read = read_rulings(answer, 2)
+
+        assert read == {2: Ruling(2, True, "a")}
+        assert any("two different rulings on blocking line L1" in s for s in read.stated)
+        assert any("ruled on L3, which is no blocking line" in s for s in read.stated)
+        assert any("ruled on L0, which is no blocking line" in s for s in read.stated)
+
+    def test_the_block_s_own_numbers_are_the_lines_read(self) -> None:
+        read = read_rulings("L1: UPHELD: a\nL3: NOT UPHELD: b", [3])
+
+        assert read == {3: Ruling(3, False, "b")}
+        assert any("ruled on L1" in s for s in read.stated)
+
+    def test_a_network_value_in_a_reason_is_written_defanged(self) -> None:
+        (ruling,) = read_rulings("L1: UPHELD: see http://evil.com/a and 185.220.101.45", 1).values()
+
+        assert "evil[.]com" in ruling.reason and "185[.]220[.]101[.]45" in ruling.reason
+        assert "http://" not in ruling.reason
 
     def test_prose_that_names_a_line_is_no_ruling(self) -> None:
         assert read_rulings("I think L1 should be upheld, maybe.\nNothing more.", 2) == {}
@@ -119,6 +139,12 @@ class TestTheAnswerIsRead:
 
     def test_the_question_lists_the_lines_as_the_block_numbered_them(self) -> None:
         assert lines_text([LINE_1, "two\nlines"]) == f"Blocking lines:\nL1: {LINE_1}\nL2: two lines"
+
+    def test_the_question_lists_no_line_marked_not_blocking_and_keeps_the_numbers(self) -> None:
+        quiet = "[analysts: dynamic] claim 1 wording ev_0005 [not blocking: wording only]"
+
+        assert lines_text([quiet, LINE_1]) == f"Blocking lines:\nL2: {LINE_1}"
+        assert lines_text([(4, LINE_1)]) == f"Blocking lines:\nL4: {LINE_1}"
 
 
 class TestTheRulingsAreWrittenOntoTheClaims:
@@ -134,12 +160,12 @@ class TestTheRulingsAreWrittenOntoTheClaims:
         assert [c.claim for c in network] == [c.claim for c in isrs["network"].claims]
         assert network[0] is isrs["network"].claims[0]
         assert network[1].limit_rulings == [
-            "at the round limit the mediator upheld blocking line L1 of the round-5 mediation "
-            "against it: ev_0139 holds the names"
+            "at the round limit the mediator ruled blocking line L1 of the round-5 mediation, "
+            "which names this claim, UPHELD: ev_0139 holds the names (the mediator's ruling)"
         ]
         assert out.isrs["triage"].claims[0].limit_rulings == [
-            "at the round limit the mediator did not uphold blocking line L2 of the round-5 "
-            "mediation against it: other"
+            "at the round limit the mediator ruled blocking line L2 of the round-5 mediation, "
+            "which names this claim, NOT UPHELD: other (the mediator's ruling)"
         ]
         # The answers the node read are not changed.
         assert not isrs["network"].claims[1].limit_rulings
@@ -165,6 +191,65 @@ class TestTheRulingsAreWrittenOntoTheClaims:
             for s in out.sentences
         )
         assert not any("names no claim the platform reads" in s for s in out.sentences)
+
+    def test_both_sides_of_a_line_carry_the_same_neutral_note(self) -> None:
+        # The review's probe: a two-sided line names the claim it supports
+        # too; the note never says the ruling is against it.
+        isrs = {
+            "static": AgentISR(
+                agent_id="static",
+                domain="x",
+                claims=[
+                    ClaimEvidence(claim="PE is a DLL", evidence_ref="ev_0001", confidence=0.8),
+                    ClaimEvidence(
+                        claim="Imports IsDebuggerPresent at 0x401000",
+                        evidence_ref="ev_0005",
+                        confidence=0.8,
+                    ),
+                ],
+            ),
+            "dynamic": AgentISR(
+                agent_id="dynamic",
+                domain="x",
+                claims=[
+                    ClaimEvidence(
+                        claim="No anti-debug behaviour seen", evidence_ref="ev_0005", confidence=0.8
+                    )
+                ],
+            ),
+        }
+        line = (
+            "[analysts: static, dynamic] static claim 2 says anti-debug via ev_0005; dynamic "
+            "claim 1 says none was seen in ev_0005 [blocking: contested]"
+        )
+
+        out = mark_claims(
+            [line], {1: Ruling(1, True, "ev_0005 shows the import")}, isrs, ["static", "dynamic"], 5
+        )
+
+        notes = [
+            out.isrs["static"].claims[1].limit_rulings,
+            out.isrs["dynamic"].claims[0].limit_rulings,
+        ]
+        assert notes[0] == notes[1]
+        assert "against" not in notes[0][0] and "which names this claim, UPHELD" in notes[0][0]
+
+    def test_a_line_marked_not_blocking_is_never_ruled_on(self) -> None:
+        # The review's probe: a not-blocking sibling is neither listed nor noted.
+        quiet = "[analysts: NETWORK ANALYST] Claim 1 wording [ev_0113] [not blocking: wording]"
+
+        out = mark_claims(
+            [LINE_1, quiet],
+            read_rulings("L1: UPHELD: a\nL2: UPHELD: b", 2),
+            _isrs(),
+            NAMES,
+            5,
+        )
+
+        assert not out.isrs["network"].claims[0].limit_rulings
+        assert out.isrs["network"].claims[1].limit_rulings
+        assert not any("line L2" in s and "upheld" in s for s in out.sentences)
+        assert any("ruled on L2, which is no blocking line" in s for s in out.sentences)
 
     def test_a_line_with_no_ruling_is_stated_and_marks_nothing(self) -> None:
         out = mark_claims([LINE_1, LINE_2], {1: Ruling(1, True, "r")}, _isrs(), NAMES, 5)
@@ -392,13 +477,25 @@ class TestTheQuestionIsAskedOnce:
         assert set(out.isrs) == {"network", "triage"}
 
     @pytest.mark.parametrize(
-        ("answer", "why"),
-        [(TimeoutError(), "it failed: TimeoutError"), ("", "the question was not answered")],
+        ("answer", "recorded", "why"),
+        [
+            (TimeoutError(), "", "it failed: TimeoutError"),
+            ("", "", "the question was not answered"),
+            (
+                "",
+                "the question was refused by the job's spend ceiling",
+                "the question was refused by the job's spend ceiling",
+            ),
+            ("", "no mediation answered in this agent", "no mediation answered in this agent"),
+        ],
     )
     def test_a_question_with_no_answer_changes_no_claim_and_says_why(
-        self, answer: Any, why: str
+        self, answer: Any, recorded: str, why: str
     ) -> None:
-        out = self._rule(_Judge(answer))
+        judge = _Judge(answer)
+        judge.limit_ruling_failure = recorded
+
+        out = self._rule(judge)
 
         assert out.isrs == {}
         (sentence,) = out.sentences
@@ -449,12 +546,40 @@ class TestTheJudgeAsksInItsOwnConversation:
         names, sent = llm.calls[0]
         assert names and sent[-1].content == f"{LIMIT_RULING_QUESTION}\n\nBlocking lines:\nL1: x"
 
-    def test_no_mediation_answered_asks_nothing(self) -> None:
+    def test_no_mediation_answered_asks_nothing_and_says_why(self) -> None:
         llm = _ReadingLlm()
         judge = JudgeAgent(llm=llm)  # type: ignore[arg-type]
 
         assert asyncio.run(judge.rule_on_standing_lines("Blocking lines:\nL1: x", None)) == ""
         assert llm.calls == []
+        assert judge.limit_ruling_failure == "no mediation answered in this agent"
+
+    def test_a_question_the_spend_ceiling_refuses_says_so(self) -> None:
+        from maljan.core.spend import SpendCeilingStop
+
+        llm = _ReadingLlm()
+        judge = JudgeAgent(llm=llm)  # type: ignore[arg-type]
+        judge._mediation_turns = ([("human", "Mediate.")], "Answer.")
+
+        def _refuse(*_args: Any, **_kwargs: Any) -> Any:
+            raise SpendCeilingStop("the ceiling is reached")
+
+        with patch.object(judge, "_spend_admits", side_effect=_refuse):
+            text = asyncio.run(judge.rule_on_standing_lines("Blocking lines:\nL1: x", None))
+
+        assert text == "" and llm.calls == []
+        assert judge.limit_ruling_failure == "the question was refused by the job's spend ceiling"
+
+    def test_a_question_that_fails_names_the_class(self) -> None:
+        class _Failing:
+            async def ainvoke(self, *_args: Any, **_kwargs: Any) -> Any:
+                raise ConnectionError("host went away")
+
+        judge = JudgeAgent(llm=_Failing())  # type: ignore[arg-type]
+        judge._mediation_turns = ([("human", "Mediate.")], "Answer.")
+
+        assert asyncio.run(judge.rule_on_standing_lines("Blocking lines:\nL1: x", None)) == ""
+        assert judge.limit_ruling_failure == "the question failed: ConnectionError"
 
 
 def _human_turn(ledger: Any) -> str:
@@ -486,7 +611,12 @@ class TestTheMediatorIsAskedToReadTheEntryALineTurnsOn:
         assert MEDIATION_ENTRY_CHECK not in text
 
 
-def _node_run(iteration: int, max_rounds: int) -> tuple[dict[str, Any], Any, list[Any]]:
+def _node_run(
+    iteration: int,
+    max_rounds: int,
+    lines: list[str] | None = None,
+    answer: Any = "L1: UPHELD: r1\nL2: NOT UPHELD: r2",
+) -> tuple[dict[str, Any], Any, list[Any]]:
     from unittest.mock import AsyncMock
 
     from maljan.pipeline.nodes import make_negotiation_node
@@ -498,11 +628,18 @@ def _node_run(iteration: int, max_rounds: int) -> tuple[dict[str, Any], Any, lis
     container.analyst_keys.return_value = list(NAMES)
     container.config.negotiation.max_iterations = max_rounds
     argument = AgentArgument(
-        agent_name="Mediator", finding="f", confidence_score=0.4, contradictions=[LINE_1, LINE_2]
+        agent_name="Mediator",
+        finding="f",
+        confidence_score=0.4,
+        contradictions=[LINE_1, LINE_2] if lines is None else lines,
     )
     judge = MagicMock()
     judge.mediate = AsyncMock(return_value=(argument, False))
-    judge.rule_on_standing_lines = AsyncMock(return_value="L1: UPHELD: r1\nL2: NOT UPHELD: r2")
+    judge.rule_on_standing_lines = AsyncMock(
+        side_effect=answer if isinstance(answer, BaseException) else None,
+        return_value=answer,
+    )
+    judge.limit_ruling_failure = ""
     container.get_judge_agent.return_value = judge
     state = {
         **_state(iteration),
@@ -526,6 +663,30 @@ class TestTheNegotiationNodeRulesAtTheLimit:
         assert result["isr_reports"]["triage"].claims[0].limit_rulings
         texts = [d.get("text", "") for t, d in events if t == "agent_message"]
         assert any("did not uphold blocking line L2" in text for text in texts)
+
+    def test_a_not_blocking_sibling_is_not_put_and_keeps_no_number(self) -> None:
+        quiet = "[analysts: TRIAGE ANALYST] Claim 1 at 0x8690 [not blocking: wording only]"
+
+        result, judge, _events = _node_run(4, 5, [quiet, LINE_1], "L2: UPHELD: r")
+
+        (text, _ledger) = judge.rule_on_standing_lines.await_args.args
+        assert text == f"Blocking lines:\nL2: {LINE_1}"
+        assert set(result["isr_reports"]) == {"network"}
+        (argument,) = result["discussion_history"]
+        assert any("upheld blocking line L2" in s for s in argument.limit_rulings)
+
+    def test_a_ruling_that_raises_leaves_the_mediation_complete_and_says_so(self) -> None:
+        from unittest.mock import patch as _patch
+
+        with _patch("maljan.pipeline.nodes.rule_at_the_limit", side_effect=RuntimeError("boom")):
+            result, _judge, _events = _node_run(4, 5)
+
+        (argument,) = result["discussion_history"]
+        assert argument.status == "complete"
+        assert result["is_consensus"] is False
+        assert "isr_reports" not in result
+        (sentence,) = argument.limit_rulings
+        assert "it failed: RuntimeError" in sentence and "boom" not in sentence
 
     def test_before_the_limit_nothing_is_asked_and_no_claim_changes(self) -> None:
         result, judge, _events = _node_run(3, 5)

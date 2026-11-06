@@ -31,12 +31,12 @@ line, possessive quantifiers).
 from __future__ import annotations
 
 import re
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from maljan.pipeline.claim_drops import defanged
-from maljan.pipeline.debate_facts import claims_named_by_lines, line_tokens
+from maljan.pipeline.debate_facts import claims_named_by_lines, line_tokens, read_marks
 from maljan.pipeline.revision_merge import _blocks, claim_tokens_by_number
 from maljan.pipeline.routing import debate_rounds, route_within_limit, with_debate_start
 
@@ -67,45 +67,107 @@ class Ruling:
 
 
 def clean_quote(text: Any, limit: int) -> str:
-    """Model text fit to quote: one line, no bracket or markup character, bounded."""
+    """Model text fit to quote: one line, no bracket or markup character, bounded.
+
+    The network values it names are written defanged after it is bounded, so
+    a URL or an address a reason quotes never stands live in a claim's note.
+    """
     one_line = " ".join(str(text or "").split()).translate(_NOT_IN_A_REASON)
     one_line = " ".join(one_line.split())
-    return one_line if len(one_line) <= limit else f"{one_line[: limit - 1].rstrip()}…"
+    bounded = one_line if len(one_line) <= limit else f"{one_line[: limit - 1].rstrip()}…"
+    return defanged(bounded)
 
 
-def read_rulings(text: str, count: int) -> dict[int, Ruling]:
-    """``{line number: Ruling}`` read from the mediator's answer, for lines 1 to ``count``.
+# A blocking line with the number the mediation's block gave it.
+NumberedLine = tuple[int, str]
 
-    The first ruling written for a line is the one read; a line number
-    outside the block's is no ruling. Linear in the answer.
+
+def numbered_blocking(lines: Sequence[str] | Sequence[NumberedLine]) -> list[NumberedLine]:
+    """``lines`` as ``(number, line)``, the blocking ones only, each with its own number.
+
+    Plain lines are numbered from 1 in the order given, as the block listed
+    them. A line the mediator marked ``[not blocking: ...]`` (``read_marks``)
+    is left out and lends no number to another: the question and the rulings
+    speak only of lines that block.
     """
-    out: dict[int, Ruling] = {}
+    pairs = [
+        (int(item[0]), str(item[1])) if isinstance(item, tuple) else (index, str(item))
+        for index, item in enumerate(lines, 1)
+    ]
+    marks = read_marks([line for _number, line in pairs])
+    return [pair for pair, mark in zip(pairs, marks, strict=True) if mark.blocking]
+
+
+class RulingsRead(dict[int, Ruling]):
+    """``{line number: Ruling}`` as read, with a sentence for each ruling not read (``stated``)."""
+
+    def __init__(
+        self, rows: Mapping[int, Ruling] | None = None, stated: Sequence[str] = ()
+    ) -> None:
+        super().__init__(rows or {})
+        self.stated: list[str] = list(stated)
+
+
+def read_rulings(text: str, numbers: int | Iterable[int]) -> RulingsRead:
+    """The rulings read from the mediator's answer, for the line numbers of the block.
+
+    ``numbers`` is the block's line numbers (an ``int`` reads 1 to it). A line
+    ruled twice the same way is read once; a line given two different
+    rulings has none, and that is stated; a number that is no line of the
+    block is no ruling, and is stated. Linear in the answer.
+    """
+    wanted = set(range(1, numbers + 1)) if isinstance(numbers, int) else set(numbers)
+    found: dict[int, Ruling] = {}
+    twice: set[int] = set()
+    outside: dict[int, None] = {}
     for raw in str(text or "").splitlines():
         match = _RULING.match(raw)
         if match is None:
             continue
         number = int(match.group(1))
-        if not 1 <= number <= count or number in out:
+        if number not in wanted:
+            outside.setdefault(number, None)
             continue
         upheld = not match.group(2).upper().startswith("NOT")
-        out[number] = Ruling(number, upheld, clean_quote(match.group(3), REASON_LIMIT))
-    return out
+        earlier = found.get(number)
+        if earlier is not None:
+            if earlier.upheld != upheld:
+                twice.add(number)
+            continue
+        found[number] = Ruling(number, upheld, clean_quote(match.group(3), REASON_LIMIT))
+    stated = [
+        f"The mediator's answer gave two different rulings on blocking line L{number}; "
+        "neither is read, and the claims it names stand with no ruling."
+        for number in sorted(twice)
+    ]
+    stated += [
+        f"The mediator's answer ruled on L{number}, which is no blocking line of the block; "
+        "that ruling is not read."
+        for number in outside
+    ]
+    return RulingsRead({n: r for n, r in found.items() if n not in twice}, stated)
 
 
-def lines_text(lines: Sequence[str]) -> str:
-    """The blocking lines as the question lists them, numbered as the block listed them."""
+def lines_text(lines: Sequence[str] | Sequence[NumberedLine]) -> str:
+    """The blocking lines as the question lists them, each with the number the block gave it."""
     return "Blocking lines:\n" + "\n".join(
-        f"L{index}: {' '.join(str(line).split())}" for index, line in enumerate(lines, 1)
+        f"L{number}: {' '.join(line.split())}" for number, line in numbered_blocking(lines)
     )
 
 
 def ruling_note(mediation_round: int, ruling: Ruling) -> str:
-    """The note a claim carries for one ruling (``ClaimEvidence.limit_rulings``)."""
-    said = "upheld" if ruling.upheld else "did not uphold"
+    """The note a claim carries for one ruling (``ClaimEvidence.limit_rulings``).
+
+    Neutral and attributed: a line names the claims on both of its sides, so
+    the note says which line names the claim and what the mediator ruled on
+    the line, never which side the claim is on.
+    """
+    said = "UPHELD" if ruling.upheld else "NOT UPHELD"
     reason = f": {ruling.reason}" if ruling.reason else ""
     return (
-        f"at the round limit the mediator {said} blocking line L{ruling.line} of the "
-        f"round-{int(mediation_round)} mediation against it{reason}"
+        f"at the round limit the mediator ruled blocking line L{ruling.line} of the "
+        f"round-{int(mediation_round)} mediation, which names this claim, {said}{reason} "
+        "(the mediator's ruling)"
     )
 
 
@@ -165,7 +227,7 @@ def _quoted_line(line: str) -> str:
 
 
 def mark_claims(
-    lines: Sequence[str],
+    lines: Sequence[str] | Sequence[NumberedLine],
     rulings: Mapping[int, Ruling],
     isr_reports: Mapping[str, Any],
     participants: Sequence[str],
@@ -173,9 +235,11 @@ def mark_claims(
 ) -> LimitRulings:
     """Each ruling written onto the claims its line names, and every sentence said.
 
-    ``lines`` are the mediation's blocking lines, numbered from 1 as the
-    block listed them. A claim is marked only when it shares a ledger id or an
-    address with what names it: the line, or, for a claim the line reaches
+    ``lines`` are the mediation's lines, as ``(number, line)`` or numbered
+    from 1 as the block listed them; only the blocking ones are read
+    (:func:`numbered_blocking`), each by its own number. A claim is marked
+    only when it shares a ledger id or an address with what names it: the
+    line, or, for a claim the line reaches
     only through a range or a list, that reference's own clause (as
     ``revision_merge`` withdraws by rule). A claim number the mediator gave
     from another numbering than the answer in force (haiku10's last line
@@ -185,11 +249,22 @@ def mark_claims(
     ``isr_reports`` is not changed: the marked answers are copies.
     """
     r = int(mediation_round)
-    out = LimitRulings()
-    for number in range(1, len(lines) + 1):
+    out = LimitRulings(sentences=list(getattr(rulings, "stated", ()) or ()))
+    blocking = numbered_blocking(lines)
+    by_number = dict(blocking)
+    # A ruling on a number that is no blocking line (one marked not blocking,
+    # or none of the block's) is not read, and that is said.
+    out.sentences += [
+        f"The mediator's answer ruled on L{n}, which is no blocking line of the block; "
+        "that ruling is not read."
+        for n in sorted(rulings)
+        if n not in by_number
+    ]
+    rulings = {n: ruling for n, ruling in rulings.items() if n in by_number}
+    for number, line_text in blocking:
         ruling = rulings.get(number)
         if ruling is None:
-            quoted = _quoted_line(lines[number - 1])
+            quoted = _quoted_line(line_text)
             out.sentences.append(
                 defanged(
                     f"Blocking line L{number} of the round-{r} mediation stood at the round limit, "
@@ -202,15 +277,19 @@ def mark_claims(
         out.sentences.append(
             defanged(
                 f"At the round limit the mediator {said} blocking line L{number} of the round-{r} "
-                f'mediation ("{_quoted_line(lines[number - 1])}")'
+                f'mediation ("{_quoted_line(line_text)}")'
                 + (f": {ruling.reason}" if ruling.reason else "")
                 + "."
             )
         )
     if not rulings:
+        out.sentences = list(dict.fromkeys(out.sentences))
         return out
     owners = {name: claim_tokens_by_number(isr_reports.get(name)) for name in participants}
-    named = claims_named_by_lines(list(lines), list(participants), owners)
+    # Read in place, each line at its own number: a line left out stands as
+    # an empty one, which names nothing.
+    placed = [by_number.get(n, "") for n in range(1, max(by_number) + 1)]
+    named = claims_named_by_lines(placed, list(participants), owners)
     # The lines whose ruling was written onto a claim, and those a sentence
     # already says why it was not.
     marked_lines: set[int] = set()
@@ -235,7 +314,7 @@ def mark_claims(
                     continue
                 # The tokens the reference speaks with: its own clause for a
                 # range or a list, the whole line for a number it names.
-                spoken = reaching[line].tokens if line in reaching else line_tokens(lines[line - 1])
+                spoken = reaching[line].tokens if line in reaching else line_tokens(by_number[line])
                 if not spoken & _block_tokens(block):
                     quoted = _quoted_line(block.sentence)
                     reference = (
@@ -302,7 +381,7 @@ def _unplaced_sentence(name: str, mediation_round: int, reference: Any) -> str:
 
 async def rule_at_the_limit(
     judge: Any,
-    lines: Sequence[str],
+    lines: Sequence[str] | Sequence[NumberedLine],
     isr_reports: Mapping[str, Any],
     participants: Sequence[str],
     mediation_round: int,
@@ -313,25 +392,39 @@ async def rule_at_the_limit(
 
     ``run`` awaits the judge's question where the judge's calls run
     (``base_agent.run_on_agent_loop``). A question that fails, is not made or
-    brings no ruling back changes no claim and is said.
+    brings no ruling back changes no claim and is said, with the reason the
+    judge recorded (``JudgeAgent.limit_ruling_failure``) where it gave one.
     """
-    lines = [str(line) for line in lines]
+    blocking = numbered_blocking(lines)
+    if not blocking:
+        return LimitRulings()
     try:
-        answer = await run(judge.rule_on_standing_lines(lines_text(lines), ledger))
+        answer = await run(judge.rule_on_standing_lines(lines_text(blocking), ledger))
     except Exception as exc:  # noqa: BLE001 — a question that failed changes nothing
         return LimitRulings(
             sentences=[
-                not_ruled_sentence(mediation_round, len(lines), f"it failed: {type(exc).__name__}")
+                not_ruled_sentence(
+                    mediation_round, len(blocking), f"it failed: {type(exc).__name__}"
+                )
             ]
         )
     if not str(answer or "").strip():
+        why = getattr(judge, "limit_ruling_failure", "")
         return LimitRulings(
             sentences=[
-                not_ruled_sentence(mediation_round, len(lines), "the question was not answered")
+                not_ruled_sentence(
+                    mediation_round,
+                    len(blocking),
+                    why if isinstance(why, str) and why else "the question was not answered",
+                )
             ]
         )
     return mark_claims(
-        lines, read_rulings(answer, len(lines)), isr_reports, participants, mediation_round
+        blocking,
+        read_rulings(answer, [n for n, _line in blocking]),
+        isr_reports,
+        participants,
+        mediation_round,
     )
 
 

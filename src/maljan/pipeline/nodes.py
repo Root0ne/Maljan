@@ -129,7 +129,14 @@ from maljan.pipeline.events import (
 )
 from maljan.pipeline.evidence_summary import collect as collect_technique_sources
 from maljan.pipeline.evidence_summary import summarise, technique_evidence
-from maljan.pipeline.limit_rulings import ends_at_the_limit, round_limit, rule_at_the_limit
+from maljan.pipeline.limit_rulings import (
+    LimitRulings,
+    ends_at_the_limit,
+    not_ruled_sentence,
+    numbered_blocking,
+    round_limit,
+    rule_at_the_limit,
+)
 from maljan.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     MEDIATOR_NO_ANSWER,
@@ -5615,11 +5622,17 @@ def make_negotiation_node(
             # its own conversation, and each ruling is written onto the claims
             # the line names (``limit_rulings``). Nothing is asked otherwise.
             limit = None
-            if (
-                measured
-                and argument.status == "complete"
-                and argument.contradictions
-                and ends_at_the_limit(
+            # The lines the mediator marked blocking, each with its number in
+            # the block (``limit_rulings.numbered_blocking``).
+            blocking = (
+                numbered_blocking(list(argument.contradictions))
+                if measured and argument.status == "complete"
+                else []
+            )
+            # In a try of its own: a ruling that fails leaves the mediation it
+            # follows complete, and says so.
+            try:
+                if blocking and ends_at_the_limit(
                     state,
                     {
                         "iteration_count": iteration + 1,
@@ -5630,21 +5643,35 @@ def make_negotiation_node(
                     },
                     getattr(stage, "key", None),
                     round_limit(container.config, stage),
+                ):
+                    limit = await rule_at_the_limit(
+                        judge,
+                        blocking,
+                        dict(state.get("isr_reports") or {}),
+                        list(agent_names),
+                        iteration + 1,
+                        state.get("evidence_ledger") or None,
+                        lambda question: run_on_agent_loop(
+                            question,
+                            hard_timeout=(
+                                None if judge_timeout is None else float(judge_timeout) + 30
+                            ),
+                            label="mediation limit rulings",
+                        ),
+                    )
+            except Exception as exc:  # noqa: BLE001 — a ruling is never worth a mediation
+                logger.warning(
+                    "negotiation: the rulings at the round limit failed (%s).",
+                    type(exc).__name__,
                 )
-            ):
-                limit = await rule_at_the_limit(
-                    judge,
-                    list(argument.contradictions),
-                    dict(state.get("isr_reports") or {}),
-                    list(agent_names),
-                    iteration + 1,
-                    state.get("evidence_ledger") or None,
-                    lambda question: run_on_agent_loop(
-                        question,
-                        hard_timeout=None if judge_timeout is None else float(judge_timeout) + 30,
-                        label="mediation limit rulings",
-                    ),
+                limit = LimitRulings(
+                    sentences=[
+                        not_ruled_sentence(
+                            iteration + 1, len(blocking), f"it failed: {type(exc).__name__}"
+                        )
+                    ]
                 )
+            if limit is not None:
                 argument.limit_rulings = list(limit.sentences)
                 if limit.sentences:
                     argument.finding = (

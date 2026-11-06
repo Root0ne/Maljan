@@ -2332,6 +2332,10 @@ class JudgeAgent(BudgetMeter):
         # The last mediation's prompt and the answer its block was read from
         # (:meth:`rule_on_standing_lines`), ``None`` before one answered.
         self._mediation_turns: tuple[list[Any], str] | None = None
+        # Why the last question after a mediation brought no answer, and why
+        # the last ruling question did, or ``""``.
+        self._after_mediation_failure: str = ""
+        self.limit_ruling_failure: str = ""
         # The notice the last verdict prompt carried when its parts did not
         # fit the judge's window whole, or ``""``; the judge node records it
         # as a degradation reason.
@@ -4106,14 +4110,16 @@ class JudgeAgent(BudgetMeter):
         binds it. Bounded as the block question is: the spend ceiling admits
         each turn, and the judge's own time limit holds the whole. ``""`` when
         no mediation answered in this agent, or the question was not made or
-        failed (logged); the caller states it.
+        failed (logged); why is left in :attr:`limit_ruling_failure` for the
+        caller to state.
         """
         if self._mediation_turns is None:
+            self.limit_ruling_failure = "no mediation answered in this agent"
             return ""
         prompt_messages, reasoning_text = self._mediation_turns
         self._mediation_ledger = list(ledger) if ledger else None
         try:
-            return await self._ask_after_mediation(
+            answer = await self._ask_after_mediation(
                 prompt_messages,
                 reasoning_text,
                 f"{LIMIT_RULING_QUESTION}\n\n{lines_text}",
@@ -4123,6 +4129,10 @@ class JudgeAgent(BudgetMeter):
             )
         finally:
             self._mediation_ledger = None
+        self.limit_ruling_failure = self._after_mediation_failure or (
+            "" if answer else "the answer was empty"
+        )
+        return answer
 
     async def _ask_after_mediation(
         self,
@@ -4139,8 +4149,10 @@ class JudgeAgent(BudgetMeter):
         mediation's ledger where the model binds it (``question``) and without
         it otherwise (``question_without_tools``). ``call`` names the call to
         the spend ceiling and the usage record, ``what`` to the log. A question
-        the ceiling refuses or that fails answers ``""``.
+        the ceiling refuses or that fails answers ``""``, and says why in
+        ``_after_mediation_failure``.
         """
+        self._after_mediation_failure = ""
         from langchain_core.messages import AIMessage, BaseMessage
 
         from maljan.llm.context_window import output_bound_kwargs
@@ -4162,6 +4174,7 @@ class JudgeAgent(BudgetMeter):
             bound = self._spend_admits(call, turns, slot=slot, deadline_s=timeout)
         except SpendCeilingStop as stop:
             self.logger.warning("%s not asked: %s.", what, stop)
+            self._after_mediation_failure = "the question was refused by the job's spend ceiling"
             return ""
         held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
         try:
@@ -4197,6 +4210,11 @@ class JudgeAgent(BudgetMeter):
             )
         except Exception as exc:  # noqa: BLE001 — an unanswered question changes nothing
             self.logger.warning("%s failed (%s).", what, type(exc).__name__)
+            self._after_mediation_failure = (
+                "a turn of the question was refused by the job's spend ceiling"
+                if isinstance(exc, SpendCeilingStop)
+                else f"the question failed: {type(exc).__name__}"
+            )
             return ""
         finally:
             self._spend_release(slot)
