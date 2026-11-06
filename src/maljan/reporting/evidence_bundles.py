@@ -19,7 +19,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import weakref
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
@@ -211,6 +211,25 @@ _SECTION_CLAIM_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
+class _NotedRef(str):
+    """A claim's evidence as the sections are shown it, and ``routed``: it without ruling notes.
+
+    The mediator's rulings at the round limit (``ClaimEvidence.limit_rulings``)
+    are noted after a claim's evidence, and their reasons name entries and
+    functions the claim itself never cited. What a section is shown (its
+    claims, the outputs and the code they cite) is chosen by the claim's own
+    evidence (:func:`_routed`); the note reaches the section's text whole.
+    """
+
+    routed: str
+
+
+def _routed(claim: Mapping[str, Any]) -> str:
+    """The text a claim routes a section by: its sentence and its own evidence."""
+    ref = claim.get("evidence_ref", "")
+    return f"{claim.get('claim', '')} {getattr(ref, 'routed', ref)}"
+
+
 def _claims_text(report: MalwareReport, isr_reports: dict[str, Any] | None) -> list[dict[str, str]]:
     """Every claim in force as ``{claim, evidence_ref, agent, label}``, in the answers' order.
 
@@ -219,19 +238,26 @@ def _claims_text(report: MalwareReport, isr_reports: dict[str, Any] | None) -> l
     a citation of the claim by, and the one the report lists it under when the
     body neither cites nor discusses it.
     """
+    import dataclasses
+
     from maljan.reporting.claim_coverage import claims_in_force
     from maljan.schemas.isr_models import carried_note, retry_added_marker
 
     def _noted(claim: Any) -> str:
         # A claim a tool-less retry added, or one a revision carried forward
-        # unwritten, says so beside its evidence.
+        # unwritten, says so beside its evidence; so does one the mediator
+        # ruled on at the round limit, whose reference then routes by what it
+        # was without the rulings (:class:`_NotedRef`).
         ref = str(claim.evidence_ref)
         if claim.added_by_retry_in_round is not None:
             ref = f"{ref} ({retry_added_marker(claim.added_by_retry_in_round)})"
         carried = carried_note(claim)
-        if carried:
-            ref = f"{ref} ({carried})"
-        return ref
+        if not getattr(claim, "limit_rulings", None):
+            return f"{ref} ({carried})" if carried else ref
+        unruled = carried_note(dataclasses.replace(claim, limit_rulings=()))
+        noted = _NotedRef(f"{ref} ({carried})")
+        noted.routed = f"{ref} ({unruled})" if unruled else ref
+        return noted
 
     return [
         {
@@ -368,7 +394,7 @@ def mentions(text: str, keywords: tuple[str, ...]) -> bool:
 def _filter_claims(claims: list[dict[str, str]], keywords: tuple[str, ...]) -> list[dict[str, str]]:
     if not keywords:
         return []
-    return [c for c in claims if mentions(f"{c['claim']} {c['evidence_ref']}", keywords)]
+    return [c for c in claims if mentions(_routed(c), keywords)]
 
 
 def cited_entry_ids(claims: list[dict[str, str]]) -> set[str]:
@@ -377,7 +403,7 @@ def cited_entry_ids(claims: list[dict[str, str]]) -> set[str]:
 
     cited: set[str] = set()
     for claim in claims:
-        cited |= entry_ids_in(f"{claim.get('claim', '')} {claim.get('evidence_ref', '')}")
+        cited |= entry_ids_in(_routed(claim))
     return cited
 
 
@@ -647,7 +673,7 @@ def _claimed_rows(
     """
     from maljan.schemas.evidence import entry_ids_in
 
-    text = f"{claim.get('claim', '')} {claim.get('evidence_ref', '')}"
+    text = _routed(claim)
     picked: dict[int, FunctionCode] = {}
     for address in _named_functions(text):
         for at in (address, *(address + base for base in bases)):

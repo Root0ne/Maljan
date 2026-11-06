@@ -349,6 +349,49 @@ class TestTheRulingsReachTheRecord:
         assert self.SENTENCE in md
 
 
+class TestARulingReasonRoutesNothing:
+    """An entry or a function named only in a ruling's reason is no citation of the claim."""
+
+    REASON_NOTE = (
+        "at the round limit the mediator ruled blocking line L1 of the round-5 mediation, "
+        "which names this claim, UPHELD: ev_0099 shows the loop at 0x401500 (the mediator's ruling)"
+    )
+
+    def _claims(self, ruled: bool) -> list[dict[str, str]]:
+        from maljan.reporting.evidence_bundles import _claims_text
+
+        claim = ClaimEvidence(
+            claim="The packer stub at 0x401000 decodes the payload.",
+            evidence_ref="[ev_0012] decode listing",
+            confidence=0.7,
+            limit_rulings=[self.REASON_NOTE] if ruled else [],
+        )
+        isrs = {"static": AgentISR(agent_id="static", domain="static", claims=[claim])}
+        return _claims_text(None, isrs)  # type: ignore[arg-type]
+
+    def test_the_cited_entries_and_the_picked_functions_are_the_claim_s_own(self) -> None:
+        from maljan.reporting.evidence_bundles import FunctionCode, _claimed_rows, cited_entry_ids
+
+        own, ruled = self._claims(False), self._claims(True)
+        rows = {
+            "ev_0012": [FunctionCode(key="a", where="0x401000", tool="t", code="c")],
+            "ev_0099": [FunctionCode(key="b", where="0x401500", tool="t", code="d")],
+        }
+        by_address = {0x401000: rows["ev_0012"], 0x401500: rows["ev_0099"]}
+
+        assert cited_entry_ids(ruled) == cited_entry_ids(own) == {"ev_0012"}
+        assert [r.key for r in _claimed_rows(ruled[0], by_address, rows, ())] == ["a"]
+        assert [r.key for r in _claimed_rows(own[0], by_address, rows, ())] == ["a"]
+
+    def test_the_section_s_text_still_carries_the_note_whole(self) -> None:
+        import json
+
+        (claim,) = self._claims(True)
+
+        assert claim["evidence_ref"] == f"[ev_0012] decode listing ({self.REASON_NOTE})"
+        assert self.REASON_NOTE in json.dumps(claim)
+
+
 class TestTheNoteTravelsWithTheClaim:
     def test_the_note_reaches_the_judge_s_summary_and_the_event_payload(self) -> None:
         from maljan.pipeline.events import claims_to_payload
