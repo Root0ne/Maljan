@@ -54,7 +54,9 @@ from maljan.reporting.section_agreement import (
 )
 
 SLEEP = "The sleep constants are not established."
-MUTEX = "The listing shows two arguments, so the mutex name is not established."
+# Not an absence a shape holds ("not established" is one, T-568): a sentence the
+# model lists against a fact of its own accord.
+MUTEX = "The listing shows two arguments, so the mutex name stays open."
 CITABLE = [f"ev_{n:04d}" for n in range(1, 30)] + ["ev_0064", "ev_0068"]
 
 

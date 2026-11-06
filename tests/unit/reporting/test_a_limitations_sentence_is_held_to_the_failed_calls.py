@@ -37,6 +37,7 @@ from maljan.reporting.section_agreement import (
     DROPPED_CODE,
     FACT,
     FAILURE_REDONE_CODE,
+    HELD_KEPT_CODE,
     REWRITTEN_CODE,
     _sentences_of,
     ask_section_agreement,
@@ -346,16 +347,18 @@ def test_a_paragraph_is_left_as_written_where_no_call_failed() -> None:
 )
 def test_a_rewrite_citing_the_call_that_redid_it_is_put_in(rewrite: str) -> None:
     report = _report()
-    # The other sentence denies an observation: it is held too (T-562), and kept.
-    kept = {"passage": "limitations", "sentence": OTHER, "sources": ["failed.1"]}
+    # The other sentence denies an observation no source speaks of: every closing
+    # sentence is answered (T-568), and it is kept with the reason.
+    kept = {"passage": "limitations", "sentence": OTHER, "sources": [], "reason": "not in a fact"}
     rows = [_row(FALSE, ["failed.1"], rewrite), {**kept, "decision": "keep"}]
-    done, _ = _ask(report, _ledger(), {"sentences": rows})
+    done, reporter = _ask(report, _ledger(), {"sentences": rows})
+    assert len(reporter.asked) == 1
     body = report.technical_analysis.analyst_limitations.body
     assert body == f"{rewrite} {OTHER}"
     assert report.technical_analysis.analyst_limitations.evidence_refs == ["ev_0001", "ev_0003"]
     assert done.summary["rewritten"] == 1
-    # Kept on a fact or a section 5 passage: counted, not recorded (T-562).
-    assert [r["code"] for r in done.tally.unresolved] == [REWRITTEN_CODE]
+    # Every kept closing sentence is counted and recorded with its reason (T-568).
+    assert [r["code"] for r in done.tally.unresolved] == [HELD_KEPT_CODE, REWRITTEN_CODE]
     assert done.summary["held_kept"] == 1
 
 
@@ -536,8 +539,10 @@ def _stored_names() -> list[str]:
 
 # The runs whose limitations say a call failed that a later call redid: haiku8's
 # reversing tools, and haiku10's "A batch emulation step did not complete", whose
-# emulation by a comma text was asked again with the list (T-562).
-_HELD_TO_FAILED_CALLS = ("haiku8", "haiku10")
+# emulation by a comma text was asked again with the list (T-562); and haiku12's
+# "The decompiler and disassembler calls for several functions failed", all six redone
+# (T-568).
+_HELD_TO_FAILED_CALLS = ("haiku8", "haiku10", "haiku12")
 
 
 @pytest.mark.parametrize("name", _stored_names())

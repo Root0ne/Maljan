@@ -46,16 +46,32 @@ not prove the test makes the platform raise it. The tests are not listed here:
 one nothing raises any more and stored runs still carry; the comment on that
 name says what reads it.
 
-**124 codes in 12 families:** [agreement](#agreement) 15 · [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 15 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 19 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
+**127 codes in 12 families:** [agreement](#agreement) 18 · [attck](#attck) 6 · [attribution](#attribution) 1 · [composer](#composer) 4 · [isr](#isr) 15 · [narrative](#narrative) 5 · [question](#question) 9 · [report](#report) 19 · [stix](#stix) 32 · [tool](#tool) 1 · [validation](#validation) 1 · [verdict](#verdict) 16. 14 code positions the register could not resolve are [listed at the end](#unresolved-code-positions).
 
 ## agreement
 
+### `agreement.absence_kept`
+
+A rewrite resting on a fact that states again the absence of the sentence the fact contradicts, the same words on the same addresses (T-568).
+
+- **Raised at** `maljan.reporting.section_agreement:_answer_violations`
+- **Constant** `maljan.reporting.section_agreement:ABSENCE_KEPT_CODE`
+- **Docs** none
+
 ### `agreement.dropped`
 
-A sentence of the conclusion or the limitations paragraph listed as saying otherwise than a section 5 passage, a fact or a closed debate line, whose rewrite passed no check: left out of the section, which only sums up what sections 4 to 6 state, and recorded here with what stood (T-554).
+A sentence of the conclusion or the limitations paragraph listed as saying otherwise than a section 5 passage, a fact or a closed debate line, whose rewrite passed no check: left out of the section, which only sums up what sections 4 to 6 state, and recorded here with what stood (T-554); one the answer leaves out with its reason, or keeps while the ledger says otherwise (a failed call a later call redid, a count of failed calls), the same way (T-568).
 
-- **Raised at** `maljan.reporting.section_agreement:apply_rows`
+- **Raised at** `maljan.reporting.section_agreement:_left_out`, `maljan.reporting.section_agreement:apply_rows`
 - **Constant** `maljan.reporting.section_agreement:DROPPED_CODE`
+- **Docs** none
+
+### `agreement.failure_count`
+
+A sentence, or a rewrite, giving failed calls a number the ledger's count does not (T-568).
+
+- **Raised at** `maljan.reporting.section_agreement:_count_violation`
+- **Constant** `maljan.reporting.section_agreement:FAILURE_COUNT_CODE`
 - **Docs** none
 
 ### `agreement.failure_redone`
@@ -68,7 +84,7 @@ A rewrite of a limitations sentence that still says a call failed, or a reading 
 
 ### `agreement.held_kept`
 
-A held sentence of the conclusion or the limitations that the answer kept, on the sources it named: it stands, and is recorded where a reader finds it.
+A sentence of the conclusion or the limitations that the answer kept: on the sources it named and the words of one it quoted, or on no source with its reason. It stands, and every one is recorded where a reader finds it (T-568).
 
 - **Raised at** `maljan.reporting.section_agreement:apply_rows`
 - **Constant** `maljan.reporting.section_agreement:HELD_KEPT_CODE`
@@ -76,10 +92,18 @@ A held sentence of the conclusion or the limitations that the answer kept, on th
 
 ### `agreement.held_unlisted`
 
-A held sentence of the conclusion or the limitations (one calling open an address or a value a section 5 passage or a fact states) that no row of the answer lists: the model decides each one, and is asked once more (T-554).
+A held sentence (any sentence of the conclusion or the limitations, T-568; one calling open an address or a value a section 5 passage or a fact states) that no row of the answer lists: the model decides each one, and is asked once more (T-554).
 
 - **Raised at** `maljan.reporting.section_agreement:_held_unlisted`
 - **Constant** `maljan.reporting.section_agreement:HELD_UNLISTED_CODE`
+- **Docs** none
+
+### `agreement.keep_unquoted`
+
+A kept closing sentence whose row quotes no words that stand in a source it names, or, for a sentence stating an absence, words stating none (T-568).
+
+- **Raised at** `maljan.reporting.section_agreement:_answer_violations`
+- **Constant** `maljan.reporting.section_agreement:KEEP_UNQUOTED_CODE`
 - **Docs** none
 
 ### `agreement.listed`
@@ -92,9 +116,9 @@ A sentence of a passage shown for reading only (a section 5 passage, a record's 
 
 ### `agreement.qualified`
 
-A held sentence whose own clause calls code not read that an entry lists, left standing by the answer (no row, a kept row, or a rewrite that failed): the platform adds what the ledger shows to it, in the facts' own words, and records what stood (T-562). Never left out, never left as written.
+A held sentence whose own clause calls code not read that an entry lists, left standing by the answer (no row, a kept row, or a rewrite that failed): the platform adds what the ledger shows to it, in the facts' own words, and records what stood (T-562). Never left out, never left as written. Also a section 5 denial a decoded value's fact contradicts whose rewrite in the model's words passed no check: the fact's clause is added, and what stood recorded (T-568).
 
-- **Raised at** `maljan.reporting.section_agreement:_qualify_unread_left`
+- **Raised at** `maljan.reporting.section_agreement:_qualify_unread_left`, `maljan.reporting.section_agreement:apply_rows`
 - **Constant** `maljan.reporting.section_agreement:QUALIFIED_CODE`
 - **Docs** none
 
@@ -150,7 +174,7 @@ A row's sentence does not stand in its passage as copied.
 
 A row names a passage the round was not shown as one it may answer for.
 
-- **Raised at** `maljan.reporting.section_agreement:_row_violations`
+- **Raised at** `maljan.reporting.section_agreement:_answer_violations`, `maljan.reporting.section_agreement:_row_violations`
 - **Constant** `maljan.reporting.section_agreement:UNKNOWN_PASSAGE_CODE`
 - **Docs** none
 
@@ -158,7 +182,7 @@ A row names a passage the round was not shown as one it may answer for.
 
 A row names a source the round was not shown, or answers a section 5 passage with a source that is not a platform fact.
 
-- **Raised at** `maljan.reporting.section_agreement:_row_violations`
+- **Raised at** `maljan.reporting.section_agreement:_answer_violations`, `maljan.reporting.section_agreement:_row_violations`
 - **Constant** `maljan.reporting.section_agreement:UNKNOWN_SOURCE_CODE`
 - **Docs** none
 
