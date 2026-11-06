@@ -193,7 +193,18 @@ def test_a_procedure_is_a_passage_written_without_the_code_and_may_be_rewritten(
     assert procedure.kind == CLAIM_LED and procedure.write is not None
     assert "procedure for T1564.003" in procedure.label
     rewrite = "The runner 0x1030 starts each command with SW_HIDE [ev_0109]."
-    done = _ask(report, {"sentences": [_row("procedures.1", HIDDEN, ["discovery"], rewrite)]})
+    # The persistence sentence calling 0x7504's body not read is held (T-562):
+    # the answer lists it too, kept.
+    unread = {
+        "passage": "persistence_detail",
+        "sentence": UNREAD,
+        "sources": ["listed.1"],
+        "decision": "keep",
+    }
+    done = _ask(
+        report,
+        {"sentences": [_row("procedures.1", HIDDEN, ["discovery"], rewrite), unread]},
+    )
     (row,) = report.technical_analysis.technique_procedures
     assert row.procedure == rewrite
     assert row.evidence_refs == ["ev_0109"]

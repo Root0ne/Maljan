@@ -37,6 +37,14 @@ from maljan.pipeline.validation import (
     absence_holders_note,
     ledger_absence_contradictions,
 )
+from maljan.reporting.section_agreement import (
+    _reports_a_claim,
+    _said_unread,
+    _unread_addresses,
+    closing_negations,
+    unread_listed_sentences,
+    whole_code_absences,
+)
 from maljan.schemas.evidence import build_entry
 from tests.linear_cost import TIME_RATIO_LIMIT, cpu_seconds
 
@@ -79,6 +87,8 @@ ENTRIES = EntryTexts.from_ledger(
     ]
 )
 LEDGER = [{"id": "ev_0001", "tool": "t", "structured": {"matches": [], "total": 12}}]
+# A fact about a routine an entry lists, as the agreement round reads it.
+LISTED = [SimpleNamespace(addresses=frozenset({0x1400}), id="listed.1")]
 
 
 @pytest.mark.parametrize(
@@ -232,6 +242,15 @@ LEDGER = [{"id": "ev_0001", "tool": "t", "structured": {"matches": [], "total": 
             ),
             id="claim numbers read for no analyst",
         ),
+        pytest.param(
+            lambda t: unread_listed_sentences(t, LISTED),  # type: ignore[arg-type]
+            id="sentences calling listed code unread",
+        ),
+        pytest.param(lambda t: _unread_addresses(t, t), id="addresses said unread"),
+        pytest.param(lambda t: _said_unread([SimpleNamespace(text=t)]), id="said unread"),  # type: ignore[list-item]
+        pytest.param(whole_code_absences, id="whole-code absences"),
+        pytest.param(closing_negations, id="closing negations"),
+        pytest.param(_reports_a_claim, id="a reported claim"),
     ],
 )
 def test_four_times_the_hostile_line_stays_under_the_ratio(read: Callable[[str], object]) -> None:

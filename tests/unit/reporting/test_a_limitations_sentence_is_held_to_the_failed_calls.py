@@ -346,12 +346,17 @@ def test_a_paragraph_is_left_as_written_where_no_call_failed() -> None:
 )
 def test_a_rewrite_citing_the_call_that_redid_it_is_put_in(rewrite: str) -> None:
     report = _report()
-    done, _ = _ask(report, _ledger(), {"sentences": [_row(FALSE, ["failed.1"], rewrite)]})
+    # The other sentence denies an observation: it is held too (T-562), and kept.
+    kept = {"passage": "limitations", "sentence": OTHER, "sources": ["failed.1"]}
+    rows = [_row(FALSE, ["failed.1"], rewrite), {**kept, "decision": "keep"}]
+    done, _ = _ask(report, _ledger(), {"sentences": rows})
     body = report.technical_analysis.analyst_limitations.body
     assert body == f"{rewrite} {OTHER}"
     assert report.technical_analysis.analyst_limitations.evidence_refs == ["ev_0001", "ev_0003"]
     assert done.summary["rewritten"] == 1
+    # Kept on a fact or a section 5 passage: counted, not recorded (T-562).
     assert [r["code"] for r in done.tally.unresolved] == [REWRITTEN_CODE]
+    assert done.summary["held_kept"] == 1
 
 
 @pytest.mark.parametrize(
@@ -529,15 +534,23 @@ def _stored_names() -> list[str]:
     )
 
 
+# The runs whose limitations say a call failed that a later call redid: haiku8's
+# reversing tools, and haiku10's "A batch emulation step did not complete", whose
+# emulation by a comma text was asked again with the list (T-562).
+_HELD_TO_FAILED_CALLS = ("haiku8", "haiku10")
+
+
 @pytest.mark.parametrize("name", _stored_names())
-def test_no_stored_run_but_haiku8_holds_its_limitations_to_the_failed_calls(name: str) -> None:
+def test_no_stored_run_but_haiku8_and_haiku10_hold_their_limitations_to_the_failed_calls(
+    name: str,
+) -> None:
     report, ledger = _stored(name)
     held = [
         p.id
         for p in passages_of(report, entries=ledger)
         if p.id == "limitations" and p.sourced_check is not None
     ]
-    assert held == (["limitations"] if name == "haiku8" else [])
+    assert held == (["limitations"] if name in _HELD_TO_FAILED_CALLS else [])
 
 
 def test_a_call_a_later_call_answered_but_did_not_redo_is_not_redone() -> None:

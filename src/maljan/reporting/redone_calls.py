@@ -37,13 +37,25 @@ agreement question reads them, ``agreement_facts``, T-396):
   different folders that hold the same file name (``a/x.exe``, ``b/x.exe``)
   are read as one program.
 
+A value given again as the same items in another shape (a comma-separated
+text given again as a list holding every one of its items, and more) is the
+same question, never a narrower one: haiku11's emulations refused a comma text
+("No candidates provided") and were asked again with the list (T-562).
+
+A call asked for no address (a scan, a lookup, an emulation by candidate
+names) is redone by a later call of the same tool that asked the same
+question: every argument, address arguments included, the failed call's, but
+for the refusal's fix and a value given again in another shape (haiku11's
+byte reads refused a quoted offset and were asked again with the number,
+T-562). Another call of the same tool with other arguments asks another
+question.
+
 The answering call must hold its answer whole (``holds_its_answer``, and
 nothing cut by the byte budget or the tool-output guardrail), and an answer
-that is error text answers nothing, a listing or not. A call asked for no address (a scan, a
-lookup, an emulation by candidate names) has nothing to be matched by, and
-stays a failure. The rows are the platform's own ids and the tool's name,
-cleaned to one capped line; the failure itself is still counted and listed
-where the run's counts are (``run_summary.evidence.failed`` and ``failures``).
+that is error text answers nothing, a listing or not. The rows are the
+platform's own ids and the tool's name, cleaned to one capped line; the
+failure itself is still counted and listed where the run's counts are
+(``run_summary.evidence.failed`` and ``failures``).
 """
 
 from __future__ import annotations
@@ -122,43 +134,149 @@ def _cut(answering: Any) -> bool:
     return answer_not_shown(answering) or not holds_its_answer(answering)
 
 
-def _changed(failed: Any, answering: Any) -> Iterator[tuple[str, bool, bool]]:
-    """Each argument, but for the addresses, a later call set to another value than the failed one.
+def _items(value: Any) -> tuple[list[str], bool]:
+    """``value`` as the items it gives, and whether it is written as a list.
 
-    ``(name, added, fixed)``: ``added`` when the failed call left it absent or
-    null; ``fixed`` when the failure's own message names it (an added one) or
-    the value it refused (a set one, replaced by a value not narrower). An
-    argument the redo leaves absent or null is no change.
+    A list, or a text that reads as a JSON list, gives its items; any other
+    text gives its comma-separated parts. Each item is one stripped text; an
+    empty one is left out.
     """
+    shaped = value
+    if isinstance(value, str) and value.lstrip().startswith("["):
+        import json
+
+        try:
+            shaped = json.loads(value)
+        except ValueError:
+            shaped = value
+    if isinstance(shaped, list | tuple):
+        return [text for text in (str(item).strip() for item in shaped) if text], True
+    return [text for text in (part.strip() for part in str(value).split(",")) if text], False
+
+
+def _reshaped(before: Any, after: Any) -> bool:
+    """Whether ``after`` gives every item ``before`` gave, written in another shape.
+
+    One side a list and the other not: a comma-separated text given again as
+    a list holding each of its items (and maybe more) asks what it asked, never
+    less.
+    """
+    was, was_list = _items(before)
+    now, now_list = _items(after)
+    return bool(was) and was_list != now_list and set(was) <= set(now)
+
+
+def _same_value(before: Any, after: Any, named: bool) -> bool:
+    """Whether ``after`` is the refused ``before`` in another spelling.
+
+    Quotes around a text are no part of it; two numbers are one where they are
+    equal (``"0xf000"`` and ``61440``). Case is kept: ``MZ`` is not ``mz``. A
+    bare hex text is read as hex only beside a number and only where the
+    failure's message names the refused value (``572d5d8e`` refused, asked as
+    ``0x572d5d8e``): ``a`` is never ``10``.
+    """
+    was = str(before).strip().strip("\"'`").strip()
+    now = str(after).strip().strip("\"'`").strip()
+    if was == now:
+        return True
+    left, right = _number(was), _number(now)
+    if left is not None and right is not None:
+        return left == right
+    if not named:
+        return False
+    if left is None and right is not None and re.fullmatch(r"[0-9a-fA-F]+", was):
+        return int(was, 16) == right
+    if right is None and left is not None and re.fullmatch(r"[0-9a-fA-F]+", now):
+        return int(now, 16) == left
+    return False
+
+
+def _program_argument(entry: Any) -> str:
+    """The argument an entry's tool declares to name the program, or ``""``."""
+    from maljan.core.declared_reading import kind_free_facts
+
+    roles = getattr(kind_free_facts(entry), "arguments", None)
+    return str(roles.get("program") or "") if isinstance(roles, Mapping) else ""
+
+
+def _changed(
+    failed: Any, answering: Any, *, by_address: bool = True, sample: Sequence[str] = ()
+) -> Iterator[tuple[str, bool, bool]]:
+    """Each argument a later call set to another value than the failed one.
+
+    The address arguments are left out when the calls are matched by address
+    (``by_address``). ``(name, added, fixed)``: ``added`` when the failed call
+    left it absent or null; ``fixed`` when the failure's own message names it
+    (an added one) or the value it refused (a set one, replaced by a value not
+    narrower), or the redo gives the same items in another shape
+    (:func:`_reshaped`). An argument the redo leaves absent or null is no
+    change.
+
+    A call asked for no address (not ``by_address``) is matched on every
+    argument, and its question is its values: a refused value is fixed only
+    when the redo gives the same value in another spelling (``"0xf000"`` as
+    ``61440``, :func:`_same_value`) or the same items in another shape. A value
+    the redo leaves absent or null is another question (a name looked up, a
+    pattern searched), but for the program the tool declares an argument for,
+    whose refused value the failure's message names and is the run's own
+    sample by the pipeline pack's record (``image_range._sample_names``): left
+    out, the server's own program, the sample, is asked the same question; a
+    refused other file (a dropped payload) left out asks about the sample, another
+    question.
+    """
+    from maljan.agents.image_range import same_program
     from maljan.core.undeclared_tools import entry_address_arguments
     from maljan.pipeline.validation import _ADDRESS_LIST_ARGUMENTS
 
-    skip = {*entry_address_arguments(failed), *entry_address_arguments(answering)}
-    skip.update(_ADDRESS_LIST_ARGUMENTS)
+    skip: set[str] = set()
+    if by_address:
+        skip = {*entry_address_arguments(failed), *entry_address_arguments(answering)}
+        skip.update(_ADDRESS_LIST_ARGUMENTS)
     asked = getattr(failed, "args", None) or {}
     again = getattr(answering, "args", None) or {}
     message = str(getattr(failed, "error", "") or getattr(failed, "output", "") or "")
+    program = "" if by_address else _program_argument(failed)
     for name in sorted({*asked, *again} - skip, key=str):
         before, after = asked.get(name), again.get(name)
-        if _empty(after) or before == after or str(before) == str(after):
+        if before == after or str(before) == str(after) or (_empty(before) and _empty(after)):
+            continue
+        refused = str(before)
+        named = len(refused) >= _NAMED_VALUE_CHARS and refused in message
+        if _empty(after):
+            if by_address:
+                continue
+            # Left out, the server's own program is asked: the same question
+            # only where the refused one is the run's own sample.
+            own = any(same_program(refused, held) for held in sample)
+            yield str(name), False, named and own and bool(program) and str(name) == program
             continue
         if _empty(before):
             yield str(name), True, _names_argument(message, str(name))
             continue
-        refused = str(before)
-        named = len(refused) >= _NAMED_VALUE_CHARS and refused in message
-        yield str(name), False, named and not _narrower(before, after)
+        if by_address:
+            fixed = named and not _narrower(before, after)
+        else:
+            fixed = _same_value(before, after, named)
+        yield str(name), False, fixed or _reshaped(before, after)
 
 
-def _same_question(failed: Any, answering: Any) -> bool:
+def _same_question(
+    failed: Any, answering: Any, *, by_address: bool = True, sample: Sequence[str] = ()
+) -> bool:
     """Whether a later call of the failed call's tool asked what it asked, but for its addresses.
 
     Never a narrower question: an argument only the redo sets, unless the
     failure named it, and a refused value replaced by a smaller number, each
     make it another question. The answer is whole: ``_answers`` keeps no cut
-    one.
+    one. Without ``by_address`` the addresses are read like every other
+    argument.
     """
-    return all(fixed for _name, _added, fixed in _changed(failed, answering))
+    return all(
+        fixed
+        for _name, _added, fixed in _changed(
+            failed, answering, by_address=by_address, sample=sample
+        )
+    )
 
 
 def _changes_a_set_value(failed: Any, answering: Any) -> bool:
@@ -245,7 +363,9 @@ def redone_failures(ledger: Iterable[Any]) -> list[dict[str, Any]]:
     Only a call ``run_summary.evidence`` counts as failed (one that ran: not
     answered from an earlier entry). Each row is ``{"entry_id", "tool",
     "answered_by"}``, the first later answer for each address, in ledger
-    order. Empty when nothing failed, without reading the ledger further.
+    order; for a call asked for no address, the first later call of its tool
+    that asked the same question. Empty when nothing failed, without reading
+    the ledger further.
     """
     entries = list(ledger)
     failed_at = [
@@ -261,11 +381,42 @@ def redone_failures(ledger: Iterable[Any]) -> list[dict[str, Any]]:
 
     bases = tuple(build_function_map(entries, None, ()).image_bases)
     answers = [at for at, entry in enumerate(entries) if _answers(entry)]
+    held: list[tuple[str, ...]] = []
+
+    def _sample() -> tuple[str, ...]:
+        # The run's own sample by the platform's record: the names the
+        # pipeline's own pack answers read it by, never a failure's message.
+        if not held:
+            from maljan.agents.image_range import _sample_names
+            from maljan.pipeline.triage_pack import pack_entries
+
+            held.append(_sample_names(pack_entries(entries)))
+        return held[0]
+
     out: list[dict[str, Any]] = []
     for at in failed_at:
         failed = entries[at]
         asked = {one_spelling(address, bases) for address in asked_addresses(failed)}
         if not asked:
+            # Nothing to match by address: the same question, every argument read.
+            again = next(
+                (
+                    later
+                    for later in answers
+                    if later > at
+                    and getattr(entries[later], "tool", None) == getattr(failed, "tool", None)
+                    and _same_question(failed, entries[later], by_address=False, sample=_sample())
+                ),
+                None,
+            )
+            if again is not None:
+                out.append(
+                    {
+                        "entry_id": str(getattr(failed, "id", "") or ""),
+                        "tool": _tool(failed),
+                        "answered_by": [str(getattr(entries[again], "id", "") or "")],
+                    }
+                )
             continue
         lists_code = entry_lists_any_code(failed)
         by: dict[int, int] = {}
