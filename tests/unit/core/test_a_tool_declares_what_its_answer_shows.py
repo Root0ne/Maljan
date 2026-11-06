@@ -119,13 +119,16 @@ class TestTheDigests:
         # itself (T-418 PR1b), these fields with them. Ghidra's moved when its
         # block declared its data-label prefix (``data_label_prefixes``, T-426),
         # and when its tools came to be read from its listing under its
-        # block's statement (T-418 PR4).
+        # block's statement (T-418 PR4). The knowledge and network servers'
+        # moved when the environment names they require took the product's new
+        # name (T-576); with the previous names they are still b261c17f07e13ef9
+        # and 7211e6023885a063.
         settings = Settings(_env_file=None)
         for key in ("knowledge", "network"):
             object.__setattr__(settings.mcp.servers[key], "trusts_served_declaration", False)
         digests = ToolDeclarations.from_settings(settings).digests()
-        assert digests["mcp:knowledge"] == "b261c17f07e13ef9"
-        assert digests["mcp:network"] == "7211e6023885a063"
+        assert digests["mcp:knowledge"] == "30ce9bdcc7185ff8"
+        assert digests["mcp:network"] == "a0714e209e262efd"
         assert digests["provider:ghidra"] == "01e22fee1043d4c4"
         assert digests["sandbox"] == "c2bf77971e47dfa4"
 

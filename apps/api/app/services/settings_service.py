@@ -22,6 +22,7 @@ from malspark.core.plugins import (
     id_refusal,
     install_allow_list,
 )
+from malspark.core.previous_name import PREVIOUS_NAME
 from malspark.core.settings_catalog import PLUGIN_CHOICE_KINDS, _registry_choices
 from malspark.core.settings_masking import (
     mask_left_in,
@@ -609,8 +610,10 @@ NESTED_SECRET_MAPS: tuple[NestedSecretMap, ...] = (ARMS, SOURCE_SECRETS)
 _NESTED_BY_KEY = {spec.key: spec for spec in NESTED_SECRET_MAPS}
 NESTED_SECRET_KEYS = frozenset(_NESTED_BY_KEY)
 # Rows a start-up repair writes to record that it is done. Their keys sit
-# outside every settings namespace and are never read as a setting.
-MARKER_PREFIX = "malspark.repair."
+# outside every settings namespace and are never read as a setting. The prefix
+# keeps the product's previous name (``malspark.core.previous_name``): the
+# markers an earlier release wrote are rows in every existing database.
+MARKER_PREFIX = f"{PREVIOUS_NAME}.repair."
 # The settings audit rows written before their values were masked are masked
 # (``composite_secrets.mask_audited_settings``).
 AUDIT_MASKED_MARKER = f"{MARKER_PREFIX}settings_audit_masked"

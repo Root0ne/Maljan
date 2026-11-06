@@ -296,8 +296,11 @@ class TestTheDigests:
         # Its trust in its server's own declaration (T-418) moved its digest,
         # and so did its tool table's removal: the server declares its tools
         # itself (T-418 PR1b), so its block is its trust, roles and launch alone.
+        # It moved once more when the environment names it requires took the
+        # product's new name (T-576); with the previous names it is still
+        # b261c17f07e13ef9.
         settings = Settings(_env_file=None)
         assert settings.mcp.servers["knowledge"].trusts_served_declaration is True
         object.__setattr__(settings.mcp.servers["knowledge"], "trusts_served_declaration", False)
         digests = ToolDeclarations.from_settings(settings).digests()
-        assert digests["mcp:knowledge"] == "b261c17f07e13ef9"
+        assert digests["mcp:knowledge"] == "30ce9bdcc7185ff8"

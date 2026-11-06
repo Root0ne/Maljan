@@ -27,18 +27,24 @@ from typing import Any
 from pydantic import BaseModel
 
 from malspark.core.logger import logger
+from malspark.core.previous_name import PREVIOUS_NAME
 from malspark.schemas.isr_models import Artifact, Finding, OpenQuestion
 
+# The language tags that name the block: the one the prompt asks for, and the
+# one an answer stored before the product's rename (T-576) carries.
+_TAG = "malspark-findings"
+_TAGS = (_TAG, f"{PREVIOUS_NAME}-findings")
+_TAG_RE = "(?:" + "|".join(re.escape(tag) for tag in _TAGS) + ")"
 # The fence, with the language tag that names it. Non-greedy so an answer that
 # somehow carries two blocks yields two matches rather than one that swallows
 # the prose between them.
 _BLOCK_RE = re.compile(
-    r"```[ \t]*malspark-findings[ \t]*\r?\n(?P<body>.*?)```",
+    r"```[ \t]*" + _TAG_RE + r"[ \t]*\r?\n(?P<body>.*?)```",
     re.DOTALL | re.IGNORECASE,
 )
 # The opening fence alone: a block cut before its closing fence (an answer the
 # output cap ended inside the block) has this and no end.
-_OPEN_RE = re.compile(r"```[ \t]*malspark-findings[ \t]*\r?\n", re.IGNORECASE)
+_OPEN_RE = re.compile(r"```[ \t]*" + _TAG_RE + r"[ \t]*\r?\n", re.IGNORECASE)
 
 
 # A claim heading in the text after an unclosed fence.
@@ -82,7 +88,7 @@ def parse_findings_block(text: str) -> FindingsBlock:
     the common case and must stay free: the channel is optional and a model
     that ignores it is not misbehaving.
     """
-    if not text or "malspark-findings" not in text:
+    if not text or not any(tag in text.lower() for tag in _TAGS):
         return FindingsBlock(text or "")
 
     findings: list[Finding] = []

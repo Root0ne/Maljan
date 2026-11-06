@@ -35,6 +35,7 @@ from app.services.report_service import (
     ioc_feed_rows,
     with_current_iocs,
 )
+from malspark.core.previous_name import PREVIOUS_NAME
 from malspark.memory.attck_loader import technique_entry
 from malspark.reporting.builder import build_consolidated_iocs
 from malspark.reporting.misp import build_misp_attributes
@@ -732,7 +733,7 @@ class TestTheMispAttributes:
         assert first == second
         assert len({a["uuid"] for a in first}) == len(first)
         expected = uuid.uuid5(
-            uuid.uuid5(uuid.NAMESPACE_URL, "malspark:misp-attribute"), f"{OWNER}|md5|{MD5}"
+            uuid.uuid5(uuid.NAMESPACE_URL, f"{PREVIOUS_NAME}:misp-attribute"), f"{OWNER}|md5|{MD5}"
         )
         assert next(a["uuid"] for a in first if a["value"] == MD5) == str(expected)
         assert not {a["uuid"] for a in first} & {a["uuid"] for a in other}
@@ -760,9 +761,8 @@ class TestTheMispAttributes:
 
         assert isinstance(report.misp_attributes, list)
         (attribute,) = [a for a in report.misp_attributes if a["value"] == SHA256]
-        expected = uuid.uuid5(
-            uuid.uuid5(uuid.NAMESPACE_URL, "malspark:misp-attribute"), f"{OWNER}|sha256|{SHA256}"
-        )
+        namespace = uuid.uuid5(uuid.NAMESPACE_URL, f"{PREVIOUS_NAME}:misp-attribute")
+        expected = uuid.uuid5(namespace, f"{OWNER}|sha256|{SHA256}")
         assert attribute["uuid"] == str(expected)
 
 

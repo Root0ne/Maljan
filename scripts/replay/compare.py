@@ -56,6 +56,8 @@ from scripts.replay.record import (
     value_free_subject,
 )
 
+from malspark.core.previous_name import CURRENT_NAME, PREVIOUS_NAME
+
 # What a ref's replay is made of: the project root marker, the rules, the
 # tables they read, and the harness that replays them. ``data/samples`` is
 # left out: a sample is never copied.
@@ -128,8 +130,14 @@ def materialise(repo: Path, ref: str, into: Path) -> Path:
     into.mkdir(parents=True)
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         tar.extractall(into, filter="data")  # nosec B202 — our own archive, the data filter
-    if not (into / "src" / "malspark").is_dir() or not (into / "pyproject.toml").is_file():
-        raise CompareError(f"{ref} has no src/malspark tree or no pyproject.toml")
+    # A ref from before the product's rename (T-576) holds its package under
+    # the previous name; its own harness imports it by that name.
+    packages = (CURRENT_NAME, PREVIOUS_NAME)
+    if (
+        not any((into / "src" / p).is_dir() for p in packages)
+        or not (into / "pyproject.toml").is_file()
+    ):
+        raise CompareError(f"{ref} has no src/{CURRENT_NAME} tree or no pyproject.toml")
     return into
 
 
@@ -155,6 +163,10 @@ def replay_under(
     cache = out.with_name(f"{out.stem}-attck")
     cache.mkdir(parents=True, exist_ok=True)
     env[ATTCK_CACHE_VARIABLE] = str(cache.resolve())
+    # The same variable under the previous name, for a ref from before the
+    # rename, so its harness reads the comparison's cache as well.
+    previous = PREVIOUS_NAME.upper() + ATTCK_CACHE_VARIABLE.removeprefix(CURRENT_NAME.upper())
+    env[previous] = str(cache.resolve())
     if out.exists():
         out.unlink()
     command = [

@@ -254,12 +254,15 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # descends from a process running the sample (T-494): explorer.exe under
 # sihost.exe leaves the table, which has no row left and is not printed; nothing else
 # changed.
+# Re-pinned when the product took its new name (T-576): the HTML's generator
+# line names Malspark; with the previous name each HTML digest is the one
+# pinned before, and the Markdown did not change.
 STORED_RENDERS = {
-    "run7": ("87ad1594f3cbc6ea", "125193da10162be9"),
-    "run5": ("4fbb0b856aea7f8e", "60e2582c1e229b35"),
-    "run4": ("581eb11ec3924a68", "75af799857a50862"),
-    "local8": ("058e0d21f925bb0e", "8148921046a3b91c"),
-    "haiku4": ("06a395f0432b80a2", "eaaa767d3f812838"),
+    "run7": ("87ad1594f3cbc6ea", "f8c2570b24983f04"),
+    "run5": ("4fbb0b856aea7f8e", "827d5f7ebdee3768"),
+    "run4": ("581eb11ec3924a68", "0d81125d321278da"),
+    "local8": ("058e0d21f925bb0e", "6016e1c49686fbb1"),
+    "haiku4": ("06a395f0432b80a2", "a56231bf54979dba"),
 }
 
 

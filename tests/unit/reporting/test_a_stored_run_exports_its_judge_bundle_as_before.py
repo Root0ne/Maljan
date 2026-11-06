@@ -30,12 +30,15 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # Re-pinned when a process the sample's lineage rule leaves out of its tree
 # came to say so (T-511): each desktop process carries
 # ``x_malspark_sample_process_tree: false``, and nothing else changed.
+# Re-pinned when the product took its new name (T-576): the producer's name and
+# the ``x_malspark_*`` properties; with the previous name each is the digest
+# pinned before.
 STORED_EXPORTS = {
-    "run7": "8ef468699faaa757",
-    "run5": "5dcfdb861872d1c3",
-    "run4": "a4ab66a0f4282d6c",
-    "local8": "d4732f60257652b8",
-    "haiku4": "1058469a77c8efa0",
+    "run7": "9f3586c36e867b3e",
+    "run5": "3abdff0c8db7948c",
+    "run4": "4cf5568e843e294e",
+    "local8": "d5d7b39ea49f8f5c",
+    "haiku4": "ac8035fc45db4cdf",
 }
 # ``(markdown, html with the nonce "fixed", normalised STIX)`` for haiku4. The
 # Markdown and HTML were re-pinned when a sample's, a tool's or a finding's text
@@ -65,7 +68,10 @@ STORED_EXPORTS = {
 # The STIX re-pinned when the desktop processes outside the sample's tree came
 # to say so (T-511: five carry ``x_malspark_sample_process_tree: false``); the
 # Markdown and HTML did not change.
-HAIKU4_RENDERS = ("06a395f0432b80a2", "eaaa767d3f812838", "59a81cbf1f25c42e")
+# The HTML and the STIX re-pinned when the product took its new name (T-576):
+# the generator line, the producer's name and the ``x_malspark_*`` properties;
+# with the previous name each is the digest pinned before.
+HAIKU4_RENDERS = ("06a395f0432b80a2", "a56231bf54979dba", "7796b8f69c8a6a3b")
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})")

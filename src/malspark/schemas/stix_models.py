@@ -45,7 +45,29 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from malspark.core.previous_name import PREVIOUS_NAME
 from malspark.schemas.judgement import JudgeAssessment
+
+# A custom property a bundle stored before the product's rename (T-576) names
+# under the previous name; read as the same property (``x_malspark_*``).
+_PREVIOUS_PROPERTY_PREFIX = f"x_{PREVIOUS_NAME}_"
+_PROPERTY_PREFIX = "x_malspark_"
+
+
+def current_property_names_in_place(bundle: dict[str, Any]) -> None:
+    """Rename a raw bundle's and its objects' ``x_<previous name>_*`` keys, in place.
+
+    For a judge answer stored before the rename, read before the schema: each
+    dict stays the same object (callers key the objects by identity), and a key
+    already under the current name wins over its previous-name twin.
+    """
+    holders = [bundle, *(o for o in bundle.get("objects") or [] if isinstance(o, dict))]
+    for held in holders:
+        for key in [
+            k for k in held if isinstance(k, str) and k.startswith(_PREVIOUS_PROPERTY_PREFIX)
+        ]:
+            value = held.pop(key)
+            held.setdefault(_PROPERTY_PREFIX + key[len(_PREVIOUS_PROPERTY_PREFIX) :], value)
 
 
 def _generate_uuid() -> str:
@@ -118,6 +140,23 @@ class _SpecConformantModel(BaseModel):
     is serialised in several places (renderer, API, long-term memory) and a rule that
     holds only where somebody remembered to pass a flag is not a rule.
     """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _current_property_names(cls, data: Any) -> Any:
+        """A stored object's ``x_<previous name>_*`` properties under their current names."""
+        if isinstance(data, dict) and any(
+            isinstance(key, str) and key.startswith(_PREVIOUS_PROPERTY_PREFIX) for key in data
+        ):
+            return {
+                (
+                    _PROPERTY_PREFIX + key[len(_PREVIOUS_PROPERTY_PREFIX) :]
+                    if isinstance(key, str) and key.startswith(_PREVIOUS_PROPERTY_PREFIX)
+                    else key
+                ): value
+                for key, value in data.items()
+            }
+        return data
 
     def model_dump(self, **kwargs: Any) -> dict[str, Any]:
         kwargs.setdefault("exclude_none", True)

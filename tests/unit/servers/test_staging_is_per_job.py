@@ -1151,12 +1151,17 @@ class TestASandboxCaptureBelongsToItsJob:
 
     def test_the_shared_directory_is_no_longer_written(self) -> None:
         """Nothing composes the old path any more; the sweep names it, and the
-        one place it is named is the sweep."""
+        one place it is named is the sweep. Its name is the one the release
+        before wrote, under the product's previous name (T-576), built in
+        ``staging`` from the one constant that spells it."""
+        from malspark.core.previous_name import PREVIOUS_NAME
+
+        assert staging.LEGACY_CAPTURE_DIR_NAME == f"{PREVIOUS_NAME}-cape-pcap"
         root = Path(__file__).resolve().parents[3]
         written = [
             path
             for path in (root / "src" / "malspark").rglob("*.py")
-            if staging.LEGACY_CAPTURE_DIR_NAME in path.read_text(encoding="utf-8")
+            if "-cape-pcap" in path.read_text(encoding="utf-8")
         ]
 
         assert [path.name for path in written] == ["staging.py"]

@@ -47,6 +47,7 @@ from malspark.agents.run_evidence_corpus import read_of_entry as _read_of_entry
 from malspark.analysis.corroboration import support_sentence
 from malspark.analysis.technique_ids import written_technique_id
 from malspark.core.logger import logger
+from malspark.core.previous_name import PREVIOUS_NAME
 from malspark.core.tool_declarations import select
 from malspark.extractors.network_extractor import (
     address_is_publishable,
@@ -1706,8 +1707,10 @@ _ATTACK_PATTERN_NAMESPACE = ATTACK_PATTERN_NAMESPACE
 
 # This platform's identity, the producer every exported object names. Derived
 # in the same namespace, so it is the same object in every export and a
-# consumer holding many of them holds one producer.
-PRODUCER_IDENTITY_ID = f"identity--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, 'malspark')}"
+# consumer holding many of them holds one producer. Derived from the product's
+# previous name (``malspark.core.previous_name``), so every bundle exported
+# before the rename and after it names the same producer.
+PRODUCER_IDENTITY_ID = f"identity--{uuid.uuid5(_ATTACK_PATTERN_NAMESPACE, PREVIOUS_NAME)}"
 
 
 def _pattern_id_for(technique_id: str) -> str:

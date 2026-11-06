@@ -541,7 +541,10 @@ class TestAgainstTheSequentialBase:
     more; the retries and the findings are the base's, the technique named.
     The request bodies were re-pinned when rule 2 of the system text came to
     ask for what a fact shows in the sample's terms instead of a named and
-    refuted claim (T-560): that sentence is the only change.
+    refuted claim (T-560): that sentence is the only change. The HTML digest
+    was recaptured when the product took its new name (T-576): the HTML's
+    generator line is the only change; the report digest stays as the test
+    computes it.
     """
 
     def test_the_requests_and_the_report_are_those_of_the_base(self) -> None:

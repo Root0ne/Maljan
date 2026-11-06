@@ -23,12 +23,15 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
+from malspark.core.previous_name import PREVIOUS_NAME
 from malspark.reporting.renderers.stix_renderer import digest_label, publishes
 
 # The namespace each attribute's uuid is derived in, with the report's own id
 # (or its job's) and the attribute's type and value: the same report always
 # yields the same uuids, and two reports sharing a value yield two attributes.
-_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "malspark:misp-attribute")
+# Named under the product's previous name (``malspark.core.previous_name``):
+# an attribute a MISP instance already holds keeps its uuid on a re-export.
+_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, f"{PREVIOUS_NAME}:misp-attribute")
 
 # The IOC table's digest types, as MISP names the attribute.
 _HASH_TYPES = {

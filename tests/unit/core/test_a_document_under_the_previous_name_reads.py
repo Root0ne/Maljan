@@ -68,3 +68,49 @@ def test_a_changed_snapshot_is_still_refused(tmp_path: Path, monkeypatch: Any) -
             legacy_tool_facts._document()
     finally:
         legacy_tool_facts._document.cache_clear()
+
+
+def test_an_answer_stored_with_the_previous_findings_tag_is_parsed() -> None:
+    from malspark.agents.findings_block import has_findings_block, parse_findings_block
+
+    body = '{"findings": [{"title": "a"}]}'
+    stored = f"prose\n\n```{PREVIOUS_NAME}-findings\n{body}\n```"
+    current = f"prose\n\n```{CURRENT_NAME}-findings\n{body}\n```"
+    assert has_findings_block(stored)
+    old, new = parse_findings_block(stored), parse_findings_block(current)
+    assert old.prose == new.prose == "prose"
+    assert [f.title for f in old.findings] == [f.title for f in new.findings] == ["a"]
+
+
+def test_a_bundle_stored_with_previous_name_properties_reads_them() -> None:
+    from malspark.schemas.stix_models import Bundle
+
+    stored = {
+        "type": "bundle",
+        "id": "bundle--1",
+        "objects": [],
+        f"x_{PREVIOUS_NAME}_fallback_verdict": {"decision": "Malware", "source": "pipeline"},
+    }
+    current = dict(stored)
+    current[f"x_{CURRENT_NAME}_fallback_verdict"] = current.pop(
+        f"x_{PREVIOUS_NAME}_fallback_verdict"
+    )
+    old, new = Bundle.model_validate(stored), Bundle.model_validate(current)
+    assert old.x_malspark_fallback_verdict is not None
+    assert old.model_dump(mode="json") == new.model_dump(mode="json")
+
+
+def test_identifiers_external_stores_hold_keep_their_values() -> None:
+    """A MISP attribute's uuid, the STIX producer's id and the repair markers stay as written."""
+    import uuid
+
+    from app.services.settings_service import MARKER_PREFIX
+    from malspark.reporting import misp
+    from malspark.reporting.renderers import stix_renderer
+    from malspark.schemas.stix_models import ATTACK_PATTERN_NAMESPACE
+
+    assert misp._NAMESPACE == uuid.uuid5(uuid.NAMESPACE_URL, f"{PREVIOUS_NAME}:misp-attribute")
+    assert stix_renderer.PRODUCER_IDENTITY_ID == (
+        f"identity--{uuid.uuid5(ATTACK_PATTERN_NAMESPACE, PREVIOUS_NAME)}"
+    )
+    assert MARKER_PREFIX == f"{PREVIOUS_NAME}.repair."

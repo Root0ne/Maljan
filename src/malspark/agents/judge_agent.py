@@ -5188,6 +5188,7 @@ class JudgeAgent(BudgetMeter):
                 postprocess_judge_bundle,
                 read_judge_assessment,
             )
+            from malspark.schemas.stix_models import current_property_names_in_place
 
             # Before the schema, and before anything that walks the objects: an
             # item the Bundle cannot hold fails the whole model, and the judge's
@@ -5203,6 +5204,9 @@ class JudgeAgent(BudgetMeter):
                 for index, obj in enumerate(data.get("objects") or [])
                 if isinstance(obj, dict)
             }
+            # An answer stored before the product's rename names its custom
+            # properties under the previous name: read as the current ones.
+            current_property_names_in_place(data)
             lifted = lift_misplaced_extensions(data)
             if record is not None:
                 record.extend(lifted)
