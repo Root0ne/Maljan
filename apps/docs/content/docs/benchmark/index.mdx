@@ -4,7 +4,7 @@ description: "The latest scored run: one real sample, a key of 57 facts from pub
 ---
 
 export const run = {
-  name: 'haiku12',
+  name: 'haiku13',
   date: '2026-11-06',
   model: 'Claude Haiku 5.5',
   effort: 'high for the analysts and the judge; medium for the mediator, the summariser and the reporter',
@@ -15,29 +15,28 @@ export const run = {
   sandbox: 'Hatching Triage',
   memory: 'an empty long-term memory, with earlier runs ignored',
   items: 57,
-  found: 49,
-  partlyBody: 5,
+  found: 46,
+  partlyBody: 9,
   partlyDump: 1,
-  missed: 2,
+  missed: 1,
   wrong: 0,
-  beyondHuman: 57,
-  calls: 170,
-  seconds: 5623,
-  usd: '10.15',
-  inputTokens: '24.19 M',
-  cachedTokens: '15.46 M',
-  outputTokens: '2.11 M',
-  ledgerEntries: 171,
-  failedCalls: 6,
-  redoneCalls: 6,
-  debateRounds: 5,
-  debateEnd: 'the round limit',
-  techniques: 24,
+  beyondHuman: 58,
+  beyondHumanStrict: 57,
+  calls: 129,
+  seconds: 5028,
+  usd: '8.24',
+  inputTokens: '19.90 M',
+  cachedTokens: '12.16 M',
+  outputTokens: '1.47 M',
+  ledger: '149 entries; 1 call failed, and a later disassembly of the same routine redid it',
+  debate: 'consensus after 3 rounds (2 of them followed by revisions), with no blocking line left',
+  techniques: 22,
   degraded: false,
+  spendNote: 'The debate is the largest single share of the spend, about a third; the reporter and the reverser come next. Prompts above 100,000 tokens are billed at the long-context rate, and 105 of the 129 calls passed that line.',
   groups: [
-    ['K1', 'Identity', 5, 4, 0, 1, 0, 0],
+    ['K1', 'Identity', 5, 3, 2, 0, 0, 0],
     ['K2', 'Execution flow', 6, 6, 0, 0, 0, 0],
-    ['K3', 'Anti-analysis', 7, 6, 0, 0, 1, 0],
+    ['K3', 'Anti-analysis', 7, 4, 2, 1, 0, 0],
     ['K4', 'Identifiers', 3, 2, 1, 0, 0, 0],
     ['K5', 'Persistence', 3, 3, 0, 0, 0, 0],
     ['K6', 'Command and control', 7, 5, 2, 0, 0, 0],
@@ -47,13 +46,16 @@ export const run = {
     ['K10', 'ATT&CK techniques', 6, 5, 0, 0, 1, 0],
   ],
   missedItems: [
-    'K3: the debugger check through the PEB BeingDebugged flag. The routine that holds it was never decompiled.',
-    'K10: process injection (T1055). An analyst claimed it; the judge dropped it because no cross-process write, remote thread or APC call was located.',
+    'K10: process injection (T1055). Analysts claimed it; the judge dropped it, because no code or data written into another live process was shown.',
   ],
   partlyItems: [
-    'K1: the link to IcedID appears only in the analysts’ claims in the evidence bundle; the report body never names IcedID.',
-    'K4: the bot ID’s format string is in the body, but not the values it is built from.',
-    'K6: four beacon types are in the body; types 1 and 2 appear only in an appendix statement, without their meaning.',
+    'K1: the link to IcedID appears only as reputation labels; the command that fetches bp.dat is not tied to IcedID.',
+    'K1: the file is named as x86-64, but the architecture check is not in the report body.',
+    'K3: the process-count check is named without its thresholds of 75 and 50 processes.',
+    'K3: the network-adapter check is named without what it rejects.',
+    'K3: the WOW64 check appears only in a reverser claim printed in the evidence bundle.',
+    'K4: the routine that supplies the bot ID and its volume calls are named, but not the ID’s format or how it is derived.',
+    'K6: beacon types 3, 4 and 5 are in the body; type 0x15 and the meaning of types 1 and 2 are not.',
     'K6: three reply verbs are named; the fourth, ERROR, is only in the bundle’s decoded strings.',
     'K7: the command that fetches bp.dat is described without naming the IcedID payload it loads.',
     'K9: update_data.dat is named with its role, but without its directory.',
@@ -61,20 +63,21 @@ export const run = {
   beyondExamples: [
     ['The compile time stamp, 2024-03-25 15:54:25 UTC', 'ev_0004'],
     ['The export directory’s own name, UpdaterTag.dll', 'ev_0004'],
-    ['Five sections with their entropies, and no packer', 'ev_0004, ev_0050'],
-    ['The string cipher in full: seed 0x33629d40, length XOR the low 16 bits of the seed, first key 0x41, decoder at 0xae78', 'ev_0021, ev_0077, ev_0079'],
-    ['The download-and-run routine 0xb4cc: it builds rundll32.exe %s,%s (0xfe90) or %s (0xfef0) and starts it with CreateProcessW through slot 0x10b38', 'ev_0078, ev_0021'],
-    ['The Content-Type: application/x-www-form-urlencoded header on the beacon', 'ev_0021'],
-    ['The command thread that runs each discovery line through a pipe, with its STARTUPINFO flags', 'ev_0079, ev_0025'],
-    ['The full command dispatcher at 0x3cf4, code by code', 'ev_0084'],
+    ['The string cipher in full: seed 0x33629d40, length XOR the low 16 bits of the seed, first key 0x41, decoder at 0xae78', 'ev_0021, ev_0067, ev_0068'],
+    ['The Content-Type: application/x-www-form-urlencoded header on the beacon', 'ev_0021, ev_0069'],
+    ['The first beacon after 1,800 sleeps of 100 ms, about 180 s', 'ev_0067'],
+    ['The full command dispatcher at 0x3cf4, code by code', 'ev_0077'],
+    ['The scheduled task’s registration in full: principal, logon trigger, exec action and settings, then the folder object’s register call', 'ev_0077, ev_0092'],
+    ['The self-delete target is the module’s own path, filled through the GetModuleFileNameW wrapper', 'ev_0069, ev_0025'],
+    ['The registry routine picks the machine hive or the current user’s by its argument', 'ev_0086, ev_0021'],
     ['The VirusTotal score at analysis time, 56 of 75', 'ev_0018'],
-    ['The sandbox’s two rundll32.exe <sample>.dll,#1 launches', 'ev_0012'],
   ],
   knownGaps: [
-    'The Limitations section has six sentences that disagree with the report body or the ledger. Three say the request body, the reply protocol and the environment gates were not established, while the C2 section describes them from code.',
-    'The debate ran to its five-round limit instead of settling earlier. Two blocking lines were still open when the limit ended it.',
-    'The hash emulation tool never reproduced a hash value in this run.',
-    'Some agreement rewrites left a sentence half old and half new, so a few sentences in the Functionality section contradict themselves, for example on the mutex name.',
+    'Section 11 (Limitations) says the injection target and the parents of sandbox processes 83 and 88 are not established. The entry it cites records both parent ids, and the judge dropped injection altogether.',
+    'Section 5.1 says the sample is not shown to use anti-debug or environment checks, while sections 4, 10 and 11 and the ledger describe the gates. Here the Limitations section is right and the body sentence is wrong.',
+    'The execution flow inverts one branch: it says a failed gate makes the export sleep forever, while the code returns at once on failure and sleeps on success.',
+    'The report left out detail its analysts had established: the WOW64 check, the 75 / 50 process-count thresholds and what the adapter check rejects. Four facts are partly rather than found for this reason.',
+    'The hash emulation tool still never reproduces a hash value.',
   ],
 };
 
@@ -93,7 +96,8 @@ real sandbox ({run.sandbox}), {run.date}.
 - **{recovered} of {run.items}** reference facts recovered: {run.found} found,
   {run.partlyBody} partly, {run.partlyDump} partly from the evidence bundle
   only, {run.missed} missed, **{run.wrong} wrong**.
-- **{run.beyondHuman} verified facts** that none of the human reports holds.
+- **{run.beyondHuman} verified facts** that none of the human reports holds
+  ({run.beyondHumanStrict} under a strict reading).
 - **{run.calls} model calls**, {run.seconds.toLocaleString('en-GB')} s (about
   {Math.round(run.seconds / 60)} minutes), **{run.usd} USD**.
 
@@ -241,6 +245,9 @@ listed separately and left out of the total.
 ### Beyond the human reports
 
 The report states **{run.beyondHuman} facts** that pass the three tests above.
+Under a strict reading, which also leaves out a fact that another sentence of
+the report contradicts, {run.beyondHumanStrict} remain. Every example below is
+on the strict list.
 Most come from reading the code: the reverser followed routines the human
 reports describe only by behaviour, and named them by address. A sample:
 
@@ -269,14 +276,11 @@ reports describe only by behaviour, and named them by address. A sample:
 | Wall time | {run.seconds.toLocaleString('en-GB')} s |
 | Spend | {run.usd} USD, at the vendor's list prices |
 | Tokens | {run.inputTokens} input ({run.cachedTokens} read from the cache), {run.outputTokens} output |
-| Ledger | {run.ledgerEntries} entries; {run.failedCalls} calls failed and {run.redoneCalls} were redone |
-| Debate | {run.debateRounds} rounds, ended by {run.debateEnd} |
+| Ledger | {run.ledger} |
+| Debate | {run.debate} |
 | Published | {run.techniques} ATT&CK techniques, a STIX 2.1 bundle and an IOC feed |
 
-Most of the spend goes to the debate, where every analyst defends or revises
-its claims against the others. Prompts above 100,000 tokens are billed at the
-long-context rate, and the reverser's and the reporter's prompts pass that
-line on most calls.
+{run.spendNote}
 
 ## What the run still gets wrong
 

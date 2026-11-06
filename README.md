@@ -49,7 +49,7 @@ of the family.
 
 | Reference facts recovered | Wrong | Verified facts beyond the human reports | Cost |
 | :-- | :-- | :-- | :-- |
-| **55 of 57** (49 found, 6 partly) | **0** | **57** | **10.15 USD** (170 model calls, 94 minutes) |
+| **56 of 57** (46 found, 10 partly) | **0** | **58** | **8.24 USD** (129 model calls, 84 minutes) |
 
 The method, the per-group scores and what the run still gets wrong are on the
 [benchmark page](https://malspark.com/docs/benchmark/).
