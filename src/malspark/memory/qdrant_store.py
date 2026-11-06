@@ -175,6 +175,8 @@ class QdrantStore:
 
         self._url = url
         self._collection = collection
+        # The name configured; ``_collection`` may switch to its previous-name twin.
+        self._configured = collection
         self._client: Any = QdrantClient(url=url, api_key=api_key)
         self._collection_ready = False
         self._function_hash_collection = function_hash_collection
@@ -380,6 +382,9 @@ class QdrantStore:
             self._client.delete_collection(collection_name=self._collection)
             self._collection_ready = False
             logger.info("QdrantStore.clear: collection '%s' deleted.", self._collection)
+            # What is stored next goes under the configured name, never under
+            # the previous-name twin the store had been reading.
+            self._collection = self._configured
 
     def purge_low_quality(
         self,

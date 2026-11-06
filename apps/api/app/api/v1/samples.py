@@ -400,7 +400,7 @@ async def upload_sample(
             logger.exception(
                 "MinIO upload failed: endpoint=%s bucket=%s path=%s tmp=%s",
                 settings.minio_endpoint,
-                settings.minio_bucket,
+                object_store.bucket(),
                 storage_path,
                 tmp_path,
             )

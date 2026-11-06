@@ -276,6 +276,11 @@ def repair_once(client: Any, cases: str, function_hashes: str | None) -> str:
             return SKIPPED_NO_MODEL
         from qdrant_client.models import Distance, PointStruct, VectorParams
 
+        # The collections the stores read: an absent default name reads its
+        # previous-name twin, so a repair left unfinished there is still done.
+        cases, _ = collection_in_use(client, cases, "memory repair")
+        if function_hashes:
+            function_hashes, _ = collection_in_use(client, function_hashes, "memory repair")
         marker = _marker_id(cases, function_hashes or "")
         # The marker an earlier release wrote names the collections as they
         # were then called; an upgrade aliases the new names to them.

@@ -220,6 +220,22 @@ class APISettings(BaseSettings, PlatformSecrets):
             return SecretStr(TEST_JWT_SECRET)
         return value
 
+    @model_validator(mode="before")
+    @classmethod
+    def _an_empty_bucket_is_not_configured(cls, data: Any) -> Any:
+        """``MINIO_BUCKET=`` (compose passes it empty when unset) names no bucket.
+
+        Left out, so the default applies and ``minio_bucket`` is not among the
+        fields set: ``object_store.bucket`` may then read the bucket of a
+        deployment started before the product's rename instead of creating an
+        empty one beside it. A non-empty value is the operator's, as written.
+        """
+        if isinstance(data, dict):
+            held = data.get("minio_bucket")
+            if isinstance(held, str) and not held.strip():
+                data = {k: v for k, v in data.items() if k != "minio_bucket"}
+        return data
+
     @model_validator(mode="after")
     def _cookie_secure_default(self) -> APISettings:
         if self.cookie_secure is None:

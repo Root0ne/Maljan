@@ -396,13 +396,27 @@ def unsettled(monkeypatch: Any) -> Any:
     return object_store
 
 
-def test_an_unset_bucket_uses_the_previous_one_and_creates_no_twin(
-    unsettled: Any, monkeypatch: Any, caplog: Any
-) -> None:
-    from app.config import get_settings
+def _settings_from_env(monkeypatch: Any, value: str | None) -> Any:
+    """The API's settings built as a process started with ``MINIO_BUCKET=value`` builds them
+    (``None``: unset), and handed to every reader of ``app.config``."""
+    import app.config
 
-    if "minio_bucket" in get_settings().model_fields_set:
-        pytest.skip("MINIO_BUCKET is set in this environment")
+    if value is None:
+        monkeypatch.delenv("MINIO_BUCKET", raising=False)
+    else:
+        monkeypatch.setenv("MINIO_BUCKET", value)
+    built = app.config.APISettings()
+    monkeypatch.setattr(app.config, "get_settings", lambda: built)
+    return built
+
+
+@pytest.mark.parametrize("value", [None, ""], ids=["unset", "empty-as-compose-passes-it"])
+def test_an_unconfigured_bucket_uses_the_previous_one_and_creates_no_twin(
+    unsettled: Any, monkeypatch: Any, caplog: Any, value: str | None
+) -> None:
+    built = _settings_from_env(monkeypatch, value)
+    assert "minio_bucket" not in built.model_fields_set
+    assert built.minio_bucket == f"{CURRENT_NAME}-samples"
     previous = f"{PREVIOUS_NAME}-samples"
     assert unsettled.PREVIOUS_BUCKET == previous
     store = _Store({previous})
@@ -415,33 +429,40 @@ def test_an_unset_bucket_uses_the_previous_one_and_creates_no_twin(
     assert len(named) == 1 and previous in named[0]
 
 
-def test_a_fresh_deployment_creates_the_default_bucket(unsettled: Any) -> None:
-    from app.config import get_settings
+def test_compose_passes_the_bucket_empty_when_it_is_unset() -> None:
+    compose = (ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8")
+    assert compose.count("MINIO_BUCKET: ${MINIO_BUCKET:-}") == 3
+    assert "MINIO_BUCKET: ${MINIO_BUCKET:-malspark" not in compose
 
-    if "minio_bucket" in get_settings().model_fields_set:
-        pytest.skip("MINIO_BUCKET is set in this environment")
+
+def test_a_fresh_deployment_creates_the_default_bucket(unsettled: Any, monkeypatch: Any) -> None:
+    _settings_from_env(monkeypatch, "")
     store = _Store(set())
     unsettled.ensure_bucket(store)
     assert store.made == [f"{CURRENT_NAME}-samples"]
 
 
-def test_a_store_that_cannot_answer_settles_nothing(unsettled: Any) -> None:
+def test_a_store_that_cannot_answer_settles_nothing(unsettled: Any, monkeypatch: Any) -> None:
+    _settings_from_env(monkeypatch, None)
+
     class _Down:
         def bucket_exists(self, name: str) -> bool:
             raise OSError("down")
 
-    assert unsettled.bucket(_Down()) == unsettled.settings.minio_bucket
+    assert unsettled.bucket(_Down()) == f"{CURRENT_NAME}-samples"
     assert unsettled._SETTLED == {}
 
 
-def test_a_configured_bucket_is_used_as_configured(unsettled: Any, monkeypatch: Any) -> None:
-    import app.config
-
-    configured = SimpleNamespace(model_fields_set={"minio_bucket"}, minio_bucket="mine")
-    monkeypatch.setattr(app.config, "get_settings", lambda: configured)
+@pytest.mark.parametrize("value", ["mine", f"{CURRENT_NAME}-samples"])
+def test_a_configured_bucket_is_used_as_configured(
+    unsettled: Any, monkeypatch: Any, value: str
+) -> None:
+    """Named explicitly, even as the default name, it is the operator's: no fallback."""
+    built = _settings_from_env(monkeypatch, value)
+    assert "minio_bucket" in built.model_fields_set
     store = _Store({f"{PREVIOUS_NAME}-samples"})
     unsettled.ensure_bucket(store)
-    assert store.made == ["mine"]
+    assert store.made == [value]
 
 
 # ---- the upgrade script, against a stub docker ------------------------------
@@ -528,3 +549,14 @@ def test_the_script_without_an_env_file_still_runs_with_a_qdrant_url(tmp_path: P
     )
     assert done.returncode == 0, done.stderr
     assert "Qdrant:" in done.stdout and "MinIO:" in done.stdout
+
+
+def test_a_mask_sent_back_under_the_previous_name_keeps_the_stored_value() -> None:
+    from app.services.server_map import TOKEN_MASK, _keep_masked_env
+
+    stored = {"analysis": {"env": {f"{OLD_ENV}X": "secret1", f"{OLD_ENV}Y": "secret2"}}}
+    sent = {"analysis": {"env": {f"{OLD_ENV}X": TOKEN_MASK, f"{NEW_ENV}Y": TOKEN_MASK}}}
+    kept = _keep_masked_env(sent, stored)
+    assert kept["analysis"]["env"] == {f"{NEW_ENV}X": "secret1", f"{NEW_ENV}Y": "secret2"}
+    both = {"analysis": {"env": {f"{OLD_ENV}X": "old", f"{NEW_ENV}X": TOKEN_MASK}}}
+    assert _keep_masked_env(both, stored)["analysis"]["env"] == {f"{NEW_ENV}X": "secret1"}

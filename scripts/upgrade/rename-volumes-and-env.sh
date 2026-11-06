@@ -299,8 +299,8 @@ docker compose -f docker/docker-compose.yml exec -T api python - <<'PY'
 from minio.commonconfig import CopySource
 from minio.error import S3Error
 from app.config import settings
-from app.services.object_store import client
-store, old = client(), "$OLD-samples"
+from app.services.object_store import client, deny_anonymous_policy
+store, old, new = client(), "$OLD-samples", settings.minio_bucket
 try:
     store.get_object_lock_config(old)
 except S3Error as exc:
@@ -310,10 +310,12 @@ else:
     raise SystemExit(f"{old} has object lock: keep it with MINIO_BUCKET={old}")
 if any(True for _ in store.list_objects(old, prefix="audit-chain/head/", recursive=True)):
     raise SystemExit(f"{old} holds audit heads: keep it with MINIO_BUCKET={old}")
-if not store.bucket_exists(settings.minio_bucket):
-    raise SystemExit("start the API once so it creates its bucket")
+# The API reads the old bucket while the new one is missing, so it is made here.
+if not store.bucket_exists(new):
+    store.make_bucket(new)
+    store.set_bucket_policy(new, deny_anonymous_policy(new))
 for item in store.list_objects(old, recursive=True):
-    store.copy_object(settings.minio_bucket, item.object_name, CopySource(old, item.object_name))
+    store.copy_object(new, item.object_name, CopySource(old, item.object_name))
 PY
 
 Redis: queued jobs and job ownership keys carry the old prefix; let the old

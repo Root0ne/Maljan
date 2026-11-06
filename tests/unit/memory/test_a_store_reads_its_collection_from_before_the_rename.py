@@ -163,3 +163,41 @@ def test_the_repair_finds_the_marker_an_earlier_release_wrote(monkeypatch: Any) 
 
     assert memory_repair.repair_once(client, NEW_CASES, NEW_HASHES) == memory_repair.ALREADY_DONE
     assert relabelled == [], "the repair does not run again"
+
+
+def test_an_unfinished_repair_on_the_previous_collections_is_still_done(monkeypatch: Any) -> None:
+    monkeypatch.setattr(embeddings, "active_backend", lambda: "model")
+    monkeypatch.setattr(embeddings, "model_backend_id", lambda: "model")
+    client = _client()
+    _old_hashes(client)
+    relabelled: list[str] = []
+    monkeypatch.setattr(
+        memory_repair, "_relabel_cases", lambda _c, name: relabelled.append(name) or 0
+    )
+    dropped: list[str] = []
+    monkeypatch.setattr(
+        memory_repair,
+        "_drop_ungated_function_hashes",
+        lambda _c, name: dropped.append(name) or 0,
+    )
+    from qdrant_client.models import Distance, VectorParams
+
+    client.create_collection(
+        OLD_CASES, vectors_config=VectorParams(size=4, distance=Distance.COSINE)
+    )
+
+    assert memory_repair.repair_once(client, NEW_CASES, NEW_HASHES) != memory_repair.ALREADY_DONE
+    assert relabelled == [OLD_CASES] and dropped == [OLD_HASHES]
+    assert NEW_CASES not in _names(client) and NEW_HASHES not in _names(client)
+    assert memory_repair.repair_once(client, NEW_CASES, NEW_HASHES) == memory_repair.ALREADY_DONE
+
+
+def test_after_clear_new_cases_go_under_the_configured_name(cases_client: Any) -> None:
+    from malspark.memory.qdrant_store import QdrantStore
+
+    QdrantStore(url="http://qdrant.test:6333", collection=OLD_CASES).store(_case())
+    store = QdrantStore(url="http://qdrant.test:6333", collection=NEW_CASES)
+    assert store.count() == 1
+    store.clear()
+    store.store(_case())
+    assert NEW_CASES in _names(cases_client) and OLD_CASES not in _names(cases_client)

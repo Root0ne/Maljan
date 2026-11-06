@@ -431,6 +431,8 @@ def _keep_masked_env(value: Any, stored: dict[str, Any] | None) -> Any:
         # A row stored before the rename names its variables by the previous
         # prefix; the editor showed (and sends back) the current names.
         stored_env = env_under_current_names(stored_env) if isinstance(stored_env, dict) else {}
+        # An export written before the rename sends the previous names back.
+        env = env_under_current_names(env)
         kept = {
             var: (stored_env.get(var) if item == TOKEN_MASK else item)
             for var, item in env.items()

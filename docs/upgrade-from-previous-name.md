@@ -73,8 +73,9 @@ The stored samples, the spilled ledger parts and, with the object-store audit
 anchor, the anchored audit heads (`audit-chain/head/`) are in the bucket
 `maljan-samples`, under its object lock, retention, legal holds and versions.
 Keep it: the compose file now passes `MINIO_BUCKET` to the API and the
-workers, and `--apply` sets `MINIO_BUCKET=maljan-samples` in the env file when
-the copied MinIO data holds that bucket.
+workers (empty when unset, which names no bucket), and `--apply` sets
+`MINIO_BUCKET=maljan-samples` in the env file when the copied MinIO data holds
+that bucket.
 
 If `MINIO_BUCKET` is not set, the default bucket is missing and
 `maljan-samples` is there, the API uses `maljan-samples` and the log names
