@@ -533,13 +533,14 @@ class TestTheCap:
 # Run in a child of its own, so the peak resident memory it reports is the read's alone.
 _PEAK_PROBE = """
 import resource, sys, time
+from maljan.utils.peak_memory import rss_to_bytes
 from maljan.tools import binary
 before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 began = time.process_time()
 answer = binary.document_info(sys.argv[1])
 took = time.process_time() - began
 rise = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before
-print(len(answer["external_relationships"][0]["target"]), took, rise * 1024)
+print(len(answer["external_relationships"][0]["target"]), took, rss_to_bytes(rise))
 """
 
 
