@@ -107,6 +107,9 @@ class ClaimInForce:
     # (``kept_after_absence_question``): the ATT&CK table's notes, per id.
     unverified_technique_ids: tuple[str, ...] = ()
     absence_kept_technique_ids: tuple[str, ...] = ()
+    # The mediator's rulings at the round limit on the lines that named it
+    # (``ClaimEvidence.limit_rulings``), noted beside its evidence.
+    limit_rulings: tuple[str, ...] = ()
 
     @property
     def label(self) -> str:
@@ -159,6 +162,9 @@ def claims_in_force(isr_reports: Mapping[str, Any] | None) -> list[ClaimInForce]
                     technique_ids=tuple(ids.get(block, ())),
                     unverified_technique_ids=tuple(unverified.get(block, ())),
                     absence_kept_technique_ids=tuple(kept.get(block, ())),
+                    limit_rulings=tuple(
+                        r for r in getattr(claim, "limit_rulings", None) or () if isinstance(r, str)
+                    ),
                 )
             )
     return out

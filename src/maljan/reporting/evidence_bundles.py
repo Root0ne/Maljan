@@ -19,7 +19,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import weakref
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
@@ -211,37 +211,61 @@ _SECTION_CLAIM_KEYWORDS: dict[str, tuple[str, ...]] = {
 }
 
 
+# The key of a claim the mediator ruled on at the round limit
+# (``ClaimEvidence.limit_rulings``) that holds its evidence without the
+# rulings' notes. Their reasons name entries and functions the claim itself
+# never cited, so what a section is shown (its claims, the outputs and the
+# code they cite) is chosen by this; ``evidence_ref`` carries the notes whole
+# to the section's text. A claim with no ruling has no such key.
+ROUTED_REF = "routed_ref"
+
+
+def _routed(claim: Mapping[str, Any]) -> str:
+    """The text a claim routes a section by: its sentence and its own evidence."""
+    ref = claim.get(ROUTED_REF, claim.get("evidence_ref", ""))
+    return f"{claim.get('claim', '')} {ref}"
+
+
 def _claims_text(report: MalwareReport, isr_reports: dict[str, Any] | None) -> list[dict[str, str]]:
     """Every claim in force as ``{claim, evidence_ref, agent, label}``, in the answers' order.
+
+    A claim the mediator ruled on at the round limit also holds
+    :data:`ROUTED_REF`, its evidence without the rulings, which routes it; the
+    composer renders the fields above alone.
 
     ``label`` names the claim by its analyst and its number in the answer in
     force (``claim_coverage.claim_label``): the name the coverage check reads
     a citation of the claim by, and the one the report lists it under when the
     body neither cites nor discusses it.
     """
+    import dataclasses
+
     from maljan.reporting.claim_coverage import claims_in_force
     from maljan.schemas.isr_models import carried_note, retry_added_marker
 
     def _noted(claim: Any) -> str:
         # A claim a tool-less retry added, or one a revision carried forward
-        # unwritten, says so beside its evidence.
+        # unwritten, or one the mediator ruled on at the round limit, says so
+        # beside its evidence.
         ref = str(claim.evidence_ref)
         if claim.added_by_retry_in_round is not None:
             ref = f"{ref} ({retry_added_marker(claim.added_by_retry_in_round)})"
         carried = carried_note(claim)
-        if carried:
-            ref = f"{ref} ({carried})"
-        return ref
+        return f"{ref} ({carried})" if carried else ref
 
-    return [
-        {
+    def _row(claim: Any) -> dict[str, str]:
+        row = {
             "claim": claim.claim,
             "evidence_ref": _noted(claim),
             "agent": claim.agent,
             "label": claim.label,
         }
-        for claim in claims_in_force(isr_reports)
-    ]
+        if claim.limit_rulings:
+            # Routed by the evidence it had before the rulings were noted.
+            row[ROUTED_REF] = _noted(dataclasses.replace(claim, limit_rulings=()))
+        return row
+
+    return [_row(claim) for claim in claims_in_force(isr_reports)]
 
 
 def _word_starts(text: str) -> Iterator[int]:
@@ -368,7 +392,7 @@ def mentions(text: str, keywords: tuple[str, ...]) -> bool:
 def _filter_claims(claims: list[dict[str, str]], keywords: tuple[str, ...]) -> list[dict[str, str]]:
     if not keywords:
         return []
-    return [c for c in claims if mentions(f"{c['claim']} {c['evidence_ref']}", keywords)]
+    return [c for c in claims if mentions(_routed(c), keywords)]
 
 
 def cited_entry_ids(claims: list[dict[str, str]]) -> set[str]:
@@ -377,7 +401,7 @@ def cited_entry_ids(claims: list[dict[str, str]]) -> set[str]:
 
     cited: set[str] = set()
     for claim in claims:
-        cited |= entry_ids_in(f"{claim.get('claim', '')} {claim.get('evidence_ref', '')}")
+        cited |= entry_ids_in(_routed(claim))
     return cited
 
 
@@ -647,7 +671,7 @@ def _claimed_rows(
     """
     from maljan.schemas.evidence import entry_ids_in
 
-    text = f"{claim.get('claim', '')} {claim.get('evidence_ref', '')}"
+    text = _routed(claim)
     picked: dict[int, FunctionCode] = {}
     for address in _named_functions(text):
         for at in (address, *(address + base for base in bases)):

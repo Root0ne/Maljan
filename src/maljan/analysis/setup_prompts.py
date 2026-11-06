@@ -90,7 +90,9 @@ PROMPT_SITES: dict[str, str | None] = {
     # The mediator's own prompt, and the structured extraction it sends after it.
     "maljan.agents.judge_agent:JudgeAgent._mediate_round": "mediator",
     "maljan.agents.judge_agent:JudgeAgent.execute_tool_loop": "mediator",
-    "maljan.agents.judge_agent:JudgeAgent._ask_for_contradictions_block": "mediator",
+    # The questions after a mediation (its missing block, the round limit's rulings) resend
+    # the mediation's own system turn.
+    "maljan.agents.judge_agent:JudgeAgent._ask_after_mediation": "mediator",
     "maljan.agents.judge_agent:JudgeAgent.give_verdict": "judge verdict",
     "maljan.agents.judge_agent:JudgeAgent.decide_techniques": "technique questions",
     "maljan.reporting.composer:ReportComposer._author._turns": "composer",

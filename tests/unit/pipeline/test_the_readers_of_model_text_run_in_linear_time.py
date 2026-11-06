@@ -32,6 +32,7 @@ from maljan.pipeline.debate_facts import (
     read_claim_references,
     read_marks,
 )
+from maljan.pipeline.limit_rulings import REASON_LIMIT, clean_quote, read_rulings
 from maljan.pipeline.validation import (
     EntryTexts,
     absence_holders_note,
@@ -338,6 +339,12 @@ LISTED = [SimpleNamespace(addresses=frozenset({0x1400}), id="listed.1")]
             lambda t: count_disagrees("3 tool calls failed and " * (len(t) // 24), _COUNTS),
             id="a failure count held to the ledger",
         ),
+        pytest.param(lambda t: read_rulings("L1: UPHELD: " + t, 1), id="limit ruling"),
+        pytest.param(
+            lambda t: read_rulings("L1 " + " " * len(t) + " UPHELD", 1), id="limit ruling spaces"
+        ),
+        pytest.param(lambda t: read_rulings("- **L1 " + t, 1), id="limit ruling with no word"),
+        pytest.param(lambda t: clean_quote(t, REASON_LIMIT), id="limit ruling reason"),
     ],
 )
 def test_four_times_the_hostile_line_stays_under_the_ratio(read: Callable[[str], object]) -> None:

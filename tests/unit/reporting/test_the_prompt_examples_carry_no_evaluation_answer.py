@@ -61,8 +61,11 @@ from maljan.agents.judge_agent import (
     CONTRADICTIONS_BLOCK_QUESTION,
     CONTRADICTIONS_BLOCK_RULE,
     EVIDENCE_SHORTENED_NOTICE,
+    LIMIT_RULING_QUESTION,
+    LIMIT_RULING_QUESTION_WITHOUT_TOOLS,
     LOWERED_ENTRY_MARK,
     MALWARE_OBJECT_RULE,
+    MEDIATION_ENTRY_CHECK,
     MEDIATION_EXTRACTION_SYSTEM,
     MEDIATOR_HUMAN_CLOSING,
     MEDIATOR_SYSTEM_HEAD,
@@ -1735,6 +1738,9 @@ PROMPTS: dict[str, str] = {
     ),
     "mediator contradiction definition, closing block rule and its one question": " ".join(
         [CONTRADICTION_DEFINITION, CONTRADICTIONS_BLOCK_RULE, CONTRADICTIONS_BLOCK_QUESTION]
+    ),
+    "mediator entry check and the round limit's ruling question": " ".join(
+        [MEDIATION_ENTRY_CHECK, LIMIT_RULING_QUESTION, LIMIT_RULING_QUESTION_WITHOUT_TOOLS]
     ),
     "mediator system turn, its closing line and the missing-block note": " ".join(
         [

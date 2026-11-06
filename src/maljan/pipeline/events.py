@@ -440,6 +440,14 @@ def claims_to_payload(claims: Any, limit: int = 12) -> list[dict[str, Any]]:
 
                 out[-1]["carried_since_round"] = carried
                 out[-1]["carried_note"] = carried_note(claim)
+            # The mediator's rulings at the round limit on the lines that
+            # named it, in the same note; only on such a claim.
+            ruled = list(getattr(claim, "limit_rulings", None) or [])
+            if ruled and isinstance(ruled[0], str):
+                from maljan.schemas.isr_models import carried_note
+
+                out[-1]["limit_rulings"] = [_cut_kept(str(r), 600) for r in ruled]
+                out[-1]["carried_note"] = carried_note(claim)
         except Exception:  # noqa: BLE001 — one malformed claim must not drop the rest
             continue
     return out
