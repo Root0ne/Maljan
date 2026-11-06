@@ -148,8 +148,15 @@ services:
   # ─────────────────────────────────────────────
   # MinIO — S3-compatible object storage
   # ─────────────────────────────────────────────
+  # Built from the pinned upstream release (docker/Dockerfile.minio): MinIO
+  # publishes source only, and the image this stack used to pull is gone from
+  # its registry. The tag here names that release; a volume written by the
+  # release pulled before (RELEASE.2025-09-07T16-13-09Z) is read as it is.
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    build:
+      context: .
+      dockerfile: Dockerfile.minio
+    image: maljan-minio:RELEASE.2025-10-15T17-29-55Z
     container_name: maljan-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -161,8 +168,9 @@ services:
       - "${BIND_ADDRESS:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
+    # The server's own liveness endpoint, read with the image's busybox wget.
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5

@@ -20,7 +20,7 @@ applies both.
 | `postgres` | `postgres:16-alpine` | Relational store. Healthchecked with `pg_isready`. |
 | `redis` | `redis:7-alpine` | Queue, events, rate-limit counters. Password-protected; the healthcheck asserts an actual `PONG`. |
 | `qdrant` | `qdrant/qdrant:v1.18.2` | Vector store, pinned to match the client version. Runs under the `qdrant` profile, which the shipped `docker/.env` turns on; without `QDRANT_API_KEY` it restarts, logging the variable to set. |
-| `minio` | `minio/minio:RELEASE.2025-09-07T16-13-09Z` | Sample storage, with its own console. |
+| `minio` | `maljan-minio`, built from `docker/Dockerfile.minio` | Sample storage, with its own console. The server is compiled from MinIO's pinned release (`RELEASE.2025-10-15T17-29-55Z`); see *MinIO, built from source* below. |
 | `ghidra-mcp` | built from `external/ghidra-mcp` | A static analyser. Runs (and is built) under the `ghidra` profile, which the shipped `docker/.env` turns on; without `GHIDRA_MCP_AUTH_TOKEN` it refuses to bind and restarts. Capped at 6 GB memory and swap, because the JVM's own limit does not bound the container. `GHIDRA_JAVA_OPTS`, `GHIDRA_MEM_LIMIT` and `GHIDRA_RESTART` in `docker/.env` change the JVM options, the cap and the restart policy; see *Running Ghidra lighter* in [configuration.md](/docs/configuration/). |
 | `ghidra-port` | `alpine/socat` (pinned by digest) | Publishes Ghidra's port on `BIND_ADDRESS` for a worker run on the host, under the `ghidra` profile; `ghidra-mcp` itself is on an internal network only. See *The container that opens the sample* below. |
 | `die-mcp`, `ilspy-mcp`, `goresym-mcp` | built from `services/<name>/Dockerfile` | The identification servers (Detect It Easy, ILSpy, GoReSym), each under its own profile (`die`, `ilspy`, `goresym`), which the shipped `docker/.env` does not turn on; each refuses to start without its token. Capped at 2 GB, 4 GB and 2 GB of memory and swap (`DIE_MEM_LIMIT`, `ILSPY_MEM_LIMIT`, `GORESYM_MEM_LIMIT`). See [Identification servers](/docs/tools/identification/). |
@@ -38,6 +38,29 @@ applies both.
 
 The three backend services share one build and one image tag, so Compose
 builds `maljan-backend` once rather than once per service.
+
+### MinIO, built from source
+
+MinIO publishes its releases as source only, and the `minio/minio` image the
+stack used to pull is no longer served by its registry. Compose therefore
+builds the server: `docker/Dockerfile.minio` clones the pinned release tag,
+stops the build if the tag is not the pinned commit, compiles it with a Go
+release that still gets upstream fixes (the release's `go.mod` names only a
+floor, Go 1.24), and copies the binary and its licence
+onto a small Alpine image tagged `maljan-minio:<release>`. The first `up`
+builds it (a few minutes, with network access to GitHub and the Go module
+proxy); later ones reuse it. The Go stage cross-compiles for the target's
+architecture, so the same file builds linux/amd64 and linux/arm64; it needs
+BuildKit, which Compose and `docker buildx` use. The healthcheck asks the
+server's `/minio/health/live` with the image's busybox `wget`. The server runs
+as root, as the pulled image did, because an existing `minio_data` volume
+holds files root wrote.
+
+MinIO is licensed under the GNU AGPLv3. The repository ships a Dockerfile that
+builds the unmodified upstream source of the named release, not a modified or
+redistributed binary; the image carries the release's `LICENSE` and `CREDITS`
+under `/licenses` and names the source and commit in its labels. An operator
+who publishes an image built from it passes those on with it.
 
 Ordering is explicit: `migrate` waits for a healthy Postgres, the API waits for
 `migrate` to exit successfully and for Postgres and Redis to be healthy, and the
@@ -364,6 +387,14 @@ production stack bakes the frontend into an image and runs the worker under
 plain `arq`, so neither picks up a source edit on its own: `make fe-rebuild`
 rebuilds and replaces the frontend container, and `make worker-restart`
 restarts the worker.
+
+A stack that ran the pulled MinIO image (`minio/minio:RELEASE.2025-09-07T16-13-09Z`)
+builds `maljan-minio` on its next `up` and starts it on the same `minio_data`
+volume, under the same service and container name, ports, credentials and
+command. Nothing needs migrating: the release built is the one after it, which
+changes no on-disk format, so buckets, objects, versions, policies and object
+lock settings read as before. `docker compose build minio` builds it ahead of
+the restart.
 
 There is no automatic import of a previous `.env` deployment. An instance
 upgrading from one enters its settings once in Settings → Configuration, or

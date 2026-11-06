@@ -214,7 +214,7 @@ def test_every_pulled_image_names_a_version() -> None:
         for name, service in config["services"].items()
         if "image" in service and "build" not in service
     }
-    assert "minio" in pulled
+    assert "postgres" in pulled
     for name, image in pulled.items():
         reference = image.rsplit("/", 1)[-1]
         assert ":" in reference, f"{name}: {image} names no tag"
@@ -222,6 +222,8 @@ def test_every_pulled_image_names_a_version() -> None:
 
 
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
+# A FROM line up to its image, past a `--platform=` flag.
+FROM = r"^FROM (?:--platform=\S+ )?"
 
 
 def test_every_pulled_and_base_image_is_pinned_by_digest() -> None:
@@ -233,13 +235,45 @@ def test_every_pulled_and_base_image_is_pinned_by_digest() -> None:
         if "image" in service and "build" not in service:
             assert DIGEST.search(service["image"]), f"{name}: {service['image']}"
     for dockerfile in sorted((ROOT / "docker").glob("Dockerfile.*")):
+        if dockerfile.suffix == ".dockerignore":
+            continue
         text = dockerfile.read_text(encoding="utf-8")
-        stages = set(re.findall(r"^FROM \S+ AS (\S+)$", text, re.MULTILINE))
-        for base in re.findall(r"^FROM (\S+)", text, re.MULTILINE):
+        stages = set(re.findall(rf"{FROM}\S+ AS (\S+)$", text, re.MULTILINE))
+        for base in re.findall(rf"{FROM}(\S+)", text, re.MULTILINE):
             assert DIGEST.search(base), f"{dockerfile.name}: FROM {base}"
         for source in re.findall(r"COPY --from=(\S+)", text):
             if source not in stages:
                 assert DIGEST.search(source), f"{dockerfile.name}: COPY --from={source}"
+
+
+def test_minio_is_built_from_the_release_its_tag_names() -> None:
+    # The pulled MinIO image is gone from its registry (T-572): compose builds
+    # the server from the pinned upstream tag, checked against its commit, and
+    # tags the image with that release. The command, the volume, the ports
+    # and the credentials stay as the API's client and the audit anchor's
+    # object lock read them.
+    config = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text())
+    minio = config["services"]["minio"]
+    assert minio["build"] == {"context": ".", "dockerfile": "Dockerfile.minio"}
+    text = (ROOT / "docker" / "Dockerfile.minio").read_text(encoding="utf-8")
+    release = set(re.findall(r"^ARG MINIO_RELEASE=(RELEASE\.\S+)$", text, re.MULTILINE))
+    commit = set(re.findall(r"^ARG MINIO_COMMIT=([0-9a-f]{40})$", text, re.MULTILINE))
+    assert len(release) == 1 and len(commit) == 1, (release, commit)
+    assert minio["image"] == f"maljan-minio:{release.pop()}"
+    assert '"${commit}" != "${MINIO_COMMIT}"' in text
+    assert 'GOARCH="${TARGETARCH:-' in text
+    assert minio["command"] == 'server /data --console-address ":9001"'
+    assert minio["volumes"] == ["minio_data:/data"]
+    assert minio["container_name"] == "maljan-minio"
+    assert set(minio["environment"]) == {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"}
+    assert "/minio/health/live" in " ".join(minio["healthcheck"]["test"])
+    # The build copies nothing from docker/, where docker/.env lives, and is
+    # sent none of it.
+    assert not re.search(r"^(COPY|ADD) (?!--from=)", text, re.MULTILINE)
+    ignore = (ROOT / "docker" / "Dockerfile.minio.dockerignore").read_text(encoding="utf-8")
+    assert [line for line in ignore.splitlines() if line.strip() and not line.startswith("#")] == [
+        "*"
+    ]
 
 
 def _workflow_service_images() -> dict[str, str]:

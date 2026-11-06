@@ -1,0 +1,3 @@
+# Dockerfile.minio fetches its source itself and copies nothing from the
+# context, so none of docker/ (docker/.env among it) is sent to the builder.
+*
