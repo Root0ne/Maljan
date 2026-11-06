@@ -1,0 +1,11 @@
+# Known vulnerabilities that cannot be fixed by an upgrade, each with the reason
+# it does not apply and a date to look again. Everything else is fixed by
+# upgrading, not listed here.
+
+[[IgnoredVulns]]
+id = "CVE-2025-69872"
+ignoreUntil = 2027-02-06
+reason = """diskcache 5.6.3 has no fixed release. It reaches Malspark only through \
+pysigma, which keeps its cache in a directory owned by the service user. Exploiting \
+the unsafe pickle load needs write access to that directory, which already means \
+code execution as that user. Revisit when diskcache or pysigma ships a fix."""
