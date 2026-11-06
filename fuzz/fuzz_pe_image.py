@@ -21,7 +21,7 @@ def TestOneInput(data: bytes) -> None:  # noqa: N802 - the name libFuzzer looks 
     image.code_sections()
     image.data_sections()
     image.imports_by_slot()
-    image.function_table()
+    _ = image.function_table
     for offset in (0, len(data) // 2, len(data) - 1):
         image.where(offset)
 
