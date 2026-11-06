@@ -67,11 +67,20 @@ def carried_marker(revision_round: int, contested_by: Sequence[str] = ()) -> str
 
 
 def carried_note(claim: Any) -> str:
-    """The carried-forward note of ``claim`` (:func:`carried_marker`), or ``""``."""
+    """The debate's note on ``claim``, or ``""``.
+
+    The carried-forward note (:func:`carried_marker`), then each ruling the
+    mediator gave at the round limit on a blocking line that named it
+    (``ClaimEvidence.limit_rulings``). A claim with neither has none.
+    """
     since = getattr(claim, "carried_since_round", None)
-    if not isinstance(since, int) or isinstance(since, bool):
-        return ""
-    return carried_marker(since, list(getattr(claim, "carried_contested_by", None) or []))
+    said = (
+        carried_marker(since, list(getattr(claim, "carried_contested_by", None) or []))
+        if isinstance(since, int) and not isinstance(since, bool)
+        else ""
+    )
+    ruled = [str(r) for r in getattr(claim, "limit_rulings", None) or [] if str(r)]
+    return "; ".join([said, *ruled] if said else ruled)
 
 
 # The note on a technique the judge named in its bundle and no analyst claimed.
@@ -239,6 +248,18 @@ class ClaimEvidence(BaseModel):
         description=(
             "The entries of other agents a debate round showed this claim's analyst, when they "
             "are every entry the claim cites."
+        ),
+        exclude_if=lambda value: not value,
+    )
+    # The mediator's ruling on each blocking line that named this claim when
+    # the round limit ended the debate on it (``pipeline.limit_rulings``):
+    # the claim stands as its analyst wrote it, and the ruling travels with it.
+    # Left out of the serialised claim when empty.
+    limit_rulings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The mediator's rulings, at the round limit, on the blocking lines that named this "
+            "claim."
         ),
         exclude_if=lambda value: not value,
     )
@@ -477,7 +498,8 @@ def claim_summary_line(
         if claim.added_by_retry_in_round is not None
         else ""
     )
-    carried = f" ({carried_note(claim)})" if claim.carried_since_round is not None else ""
+    note = carried_note(claim)
+    carried = f" ({note})" if note else ""
     return (
         f"Claim {number}{noted}: {claim.claim}{tech}"
         f" | Evidence: {claim.evidence_ref}{failed}{retried}{carried}"

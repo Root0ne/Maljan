@@ -79,6 +79,16 @@ class AgentArgument(BaseModel):
             "ends as ``ledger_stated``."
         ),
     )
+    limit_rulings: list[str] = Field(
+        default_factory=list,
+        repr=False,
+        description=(
+            "For the mediator: when the round limit ended the debate on this mediation's "
+            "blocking lines, the platform's sentences on the mediator's ruling on each, on the "
+            "claims each ruling was written onto, and on any line it gave no ruling on "
+            "(``limit_rulings``)."
+        ),
+    )
     converged: list[dict[str, Any]] = Field(
         default_factory=list,
         repr=False,

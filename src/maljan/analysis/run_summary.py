@@ -151,6 +151,10 @@ class NegotiationMetrics:
     # analysts were told those facts, each with them (``debate_facts.ledger_stated``).
     # They stayed blocking lines.
     ledger_stated: list[str] = field(default_factory=list)
+    # The mediator's rulings on the blocking lines the round limit ended the
+    # debate on, the claims each was written onto, and any line not ruled on
+    # (``pipeline.limit_rulings``).
+    limit_rulings: list[str] = field(default_factory=list)
 
     @property
     def consensus_applicable(self) -> bool:
@@ -1483,6 +1487,10 @@ class RunSummary:
             lines += ["**Blocking lines the ledger states, told before:**", ""]
             lines += [f"- {sentence}" for sentence in n.ledger_stated]
             lines.append("")
+        if n.limit_rulings:
+            lines += ["**Rulings on the blocking lines the round limit left:**", ""]
+            lines += [f"- {sentence}" for sentence in n.limit_rulings]
+            lines.append("")
         if n.mediation_notes:
             lines += [f"- {sentence}" for sentence in n.mediation_notes]
             lines.append("")
@@ -1813,6 +1821,7 @@ class RunSummary:
                 ),
                 **({"not_blocking_at_end": n.not_blocking_at_end} if n.not_blocking_at_end else {}),
                 **({"ledger_stated": list(n.ledger_stated)} if n.ledger_stated else {}),
+                **({"limit_rulings": list(n.limit_rulings)} if n.limit_rulings else {}),
             },
             "agent_stats": [
                 {
@@ -2594,6 +2603,12 @@ class RunSummaryBuilder:
                 for arg in discussion_history
                 if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
                 for sentence in getattr(arg, "ledger_stated", None) or []
+            ],
+            limit_rulings=[
+                defanged(str(sentence))
+                for arg in discussion_history
+                if getattr(arg, "agent_name", "") == MEDIATOR_AGENT_NAME
+                for sentence in getattr(arg, "limit_rulings", None) or []
             ],
         )
         return self

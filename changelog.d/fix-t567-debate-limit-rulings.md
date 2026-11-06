@@ -1,0 +1,6 @@
+### Fixed
+
+- **The blocking lines the round limit leaves are ruled on by the mediator, and a mediation asks the mediator to read the entry a line turns on (T-567).** haiku11's last mediation raised a real line (an anti-debug absence against an entry read in the debate) that nobody decided, and haiku12's mediator argued a line from a report's account of an entry with no tool call in five mediations.
+  - A mediation offering `read_evidence` over the run's ledger closes by asking the mediator to read the entry a line turns on, and the entries cited against it, before it marks the line blocking. Its tools are never limited; a mediation with no ledger is asked as before.
+  - When the round limit ends the debate where another round would have been held, the mediator is asked once more, in its own conversation and with `read_evidence`, whether the entries uphold each blocking line. No round is held. Each ruling is written onto the claims the line names that share a ledger id or an address with it, as a note the claim carries to the judge, the transcript and the report; the claim stands as written and no value is removed.
+  - Every ruling, every line not ruled on, every reference that names no claim and a question not made are stated in `run_summary.negotiation.limit_rulings`, the mediation's finding and the room.

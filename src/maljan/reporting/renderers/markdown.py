@@ -2358,6 +2358,8 @@ class MarkdownRenderer:
                     lines.append(_item(str(sentence)))
             for sentence in negotiation.get("ledger_stated") or []:
                 lines.append(_item(str(sentence)))
+            for sentence in negotiation.get("limit_rulings") or []:
+                lines.append(_item(str(sentence)))
         # A model's configured endpoint prints as configured, set aside where
         # this line writes it and nowhere else.
         model_name = ctx.endpoint_kept if ctx is not None else None

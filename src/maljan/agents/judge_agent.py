@@ -650,6 +650,37 @@ MEDIATOR_HUMAN_CLOSING = (
     "End with the CONTRADICTIONS: block and then the agreement_confidence line. "
     "Do not state a verdict."
 )
+# Said before the closing line when the mediation offers ``read_evidence`` over
+# the run's ledger: a line about what an entry shows is ruled on the entry,
+# read, not on a report's account of it. It asks; it never limits the tools.
+MEDIATION_ENTRY_CHECK = (
+    "When a line turns on what a ledger entry shows (a value, a name, the arguments of a "
+    "call, what a citation holds), read that entry, and the entries the analysts cite "
+    "against the line, with read_evidence before you mark the line blocking, unless the "
+    "entry's text is in this conversation already; rule on what the entries show, not on "
+    "what a report says they show."
+)
+
+# The question asked once, in the mediation's own conversation, when the round
+# limit ends the debate on blocking lines no revision will answer
+# (``pipeline.limit_rulings``). The lines follow it, numbered as the block
+# listed them.
+LIMIT_RULING_QUESTION = (
+    "The debate has reached its round limit: no analyst revises again, so each blocking "
+    "line of your block stands undecided unless you decide it now. For each blocking line "
+    "below, read the ledger entries it cites and the entries the analysts cite against it, "
+    "and decide from what those entries show whether the line is UPHELD (the entries "
+    "contradict the claim the line contests) or NOT UPHELD (the entries support the claim "
+    "as its analyst wrote it). Write one line per blocking line and nothing else, each "
+    "reading 'L<number>: UPHELD: <one-sentence reason naming the entry ids>' or "
+    "'L<number>: NOT UPHELD: <one-sentence reason naming the entry ids>'."
+)
+# Said where that question carries no tool: no ledger to read, or a model that
+# cannot bind ``read_evidence``.
+LIMIT_RULING_QUESTION_WITHOUT_TOOLS = (
+    f"{LIMIT_RULING_QUESTION} This turn carries no tools: decide from the entries this "
+    "conversation holds."
+)
 
 # The block's opening line: the label in capitals, with any Markdown emphasis
 # or heading marks a model puts around it, and what follows on the same line.
@@ -2298,6 +2329,9 @@ class JudgeAgent(BudgetMeter):
         self.read_degradations: list[str] = []
         # The run's ledger while a mediation round runs (:meth:`mediate`).
         self._mediation_ledger: list[Any] | None = None
+        # The last mediation's prompt and the answer its block was read from
+        # (:meth:`rule_on_standing_lines`), ``None`` before one answered.
+        self._mediation_turns: tuple[list[Any], str] | None = None
         # The notice the last verdict prompt carried when its parts did not
         # fit the judge's window whole, or ``""``; the judge node records it
         # as a degradation reason.
@@ -3502,6 +3536,7 @@ class JudgeAgent(BudgetMeter):
         only the loop's own (``agents.ledger_reads``).
         """
         self._mediation_ledger = list(ledger) if ledger else None
+        self._mediation_turns = None
         try:
             return await self._mediate_round(
                 reports,
@@ -3628,6 +3663,14 @@ class JudgeAgent(BudgetMeter):
         # later round (``anthropic_history``, ``STANDING_FACTS_CHARS``); the
         # run state, regenerated each round, stands after it.
         standing_head = f"{_standing_blocks('', facts_block)}{_identity_prefix(sample)}"
+        # The round's ``read_evidence`` reads the run's ledger: the mediator is
+        # asked to read an entry a line turns on before it rules on it. A
+        # mediation with no ledger is asked as before.
+        closing = (
+            f"{MEDIATION_ENTRY_CHECK} {MEDIATOR_HUMAN_CLOSING}"
+            if self._mediation_ledger
+            else MEDIATOR_HUMAN_CLOSING
+        )
 
         def _mediation_human(
             reports_shown: str, history_shown: str, notice: str, entries_shown: str = ""
@@ -3638,7 +3681,7 @@ class JudgeAgent(BudgetMeter):
                 f"{standing_head}{_standing_blocks(run_state, '')}{note}"
                 f"Expert Reports:\n{reports_shown}\n\nPrevious Discussion:\n{history_shown}\n\n"
                 f"{carried_facts}{entries}"
-                f"{MEDIATOR_HUMAN_CLOSING}"
+                f"{closing}"
             )
 
         # Whole when the judge's window holds it with its output cap kept
@@ -3942,6 +3985,9 @@ class JudgeAgent(BudgetMeter):
                 else ""
             ),
         )
+        # The conversation the block was read from, for the one question the
+        # round limit may ask after it (:meth:`rule_on_standing_lines`).
+        self._mediation_turns = (list(prompt_messages), reasoning_text)
         return argument, is_consensus
 
     def _mediation_entries_reserve(self) -> int:
@@ -4041,6 +4087,60 @@ class JudgeAgent(BudgetMeter):
         last agreement line is the one read; a question that is not made or
         fails leaves the answer as it was.
         """
+        answer = await self._ask_after_mediation(
+            prompt_messages,
+            reasoning_text,
+            CONTRADICTIONS_BLOCK_QUESTION,
+            CONTRADICTIONS_BLOCK_QUESTION_WITHOUT_TOOLS,
+            "mediation block question",
+            "Mediator block question",
+        )
+        return f"{reasoning_text.rstrip()}\n\n{answer}" if answer else reasoning_text
+
+    async def rule_on_standing_lines(self, lines_text: str, ledger: Sequence[Any] | None) -> str:
+        """The mediator's rulings on the blocking lines the round limit leaves, or ``""``.
+
+        One question (:data:`LIMIT_RULING_QUESTION`, then ``lines_text``) after
+        the last mediation's answer, in the conversation that produced it,
+        offering ``read_evidence`` over ``ledger`` (the run's) where the model
+        binds it. Bounded as the block question is: the spend ceiling admits
+        each turn, and the judge's own time limit holds the whole. ``""`` when
+        no mediation answered in this agent, or the question was not made or
+        failed (logged); the caller states it.
+        """
+        if self._mediation_turns is None:
+            return ""
+        prompt_messages, reasoning_text = self._mediation_turns
+        self._mediation_ledger = list(ledger) if ledger else None
+        try:
+            return await self._ask_after_mediation(
+                prompt_messages,
+                reasoning_text,
+                f"{LIMIT_RULING_QUESTION}\n\n{lines_text}",
+                f"{LIMIT_RULING_QUESTION_WITHOUT_TOOLS}\n\n{lines_text}",
+                "mediation limit rulings",
+                "Mediator limit rulings",
+            )
+        finally:
+            self._mediation_ledger = None
+
+    async def _ask_after_mediation(
+        self,
+        prompt_messages: list[tuple[str, str]],
+        reasoning_text: str,
+        question: str,
+        question_without_tools: str,
+        call: str,
+        what: str,
+    ) -> str:
+        """The answer to one question after the mediator's answer, or ``""``.
+
+        In the conversation that produced it, with ``read_evidence`` over the
+        mediation's ledger where the model binds it (``question``) and without
+        it otherwise (``question_without_tools``). ``call`` names the call to
+        the spend ceiling and the usage record, ``what`` to the log. A question
+        the ceiling refuses or that fails answers ``""``.
+        """
         from langchain_core.messages import AIMessage, BaseMessage
 
         from maljan.llm.context_window import output_bound_kwargs
@@ -4054,21 +4154,15 @@ class JudgeAgent(BudgetMeter):
         reads, reading = self._reading_model(self._mediation_ledger)
         turns += [
             AIMessage(content=reasoning_text),
-            HumanMessage(
-                content=CONTRADICTIONS_BLOCK_QUESTION
-                if reading is not None
-                else CONTRADICTIONS_BLOCK_QUESTION_WITHOUT_TOOLS
-            ),
+            HumanMessage(content=question if reading is not None else question_without_tools),
         ]
         timeout = _seconds_or_none(loop_limits("judge")[0])
         slot = object()
         try:
-            bound = self._spend_admits(
-                "mediation block question", turns, slot=slot, deadline_s=timeout
-            )
+            bound = self._spend_admits(call, turns, slot=slot, deadline_s=timeout)
         except SpendCeilingStop as stop:
-            self.logger.warning("Mediator block question not asked: %s.", stop)
-            return reasoning_text
+            self.logger.warning("%s not asked: %s.", what, stop)
+            return ""
         held = output_bound_kwargs(self.llm, bound) if bound is not None else {}
         try:
             # A provider saying "not now" is asked again inside the model call
@@ -4079,13 +4173,11 @@ class JudgeAgent(BudgetMeter):
             async def _turn(conversation: list[Any]) -> Any:
                 kept = held
                 if sent[0]:
-                    later = self._spend_admits(
-                        "mediation block question", conversation, slot=slot, deadline_s=timeout
-                    )
+                    later = self._spend_admits(call, conversation, slot=slot, deadline_s=timeout)
                     kept = output_bound_kwargs(self.llm, later) if later is not None else {}
                 sent[0] += 1
                 model = self.llm if reading is None else reading
-                return await as_call("Mediator block question", model.ainvoke(conversation, **kept))
+                return await as_call(what, model.ainvoke(conversation, **kept))
 
             response = await asyncio.wait_for(
                 _turn(turns)
@@ -4093,25 +4185,22 @@ class JudgeAgent(BudgetMeter):
                 else reads.answer(
                     _turn,
                     turns,
-                    on_read=lambda reply: self._record_usage(
-                        reply, call="mediation block question"
-                    ),
-                    what="Mediator block question",
-                    call="mediation block question",
+                    on_read=lambda reply: self._record_usage(reply, call=call),
+                    what=what,
+                    call=call,
                 ),
                 timeout,
             )
-            self._record_usage(response, call="mediation block question")
+            self._record_usage(response, call=call)
             record_judge_response(
                 getattr(self, "truncation_ledger", None), response, cap=self._output_cap().tokens
             )
-        except Exception as exc:  # noqa: BLE001 — an unanswered question leaves the answer as it was
-            self.logger.warning("Mediator block question failed (%s).", type(exc).__name__)
-            return reasoning_text
+        except Exception as exc:  # noqa: BLE001 — an unanswered question changes nothing
+            self.logger.warning("%s failed (%s).", what, type(exc).__name__)
+            return ""
         finally:
             self._spend_release(slot)
-        answer = _answer_text(response).strip()
-        return f"{reasoning_text.rstrip()}\n\n{answer}" if answer else reasoning_text
+        return _answer_text(response).strip()
 
     async def give_verdict(
         self,
