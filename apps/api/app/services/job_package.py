@@ -12,9 +12,10 @@ is. It holds:
 - ``manifest.sig``, optionally and always the second entry: an HMAC-SHA256
   over the manifest's bytes under a key derived from the settings encryption
   key the platform already holds, under its own purpose label
-  (:data:`SIGNATURE_LABEL`). Like the ledger's chain it proves integrity only
-  to a holder of that key: anyone who holds it can sign another manifest, and
-  anyone without it cannot check it;
+  (:data:`SIGNATURE_LABEL`; a package signed before the rename, under
+  :data:`PREVIOUS_SIGNATURE_LABEL`, still verifies). Like the ledger's chain
+  it proves integrity only to a holder of that key: anyone who holds it can
+  sign another manifest, and anyone without it cannot check it;
 - ``run/``: the stored-run files as they are (the job row with the sample's
   hash and name, the report row, the report document, the evidence ledger, the
   run summary, the judge's bundle, the events), exactly what
@@ -86,17 +87,21 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import IO, Any, BinaryIO, Protocol
 
-from malspark.core.previous_name import PREVIOUS_NAME
+from malspark.core.previous_name import PREVIOUS_NAME, under_current_name
 
 from app.services import ledger_chain
 from app.services.run_export import LAYOUT
 
 FORMAT = "malspark-job-package/2"
-# The HKDF purpose label the signature key is derived under, and the
-# signature's domain tag: both keep the previous product name
-# (``malspark.core.previous_name``), so a package signed before the rename
-# still verifies.
-SIGNATURE_LABEL = f"{PREVIOUS_NAME}-job-package-v1".encode("ascii")
+# The HKDF purpose label a new package's signature key is derived under, and
+# the label a package signed before the rename was (``malspark.core.previous_name``).
+# The signature record names its label; a verification derives a key under
+# each, so a package of either kind verifies.
+SIGNATURE_LABEL = b"malspark-job-package-v1"
+PREVIOUS_SIGNATURE_LABEL = f"{PREVIOUS_NAME}-job-package-v1".encode("ascii")
+SIGNATURE_LABELS = (SIGNATURE_LABEL, PREVIOUS_SIGNATURE_LABEL)
+# The signature's domain tag keeps the previous product name, as the tags of
+# the ledger's chain do: one tag for every package, old or new.
 _SIGNATURE_TAG = f"{PREVIOUS_NAME}-job-package-manifest/1\n".encode("ascii")
 SIGNATURE_ALGORITHM = "HMAC-SHA256"
 SIGNATURE_PROVES = (
@@ -138,12 +143,6 @@ _HEX = frozenset("0123456789abcdef")
 # gzip header the builder wrote then (no flags, no time, maximum compression,
 # no named system).
 LEGACY_FORMAT = "malspark-job-package/1"
-# Both formats as a package built before the rename names them, read as the
-# format each is (``malspark.core.previous_name``).
-PREVIOUS_NAME_FORMATS = {
-    f"{PREVIOUS_NAME}-job-package/2": FORMAT,
-    f"{PREVIOUS_NAME}-job-package/1": LEGACY_FORMAT,
-}
 _LEGACY_HEADER = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff"
 # The current header: the same fields with FEXTRA set, and one extra subfield
 # ("MJ") holding the SHA-256 of the rest of the file and its HMAC.
@@ -511,10 +510,13 @@ def signature_keys() -> dict[str, ledger_chain.ChainKey]:
 
     The same source as the ledger's own keys (``ledger_chain.known_keys``):
     one settings encryption key is held at a time, so this is the current key
-    alone; a package signed under an earlier key reads ``other_key``.
+    under each label of :data:`SIGNATURE_LABELS` (a package signed before the
+    rename names the previous one); a package signed under an earlier
+    settings key reads ``other_key``.
     """
     key, _ = signature_key()
-    return {key.key_id: key} if key is not None else {}
+    previous, _ = ledger_chain.platform_key_status(PREVIOUS_SIGNATURE_LABEL)
+    return {k.key_id: k for k in (key, previous) if k is not None}
 
 
 def sign(manifest: bytes, key: ledger_chain.ChainKey) -> str:
@@ -716,11 +718,18 @@ def build_package(
     return manifest
 
 
-def _signature_record(body: bytes, key_id: str, mac: str) -> dict[str, str]:
-    """The signature record the builder writes for the manifest's bytes ``body``."""
+def _signature_record(
+    body: bytes, key_id: str, mac: str, label: bytes | None = None
+) -> dict[str, str]:
+    """The signature record the builder writes for the manifest's bytes ``body``.
+
+    ``label`` is the key label the record names: the builder's own
+    (:data:`SIGNATURE_LABEL`) unless a verification re-states a record signed
+    under another of :data:`SIGNATURE_LABELS`.
+    """
     return {
         "algorithm": SIGNATURE_ALGORITHM,
-        "key_label": SIGNATURE_LABEL.decode("ascii"),
+        "key_label": (SIGNATURE_LABEL if label is None else label).decode("ascii"),
         "key_id": key_id,
         "manifest_sha256": hashlib.sha256(body).hexdigest(),
         "hmac": mac,
@@ -1235,8 +1244,10 @@ def verify_package(
                         manifest_bytes = handle.read()
                         parsed = _parse(manifest_bytes, MANIFEST_DEPTH)
                         formats = (FORMAT, LEGACY_FORMAT)
+                        # A manifest written before the rename names either
+                        # format under the previous name, read as the same one.
                         named = (
-                            PREVIOUS_NAME_FORMATS.get(parsed.get("format"), parsed.get("format"))
+                            under_current_name(parsed.get("format"))
                             if isinstance(parsed, dict)
                             else None
                         )
@@ -1433,9 +1444,19 @@ def _check_signature(
         return "invalid", "The signature record carries no well-formed key id and HMAC.", None
     if key_id != declared.get("key_id"):
         return "invalid", "The signature names another key than the manifest does.", None
+    labels = {label.decode("ascii"): label for label in SIGNATURE_LABELS}
+    label = labels.get(str(record.get("key_label")))
+    if label is None:
+        return "invalid", "The signature names a key label no release derives.", None
+    # The manifest, which the HMAC covers, names the same label.
+    if record.get("key_label") != declared.get("key_label"):
+        return "invalid", "The signature names another key label than the manifest does.", None
     # Byte for byte the record the builder writes (as ``_Stage.json`` writes
-    # it): no field, value or spacing of it is left unchecked.
-    canonical = json.dumps(_signature_record(body, str(key_id), str(mac)), indent=1, sort_keys=True)
+    # it), under the label it names: no field, value or spacing of it is left
+    # unchecked.
+    canonical = json.dumps(
+        _signature_record(body, str(key_id), str(mac), label), indent=1, sort_keys=True
+    )
     if signature_bytes != canonical.encode("utf-8"):
         return "invalid", "The signature file is not the record the builder writes.", None
     key = keys.get(str(key_id))
@@ -1545,8 +1566,10 @@ __all__ = [
     "BROKEN",
     "FORMAT",
     "OTHER_KEY",
+    "PREVIOUS_SIGNATURE_LABEL",
     "SEAL_UNVERIFIABLE",
     "SIGNATURE_LABEL",
+    "SIGNATURE_LABELS",
     "UNSIGNED",
     "VERIFIED",
     "PackageError",

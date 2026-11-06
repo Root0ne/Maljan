@@ -10,6 +10,7 @@
  * lands on the same place in the other.
  */
 
+import { underCurrentName } from "@/lib/previousName";
 import { inlineText, subsectionTitles } from "./safeMarkdown";
 
 export const BUNDLE_FORMAT = "malspark-evidence-bundle/1";
@@ -79,7 +80,9 @@ export function readBundle(body: string): { bundle: EvidenceBundle } | { problem
   }
   if (!data || typeof data !== "object") return { problem: "the server's answer is not a bundle" };
   const doc = data as Record<string, unknown>;
-  if (doc.format !== BUNDLE_FORMAT) {
+  // A bundle stored before the rename names the same format under the
+  // previous name (`@/lib/previousName`).
+  if (underCurrentName(doc.format) !== BUNDLE_FORMAT) {
     return { problem: `the server sent a bundle of format ${JSON.stringify(doc.format ?? null)}, not ${BUNDLE_FORMAT}` };
   }
   const report = (doc.report && typeof doc.report === "object" ? doc.report : {}) as Record<string, unknown>;

@@ -13,7 +13,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Res
 from fastapi.responses import JSONResponse
 from malspark.core.model_assignments import endpoint_label
 from malspark.core.plugins import ALLOW_LIST_KEY
-from malspark.core.previous_name import PREVIOUS_NAME
+from malspark.core.previous_name import under_current_name
 from malspark.core.settings_annotations import (
     GROUP_DESCRIPTIONS,
     GROUP_ORDER,
@@ -116,18 +116,13 @@ WHOLE_MAP_FORMAT = "malspark-settings/1"
 IMPORT_FORMATS = (EXPORT_FORMAT, CHANGES_FORMAT, WHOLE_MAP_FORMAT)
 # The formats written before ``CALL_BUDGET_KEY`` existed.
 FORMER_FLOOR_FORMATS = (CHANGES_FORMAT, WHOLE_MAP_FORMAT)
-# Every format as an export written before the rename names it
-# (``malspark.core.previous_name``): read as the same format, so an operator's
-# earlier exports still import.
-PREVIOUS_NAME_FORMAT_PREFIX = f"{PREVIOUS_NAME}-settings/"
-_FORMAT_PREFIX = "malspark-settings/"
 
 
 def current_format(fmt: str) -> str:
-    """``fmt`` under the current name: an earlier export's format reads as the same version."""
-    if fmt.startswith(PREVIOUS_NAME_FORMAT_PREFIX):
-        return _FORMAT_PREFIX + fmt[len(PREVIOUS_NAME_FORMAT_PREFIX) :]
-    return fmt
+    """``fmt`` under the current name: an export written before the rename
+    (``malspark.core.previous_name``) reads as the same version, so an
+    operator's earlier exports still import."""
+    return str(under_current_name(fmt))
 
 
 logger = get_logger("api.settings")

@@ -31,13 +31,14 @@ ALLOWED: dict[str, tuple[str | None, str]] = {
     "src/malspark/core/previous_name.py": (
         'PREVIOUS_NAME = "',
         "The one constant every value bound to earlier data is built from: hash-chain "
-        "domain tags and HKDF labels, the legacy capture directory, the earlier settings "
-        "export and job package formats, and stored STIX property names.",
+        "domain tags and HKDF labels, the earlier package key label, the legacy capture "
+        "directory, every earlier format and schema label, and stored STIX property names.",
     ),
-    "apps/web/src/types/settings.ts": (
-        "export const PREVIOUS_NAME_SETTINGS_FORMAT_PREFIX = ",
-        "The console checks an import's format before the API sees it, so it mirrors the "
-        "API's earlier-format prefix to keep an operator's earlier exports importable.",
+    "apps/web/src/lib/previousName.ts": (
+        "export const PREVIOUS_NAME_FORMAT_PREFIX = ",
+        "The console checks a stored or imported document's format before the API sees "
+        "it, so it mirrors the constant to read an earlier settings export or evidence "
+        "bundle as the same version.",
     ),
     "scripts/upgrade/rename-volumes-and-env.sh": (
         None,

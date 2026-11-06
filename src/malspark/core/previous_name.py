@@ -13,8 +13,13 @@ file to the new one:
 - the capture directory an earlier release wrote
   (``malspark.tools.staging.LEGACY_CAPTURE_DIR_NAME``), which the sweep still
   reaches;
-- the settings export format and the job package format an earlier release
-  wrote, which an import and a verification still read;
+- every versioned format and schema label an earlier release wrote
+  (``<name>-settings/3``, ``<name>-job-package/2``, ``<name>-evidence-bundle/1``,
+  a data file's ``<name>-.../v1``): a reader takes it as the same version under
+  the current name (:func:`under_current_name`), and a writer writes the
+  current name;
+- the job package signature key label an earlier release signed under, which
+  a verification still derives beside the current one;
 - the STIX custom properties a stored bundle carries, which the bundle
   endpoint reads under the current names.
 
@@ -26,3 +31,20 @@ what it was. ``scripts/upgrade/rename-volumes-and-env.sh`` and
 from __future__ import annotations
 
 PREVIOUS_NAME = "maljan"
+CURRENT_NAME = "malspark"
+
+_PREVIOUS_PREFIX = f"{PREVIOUS_NAME}-"
+_CURRENT_PREFIX = f"{CURRENT_NAME}-"
+
+
+def under_current_name(label: object) -> object:
+    """A format or schema label an earlier release wrote, as that version under the current name.
+
+    ``<previous>-settings/3`` reads as ``malspark-settings/3``; a label under the
+    current name, any other string and a non-string are returned as they are,
+    so a reader compares the result with its own constants and refuses what
+    it refused before.
+    """
+    if isinstance(label, str) and label.startswith(_PREVIOUS_PREFIX):
+        return _CURRENT_PREFIX + label[len(_PREVIOUS_PREFIX) :]
+    return label

@@ -84,13 +84,14 @@ that copies every object into the new bucket from inside the API container.
   stored before the upgrade is served under the new property names.
 - Settings exports are written as `malspark-settings/3`; an export written
   before the upgrade still imports.
-- Job packages are written as `malspark-job-package/2`; a package built before
-  the upgrade still verifies.
+- Job packages are written as `malspark-job-package/2` and signed under the key
+  label `malspark-job-package-v1`; a package built and signed before the
+  upgrade still verifies. An evidence bundle stored before still reads.
 - The FLOSS binary is installed under `~/.local/share/malspark/tools`; run
   `scripts/install_floss.sh` again, or move the old directory there.
 
 Some values keep the old name on purpose, because data already written is
-bound to them: the domain tags and key labels of the evidence ledger, audit
-chain and job package signatures, and the capture directory an earlier
-release left under the system temp directory. They are listed in
+bound to them: the domain tags of the evidence ledger, audit chain, stored
+report seals and job package signatures, the ledger chain's key label, and the
+capture directory an earlier release left under the system temp directory. They are listed in
 `src/malspark/core/previous_name.py`.

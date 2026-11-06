@@ -461,3 +461,38 @@ def test_an_edit_without_a_category_is_still_refused():
     with pytest.raises(AgentMapError) as exc:
         validate_agent_map({"core.agents.definitions": _LEGACY_DEFINITIONS}, {})
     assert "core.agents.definitions.my_sandbox.category" in exc.value.errors
+
+
+@pytest.mark.parametrize("version", ["1", "2", "3"])
+def test_an_export_written_before_the_rename_imports_as_the_same_version(client, version):
+    """An operator's export from before T-576 names its format under the previous name."""
+    from app.api.v1.settings import IMPORT_FORMATS, current_format
+    from malspark.core.previous_name import PREVIOUS_NAME
+
+    previous = f"{PREVIOUS_NAME}-settings/{version}"
+    assert current_format(previous) == f"malspark-settings/{version}"
+    assert current_format(previous) in IMPORT_FORMATS
+    with (
+        patch(
+            "app.api.v1.settings.SettingsService.save",
+            AsyncMock(return_value=SaveResult(["core.llm.provider"], {"next_job": 1})),
+        ) as save,
+        patch("app.api.v1.settings.audit_record", AsyncMock()),
+    ):
+        r = client.post(
+            "/api/v1/settings/import",
+            json={"format": previous, "values": {"core.llm.provider": "openai"}},
+        )
+    assert r.status_code == 200, r.text
+    assert save.call_args.args[0] == {"core.llm.provider": "openai"}
+
+
+def test_an_unknown_format_under_the_previous_name_is_still_refused(client):
+    from malspark.core.previous_name import PREVIOUS_NAME
+
+    r = client.post(
+        "/api/v1/settings/import",
+        json={"format": f"{PREVIOUS_NAME}-settings/9", "values": {}},
+    )
+    assert r.status_code == 422
+    assert r.json() == {"errors": {"format": "unsupported format"}}

@@ -32,6 +32,7 @@ from collections.abc import Mapping
 from functools import cache
 from typing import Any
 
+from malspark.core.previous_name import under_current_name
 from malspark.core.tool_declarations import STRICT_DECLARATIONS, ToolFacts
 
 SNAPSHOT_PATH = "data/legacy_tool_facts_v1.json"
@@ -40,6 +41,9 @@ SNAPSHOT_SCHEMA = "malspark-legacy-tool-facts/v1"
 # the file is UTF-8 with LF line ends), with its schema label under the
 # product's current name (T-576); not one fact in it changed.
 SNAPSHOT_SHA256 = "3c2ae629ba80ae4d12885a6c132aff4ad37740faa00fe314f0dd4dde572bbf10"
+# The same snapshot byte for byte as it was cut, its schema label under the
+# previous name (``malspark.core.previous_name``): a copy of it reads the same.
+PREVIOUS_NAME_SNAPSHOT_SHA256 = "3cf4058ce94d31eb67c1cc877a609df2596129994bb8cf2e39e4fdd172c4b221"
 
 
 @cache
@@ -53,13 +57,13 @@ def _document() -> Mapping[str, Any]:
 
     text = resolve_data(SNAPSHOT_PATH).read_text(encoding="utf-8")
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    if digest != SNAPSHOT_SHA256:
+    if digest not in (SNAPSHOT_SHA256, PREVIOUS_NAME_SNAPSHOT_SHA256):
         raise ValueError(
             f"{SNAPSHOT_PATH} is not the frozen snapshot (sha256 {digest}, "
             f"pinned {SNAPSHOT_SHA256}); a stored run would read differently."
         )
     document = json.loads(text)
-    if document.get("schema") != SNAPSHOT_SCHEMA:
+    if under_current_name(document.get("schema")) != SNAPSHOT_SCHEMA:
         raise ValueError(f"{SNAPSHOT_PATH} is not of the schema {SNAPSHOT_SCHEMA}.")
     return document  # type: ignore[no-any-return]
 
