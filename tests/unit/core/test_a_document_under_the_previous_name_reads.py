@@ -131,3 +131,85 @@ def test_a_judge_answer_stored_with_previous_name_properties_is_renamed_in_place
     assert obj == {"type": "malware", "id": "malware--1", f"x_{CURRENT_NAME}_confidence": 0.8}
     assert both == {"type": "indicator", f"x_{CURRENT_NAME}_confidence": 0.9}
     assert f"x_{CURRENT_NAME}_assessment" in bundle
+
+
+# ---- stored fixtures under the previous name (T-576) ----------------------
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+def _back(text: str) -> str:
+    """``text`` as a release before the rename wrote it: every case of the name."""
+    for current, previous in (
+        (CURRENT_NAME.upper(), PREVIOUS_NAME.upper()),
+        (CURRENT_NAME.capitalize(), PREVIOUS_NAME.capitalize()),
+        (CURRENT_NAME, PREVIOUS_NAME),
+    ):
+        text = text.replace(current, previous)
+    return text
+
+
+def _forward(text: str) -> str:
+    for previous, current in (
+        (PREVIOUS_NAME.upper(), CURRENT_NAME.upper()),
+        (PREVIOUS_NAME.capitalize(), CURRENT_NAME.capitalize()),
+        (PREVIOUS_NAME, CURRENT_NAME),
+    ):
+        text = text.replace(previous, current)
+    return text
+
+
+def test_a_stored_report_written_before_the_rename_renders_as_it_does_now() -> None:
+    """Every difference is the report's own stored text; nothing it reads by key is lost.
+
+    The fixture holds no ledger seal, so there is no seal to verify here; the
+    seal tags are held unchanged by ``test_identifiers_external_stores_hold_keep_their_values``
+    and the ledger-chain tests.
+    """
+    from malspark.reporting.models import MalwareReport, key_ordered
+    from malspark.reporting.renderers import HtmlRenderer, MarkdownRenderer
+
+    fixture = ROOT / "tests/fixtures/reporting/stored_report_redacted.json"
+    current_text = fixture.read_text(encoding="utf-8")
+    previous_text = _back(current_text)
+    assert previous_text != current_text
+    current = MalwareReport.model_validate(key_ordered(json.loads(current_text)))
+    previous = MalwareReport.model_validate(key_ordered(json.loads(previous_text)))
+    assert _forward(MarkdownRenderer().render(previous)) == MarkdownRenderer().render(current)
+    assert _forward(HtmlRenderer().render(previous, nonce="n")) == HtmlRenderer().render(
+        current, nonce="n"
+    )
+
+
+def test_a_stored_run_written_before_the_rename_replays_to_the_same_codes(
+    tmp_path: Path,
+) -> None:
+    """The tiny run with every file as a release before the rename wrote it decides the same."""
+    import shutil
+
+    from scripts.replay.record import BOOKKEEPING_KEYS
+    from scripts.replay.rules import replay_run
+    from scripts.replay.stored import read_run
+
+    fixture = ROOT / "tests/fixtures/replay/tiny"
+    previous = tmp_path / "tiny"
+    shutil.copytree(fixture, previous)
+    changed = 0
+    for path in previous.glob("*.json"):
+        text = path.read_text(encoding="utf-8")
+        if _back(text) != text:
+            changed += 1
+            path.write_text(_back(text), encoding="utf-8")
+    assert changed
+
+    def _decided(record: dict[str, Any]) -> Any:
+        return json.loads(
+            _forward(
+                json.dumps(
+                    {k: v for k, v in record.items() if k not in BOOKKEEPING_KEYS and k != "run"},
+                    sort_keys=True,
+                )
+            )
+        )
+
+    assert _decided(replay_run(read_run(previous))) == _decided(replay_run(read_run(fixture)))

@@ -36,6 +36,11 @@ what it was. ``scripts/upgrade/rename-volumes-and-env.sh`` and
 
 from __future__ import annotations
 
+import logging
+import os
+from collections.abc import Mapping
+from typing import Any
+
 PREVIOUS_NAME = "maljan"
 CURRENT_NAME = "malspark"
 
@@ -54,3 +59,48 @@ def under_current_name(label: object) -> object:
     if isinstance(label, str) and label.startswith(_PREVIOUS_PREFIX):
         return _CURRENT_PREFIX + label[len(_PREVIOUS_PREFIX) :]
     return label
+
+
+def previous_group(group: str) -> str | None:
+    """The entry-point group ``group`` was named before the rename; ``None`` for no such.
+
+    ``malspark.memory_backends`` was ``<previous>.memory_backends``: a plugin
+    package built before the rename still declares itself there.
+    """
+    prefix = f"{CURRENT_NAME}."
+    return f"{PREVIOUS_NAME}.{group[len(prefix) :]}" if group.startswith(prefix) else None
+
+
+def previous_environment_names(environ: Mapping[str, str] | None = None) -> list[str]:
+    """The names of the environment variables set under the previous prefix, sorted.
+
+    Nothing reads them any more: each moved to ``MALSPARK_`` with the rename.
+    Only names are returned, never a value.
+    """
+    prefix = f"{PREVIOUS_NAME.upper()}_"
+    return sorted(
+        name for name in (os.environ if environ is None else environ) if name.startswith(prefix)
+    )
+
+
+def warn_previous_environment(
+    log: Any = None, environ: Mapping[str, str] | None = None
+) -> list[str]:
+    """Warn, once at start, of every variable still set under the previous prefix, by name.
+
+    The API, the worker and the sidecars that import the platform call it as
+    they start. A variable set outside ``docker/.env`` (a shell profile, a unit
+    file) that the upgrade script could not rename is otherwise silently not
+    read. The value is never logged.
+    """
+    names = previous_environment_names(environ)
+    if names:
+        log = logging.getLogger(CURRENT_NAME) if log is None else log
+        current = f"{CURRENT_NAME.upper()}_"
+        log.warning(
+            "Environment variables under the product's previous name are set and not read: "
+            "%s. Rename each to its %s name.",
+            ", ".join(names),
+            current,
+        )
+    return names

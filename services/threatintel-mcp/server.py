@@ -43,6 +43,9 @@ from malspark.core.stdio_safe import route_logging_to_stderr
 # in-process keeps its own logging.
 if __name__ == "__main__":
     route_logging_to_stderr()
+    from malspark.core.previous_name import warn_previous_environment
+
+    warn_previous_environment()
 
 from malspark.tools.arguments import says_unquoted, unquoted, with_read_as
 from malspark.tools.capabilities import (

@@ -49,6 +49,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from malspark.core.logger import logger
+from malspark.core.previous_name import previous_group
 
 # Each kind of plugin and the entry-point group its packages declare it in.
 PLUGIN_GROUPS: dict[str, str] = {
@@ -288,7 +289,37 @@ def allowed_names(kind: str, allowed: Iterable[Any] | None = None) -> set[str]:
 
 
 def _entry_points(group: str) -> list[Any]:
-    return list(entry_points(group=group))
+    """Every entry point of ``group``, and of the group's name before the product's rename.
+
+    A plugin package built before the rename (T-576) declares itself under the
+    previous group; it is still found, and a warning names it so its author can
+    move it. A package declaring the same name under both is read once.
+    """
+    found = list(entry_points(group=group))
+    previous = previous_group(group)
+    if previous is None:
+        return found
+    held = {(str(p.name), str(getattr(p, "value", ""))) for p in found}
+    for point in entry_points(group=previous):
+        if (str(point.name), str(getattr(point, "value", ""))) in held:
+            continue
+        found.append(point)
+        if (previous, str(point.name)) in _WARNED_PREVIOUS_GROUP:
+            continue
+        _WARNED_PREVIOUS_GROUP.add((previous, str(point.name)))
+        logger.warning(
+            "Plugin %r (%s) is declared in the entry-point group %s; it is read, and "
+            "its package should declare it in %s instead.",
+            str(point.name),
+            _distribution_name(getattr(point, "dist", None)) or "an unnamed package",
+            previous,
+            group,
+        )
+    return found
+
+
+# The plugins under a previous group already named in the log, once each.
+_WARNED_PREVIOUS_GROUP: set[tuple[str, str]] = set()
 
 
 def _distribution_name(dist: Any) -> str:

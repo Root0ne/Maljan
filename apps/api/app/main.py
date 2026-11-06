@@ -228,6 +228,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # ── Startup ──────────────────────────────────────────────
     logger.info("Starting Malspark API server...")
+    from malspark.core.previous_name import warn_previous_environment
+
+    warn_previous_environment(logger)
 
     # The API's own credentials (database, Redis, object store) mask shown
     # text by value from the start (``malspark.core.settings_masking``).

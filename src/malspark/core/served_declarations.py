@@ -104,7 +104,7 @@ from malspark.core.tool_declarations import (
     lenient_declaration,
     loggable_names,
 )
-from malspark.tools.declared_facts import FACTS_META_KEY
+from malspark.tools.declared_facts import FACTS_META_KEY, facts_in_meta
 
 if TYPE_CHECKING:
     from malspark.core.tool_declarations import Declared
@@ -206,7 +206,8 @@ def served_facts_of(definition: Any, where: str = "") -> ToolFacts | None:
     not a mapping, declares nothing, with a warning.
     """
     meta = _meta_of(definition)
-    raw = meta.get(FACTS_META_KEY) if isinstance(meta, Mapping) else None
+    # Under the current key, else the one a server built before the rename sends.
+    raw = facts_in_meta(meta)
     if raw is None:
         return None
     name = _name_of(definition)

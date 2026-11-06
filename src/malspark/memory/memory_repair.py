@@ -28,9 +28,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from malspark.core.logger import logger
+from malspark.core.previous_name import CURRENT_NAME, PREVIOUS_NAME
 
-# Where the marker of a finished repair is kept, and which repair it is.
-REPAIR_COLLECTION = "malspark_memory_repairs"
+# Where the marker of a finished repair is kept, and which repair it is. The
+# collection keeps the product's previous name (``malspark.core.previous_name``):
+# the markers an earlier release wrote are there.
+REPAIR_COLLECTION = f"{PREVIOUS_NAME}_memory_repairs"
 REPAIR_ID = "aud65-labels-and-hash-order-v1"
 # The scroll page the stores already read with.
 _PAGE = 256
@@ -49,7 +52,24 @@ def _marker_id(*names: str) -> int:
 
 
 def _collections(client: Any) -> set[str]:
-    return {c.name for c in client.get_collections().collections}
+    """Every collection name the server answers to: its collections and their aliases."""
+    names = {c.name for c in client.get_collections().collections}
+    return names | aliases(client)
+
+
+def aliases(client: Any) -> set[str]:
+    """The alias names the server holds (an upgrade aliases the new names to the old
+    collections); none when the server cannot list them."""
+    try:
+        return {a.alias_name for a in client.get_aliases().aliases}
+    except Exception:  # noqa: BLE001 — a server without aliases has none to add
+        return set()
+
+
+def _previous(name: str) -> str:
+    """``name`` as the release before the rename named a default collection."""
+    current = f"{CURRENT_NAME}_"
+    return f"{PREVIOUS_NAME}_{name[len(current) :]}" if name.startswith(current) else name
 
 
 def _pages(client: Any, collection: str) -> Any:
@@ -231,9 +251,12 @@ def repair_once(client: Any, cases: str, function_hashes: str | None) -> str:
         from qdrant_client.models import Distance, PointStruct, VectorParams
 
         marker = _marker_id(cases, function_hashes or "")
+        # The marker an earlier release wrote names the collections as they
+        # were then called; an upgrade aliases the new names to them.
+        earlier = _marker_id(_previous(cases), _previous(function_hashes or ""))
         existing = _collections(client)
         if REPAIR_COLLECTION in existing and client.retrieve(
-            collection_name=REPAIR_COLLECTION, ids=[marker]
+            collection_name=REPAIR_COLLECTION, ids=sorted({marker, earlier})
         ):
             return ALREADY_DONE
         relabelled = 0

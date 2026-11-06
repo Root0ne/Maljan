@@ -61,6 +61,10 @@ DEFAULT_STAGING_TTL_HOURS = 24.0
 # written out in each server, because the remover has to reach the same
 # directory the writer did.
 DEFAULT_BASE_NAME = "malspark-analysis-mcp"
+# The default base a release before the product's rename (T-576) used, under
+# its previous name: no sidecar writes there now, and the sweep still reaches
+# it, because what a killed worker left there is live malware.
+LEGACY_BASE_NAME = f"{PREVIOUS_NAME}-analysis-mcp"
 
 # What a job directory is called. The prefix is what tells the sweep which
 # entries under the base are job directories and which are the flat files of

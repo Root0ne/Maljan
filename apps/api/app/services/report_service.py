@@ -11,6 +11,7 @@ from malspark.reporting.builder import ioc_table
 from malspark.reporting.models import ConsolidatedIOC
 from malspark.reporting.renderers.stix_renderer import SAMPLE_DIGESTS, publishes, yes_because
 from malspark.reporting.run_diff import RunRecord, diff_runs
+from malspark.schemas.stix_models import with_current_property_names
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -253,7 +254,9 @@ def run_record(report: AnalysisReport) -> RunRecord:
         malware_category=report.malware_category,
         malware_report=report.malware_report,
         run_summary=report.run_summary,
-        stix_bundle=report.stix_bundle,
+        # A bundle stored before the rename reads under the current property
+        # names, as the bundle endpoint serves it.
+        stix_bundle=with_current_property_names(report.stix_bundle),
         agent_findings=[
             {
                 "agent_name": f.agent_name,

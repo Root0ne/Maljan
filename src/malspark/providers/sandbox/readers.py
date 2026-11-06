@@ -188,8 +188,25 @@ def _read_entry_points() -> None:
     _ENTRY_POINTS_READ.append(True)
     from importlib.metadata import entry_points
 
+    from malspark.core.previous_name import previous_group
+
     try:
-        found = entry_points(group=ENTRY_POINT_GROUP)
+        found = list(entry_points(group=ENTRY_POINT_GROUP))
+        # A reader package built before the product's rename declares itself
+        # under the previous group: still read, and named so it can move.
+        previous = previous_group(ENTRY_POINT_GROUP)
+        held = {str(entry.name) for entry in found}
+        for entry in entry_points(group=previous) if previous else ():
+            if str(entry.name) in held:
+                continue
+            logger.warning(
+                "Sandbox report reader %r is declared in the entry-point group %s; it is "
+                "read, and its package should declare it in %s instead.",
+                str(entry.name),
+                previous,
+                ENTRY_POINT_GROUP,
+            )
+            found.append(entry)
     except Exception as exc:  # noqa: BLE001 — a broken package never stops the built-ins
         logger.warning("Sandbox report readers: entry points unreadable (%s).", type(exc).__name__)
         return

@@ -18,3 +18,15 @@ export function underCurrentName(format: unknown): unknown {
     ? CURRENT_FORMAT_PREFIX + format.slice(PREVIOUS_NAME_FORMAT_PREFIX.length)
     : format;
 }
+
+/** The prefix of a STIX custom property a bundle stored before the rename
+ *  carries (`x_<previous>_published`), derived from the same constant. */
+export const PREVIOUS_PROPERTY_PREFIX = `x_${PREVIOUS_NAME_FORMAT_PREFIX.replace(/-$/, "_")}`;
+const CURRENT_PROPERTY_PREFIX = "x_malspark_";
+
+/** A stored object's custom property `name` (`published`, not `x_malspark_published`):
+ *  under the current name, else under the previous one. */
+export function customProperty(record: Record<string, unknown>, name: string): unknown {
+  const current = record[CURRENT_PROPERTY_PREFIX + name];
+  return current !== undefined ? current : record[PREVIOUS_PROPERTY_PREFIX + name];
+}

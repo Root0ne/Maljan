@@ -17,6 +17,8 @@
  * object the bundle carries.
  */
 
+import { customProperty } from "@/lib/previousName";
+
 export type StixObject = Record<string, unknown> & { id: string; type: string };
 
 export interface GraphNode {
@@ -117,7 +119,8 @@ export const EVIDENCE_REFS_PROPERTY = "x_malspark_evidence_refs";
  * an id in a description or a pattern stays text.
  */
 export function evidenceIdsOf(obj: Record<string, unknown>): string[] {
-  const value = obj[EVIDENCE_REFS_PROPERTY];
+  // Under the previous name too, as a bundle stored before the rename has it.
+  const value = customProperty(obj, "evidence_refs");
   const found: string[] = [];
   for (const v of Array.isArray(value) ? value : []) {
     const id = text(v);
@@ -177,7 +180,7 @@ export function labelOf(obj: StixObject): string {
  * then prints none. The object's JSON still shows whatever it holds.
  */
 export function statedConfidence(obj: Record<string, unknown>): StatedConfidence | null {
-  const own = obj.x_malspark_confidence;
+  const own = customProperty(obj, "confidence");
   if (typeof own === "number" || (typeof own === "string" && own.trim() !== "")) {
     const n = Number(own);
     if (Number.isFinite(n) && n >= 0 && n <= 1) return { value: n, property: "x_malspark_confidence" };
@@ -615,8 +618,9 @@ export function readStixAnswer(data: unknown): StixAnswer {
       notice: typeof record.notice === "string" ? record.notice : null,
     };
   }
-  if (record.x_malspark_published === false) {
-    const note = record.x_malspark_notice;
+  // A bundle stored before the rename names the flag under the previous name.
+  if (customProperty(record, "published") === false) {
+    const note = customProperty(record, "notice");
     return { bundle: record, draft: true, notice: typeof note === "string" ? note : null };
   }
   return { bundle: record, draft: false, notice: null };

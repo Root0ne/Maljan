@@ -906,6 +906,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-malspark}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-malspark}
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env}@redis:6379/0
       MINIO_ENDPOINT: minio:9000
+      MINIO_BUCKET: ${MINIO_BUCKET:-malspark-samples}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in docker/.env}
       # The audit chain's anchor outside the database (bootstrap.env.example):
@@ -1021,6 +1022,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-malspark}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in docker/.env (see README)}@postgres:5432/${POSTGRES_DB:-malspark}
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in docker/.env}@redis:6379/0
       MINIO_ENDPOINT: minio:9000
+      MINIO_BUCKET: ${MINIO_BUCKET:-malspark-samples}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in docker/.env}
       # The audit chain's anchor outside the database (bootstrap.env.example):
@@ -1161,6 +1163,7 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in docker/.env}
       SETTINGS_ENCRYPTION_KEY: ${SETTINGS_ENCRYPTION_KEY:?set SETTINGS_ENCRYPTION_KEY in docker/.env}
       MINIO_ENDPOINT: minio:9000
+      MINIO_BUCKET: ${MINIO_BUCKET:-malspark-samples}
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in docker/.env}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in docker/.env}
       # The audit chain's anchor outside the database (bootstrap.env.example):

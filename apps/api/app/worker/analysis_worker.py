@@ -4546,6 +4546,9 @@ async def startup(ctx: dict) -> None:
     # not the ``logging.lastResort`` stderr handler a bare logger falls back
     # to before ``setup_logging()`` attaches one.
     setup_logging()
+    from malspark.core.previous_name import warn_previous_environment
+
+    warn_previous_environment(logger)
 
     # Before any job, and so before any thread or the YARA engine loads: C code
     # in this process folds case by LC_CTYPE, and a Turkish one leaves a capital

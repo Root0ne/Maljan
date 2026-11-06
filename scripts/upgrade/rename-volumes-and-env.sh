@@ -18,10 +18,17 @@
 # Env file: every key that starts with MALJAN_ becomes MALSPARK_ in place (a
 # copy of the file is kept beside it first). Only key names are printed, never
 # a value. A value that still names the old database, user or bucket is named
-# by its key so you can decide; it is not changed.
+# by its key so you can decide; it is not changed. Where the copied MinIO data
+# holds the old bucket, MINIO_BUCKET is set to it, so the API keeps reading its
+# samples, spilled parts and audit heads (with their locks) where they are.
+#
+# Qdrant: with --qdrant-url, the new collection names are created as aliases of
+# the old collections where the new names are free (the API key is read from
+# the env file's QDRANT_API_KEY and never printed); without it, the requests
+# are printed.
 #
 #   scripts/upgrade/rename-volumes-and-env.sh [--apply] [--env-file docker/.env]
-#       [--from-project NAME]... [--image alpine:3.20]
+#       [--from-project NAME]... [--image alpine:3.20] [--qdrant-url URL]
 #
 # Stop the old stack first (docker compose ... down, without -v).
 
@@ -38,10 +45,12 @@ VOLUMES=(pgdata redis_data qdrant_data minio_data ghidra_projects attck_cache)
 apply=0
 env_file=docker/.env
 image=alpine:3.20
+qdrant_url=
 projects=()
+old_bucket=0
 
 usage() {
-  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
@@ -50,6 +59,7 @@ while [ $# -gt 0 ]; do
     --env-file) env_file="${2:?--env-file needs a path}"; shift ;;
     --from-project) projects+=("${2:?--from-project needs a name}"); shift ;;
     --image) image="${2:?--image needs an image}"; shift ;;
+    --qdrant-url) qdrant_url="${2:?--qdrant-url needs a URL}"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -81,7 +91,7 @@ copy_volume() {
   if [ -n "$key" ]; then
     labels=(--label "com.docker.compose.project=$NEW" --label "com.docker.compose.volume=$key")
   fi
-  docker volume create "${labels[@]}" "$to" >/dev/null
+  docker volume create ${labels[@]+"${labels[@]}"} "$to" >/dev/null
   docker run --rm -v "$from:/from:ro" -v "$to:/to" "$image" sh -c 'cd /from && cp -a . /to/'
   echo "  copied $from -> $to"
 }
@@ -96,7 +106,7 @@ else
   for key in "${VOLUMES[@]}"; do
     for project in "${projects[@]}"; do
       from="${project}_${key}"
-      grep -qx -- "$from" <<<"$existing" || continue
+      grep -qxF -- "$from" <<<"$existing" || continue
       to="${NEW}_${key}"
       if [ -n "${target_from[$to]:-}" ]; then
         echo "  refuse: both ${target_from[$to]} and $from would become $to;" \
@@ -123,6 +133,17 @@ else
   [ ${#target_from[@]} -gt 0 ] || echo "  no volume of the projects ${projects[*]} found"
   echo "  The old volumes are kept. Once the new stack reads its data, remove them"
   echo "  with: docker volume rm <name>"
+  # Does the MinIO data (the old volume, or the new one already there) hold
+  # the old bucket?
+  minio_volume="${target_from[${NEW}_minio_data]:-}"
+  if [ -z "$minio_volume" ] && grep -qxF -- "${NEW}_minio_data" <<<"$existing"; then
+    minio_volume="${NEW}_minio_data"
+  fi
+  if [ -n "$minio_volume" ] \
+    && docker run --rm -v "$minio_volume:/data:ro" "$image" test -d "/data/$OLD-samples" 2>/dev/null; then
+    old_bucket=1
+    echo "  $minio_volume holds the bucket $OLD-samples: MINIO_BUCKET keeps it (see the env file)"
+  fi
 fi
 
 # ── Env file ─────────────────────────────────────────────────────────
@@ -148,6 +169,8 @@ else
     done <<<"$old_keys"
     if [ "$apply" -eq 1 ]; then
       backup="${env_file}.before-${NEW}"
+      # An earlier run's backup is never overwritten.
+      [ -e "$backup" ] && backup="${backup}.$(date -u +%Y%m%dT%H%M%SZ)"
       cp -p -- "$env_file" "$backup"
       tmp="$(mktemp "${env_file}.XXXXXX")"
       chmod --reference="$env_file" "$tmp" 2>/dev/null || chmod 600 "$tmp"
@@ -174,12 +197,60 @@ else
       echo "  renamed in place; the file as it was is kept at $backup (it holds secrets)"
     fi
   fi
+  # The old bucket stays the API's bucket (option a for Postgres, for MinIO).
+  if [ "$old_bucket" -eq 1 ]; then
+    if grep -qE '^[[:space:]]*(export[[:space:]]+)?MINIO_BUCKET=' "$env_file"; then
+      echo "  keep MINIO_BUCKET: it is already set; it must name the bucket the data is in"
+    elif [ "$apply" -eq 1 ]; then
+      printf 'MINIO_BUCKET=%s\n' "$OLD-samples" >>"$env_file"
+      echo "  set MINIO_BUCKET to the bucket the copied data holds"
+    else
+      echo "  set MINIO_BUCKET to the bucket the copied data holds"
+    fi
+  fi
   # Values that still name the previous name: the key only.
   while IFS= read -r line; do
     key="$(sed -E -e 's/=.*//' -e 's/^.*[[:space:]]//' <<<"$line")"
     echo "  the value of $key names the previous name; it is left as it is (see below)"
   done < <(grep -E '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*=' "$env_file" \
     | awk -F= -v old="$OLD" '{ v = substr($0, index($0, "=") + 1); if (tolower(v) ~ old) print $1 "=" }' || true)
+fi
+
+# ── Qdrant ───────────────────────────────────────────────────────────
+
+echo
+echo "Qdrant:"
+qdrant_pairs=("${NEW}_cases_v2 ${OLD}_cases_v2" "${NEW}_function_hashes_v1 ${OLD}_function_hashes_v1")
+if [ -z "$qdrant_url" ] || ! command -v curl >/dev/null 2>&1; then
+  for pair in "${qdrant_pairs[@]}"; do
+    set -- $pair
+    echo "  alias $1 -> $2 (pass --qdrant-url to create it): POST /collections/aliases"
+    echo "    {\"actions\":[{\"create_alias\":{\"collection_name\":\"$2\",\"alias_name\":\"$1\"}}]}"
+  done
+else
+  # The key goes to curl on its standard input, never on its command line.
+  qdrant_key="$(sed -nE 's/^[[:space:]]*(export[[:space:]]+)?QDRANT_API_KEY=//p' "$env_file" 2>/dev/null | tail -1)"
+  qdrant() {
+    printf 'header = "api-key: %s"\n' "$qdrant_key" \
+      | curl -sS --fail -K - -H 'Content-Type: application/json' "$@"
+  }
+  names="$(qdrant "$qdrant_url/collections" | grep -oE '"name":"[^"]*"' | cut -d'"' -f4 || true)"
+  aliases="$(qdrant "$qdrant_url/aliases" | grep -oE '"alias_name":"[^"]*"' | cut -d'"' -f4 || true)"
+  for pair in "${qdrant_pairs[@]}"; do
+    set -- $pair
+    if grep -qxF -- "$1" <<<"$names" || grep -qxF -- "$1" <<<"$aliases"; then
+      echo "  skip alias $1: the name is taken"
+    elif ! grep -qxF -- "$2" <<<"$names"; then
+      echo "  skip alias $1: there is no collection $2"
+    elif [ "$apply" -eq 0 ]; then
+      echo "  alias $1 -> $2"
+    else
+      qdrant -X POST "$qdrant_url/collections/aliases" \
+        -d "{\"actions\":[{\"create_alias\":{\"collection_name\":\"$2\",\"alias_name\":\"$1\"}}]}" >/dev/null
+      echo "  created alias $1 -> $2"
+    fi
+  done
+  unset qdrant_key
 fi
 
 # ── What the script does not do ─────────────────────────────────────
@@ -205,18 +276,31 @@ role "$OLD". Either
      AUDIT_ANCHOR_DATABASE_URL as it is.
 
 Qdrant: the copied qdrant_data still holds the collections ${OLD}_cases_v2 and
-${OLD}_function_hashes_v1. Point core.memory.qdrant.collection and
-core.memory.qdrant.function_hash_collection at them in the console, or leave
-the new defaults and let memory start empty.
+${OLD}_function_hashes_v1. The aliases above let the new default names read
+them; or point core.memory.qdrant.collection and
+core.memory.qdrant.function_hash_collection at the old names in the console.
 
-MinIO: the copied minio_data still holds the bucket $OLD-samples. With the new
-stack up, copy its objects into the bucket the API now uses:
+MinIO: the copied minio_data still holds the bucket $OLD-samples, with its
+object lock, retention, legal holds and versions. Keep it: MINIO_BUCKET=$OLD-samples
+in docker/.env (set above when the bucket was found). The object-store audit
+anchor keeps its heads there under audit-chain/head/; a new, empty bucket would
+read as empty beside the database's head and the next append would anchor anew.
+Only a bucket with no object lock and no audit head may be copied instead; this
+copy refuses any other (run it with the new stack up and MINIO_BUCKET unset):
 
 docker compose -f docker/docker-compose.yml exec -T api python - <<'PY'
 from minio.commonconfig import CopySource
 from app.config import settings
 from app.services.object_store import client
 store, old = client(), "$OLD-samples"
+try:
+    store.get_object_lock_config(old)
+except Exception:
+    pass
+else:
+    raise SystemExit(f"{old} has object lock: keep it with MINIO_BUCKET={old}")
+if any(True for _ in store.list_objects(old, prefix="audit-chain/head/", recursive=True)):
+    raise SystemExit(f"{old} holds audit heads: keep it with MINIO_BUCKET={old}")
 if not store.bucket_exists(settings.minio_bucket):
     raise SystemExit("start the API once so it creates its bucket")
 for item in store.list_objects(old, recursive=True):

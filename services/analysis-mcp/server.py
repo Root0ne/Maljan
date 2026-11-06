@@ -44,6 +44,9 @@ from malspark.core.stdio_safe import route_logging_to_stderr
 # in-process keeps its own logging.
 if __name__ == "__main__":
     route_logging_to_stderr()
+    from malspark.core.previous_name import warn_previous_environment
+
+    warn_previous_environment()
 
 from malspark.core.ctype_locale import pin_character_classification, say_on_stderr
 from malspark.core.paths import resolve_data
@@ -1605,6 +1608,12 @@ def _prune_staging(base: Path) -> int:
     if ttl <= 0:
         return 0
     cutoff = time.time() - ttl
+    removed = _prune_base(base, cutoff)
+    return removed + _prune_legacy_captures(cutoff) + _prune_legacy_base(base, cutoff)
+
+
+def _prune_base(base: Path, cutoff: float) -> int:
+    """Sweep one staging base: its job directories, its flat files and its carved tree."""
     removed = 0
     for entry in base.iterdir():
         try:
@@ -1620,7 +1629,30 @@ def _prune_staging(base: Path) -> int:
         except OSError:  # a file another call already removed
             continue
     removed += _prune_carved(base / CARVED_DIRECTORY, cutoff)
-    return removed + _prune_legacy_captures(cutoff)
+    return removed
+
+
+def _prune_legacy_base(base: Path, cutoff: float) -> int:
+    """Sweep the default base a release before the product's rename staged into.
+
+    Swept as the current base is, with the same TTL, and removed once empty. A
+    link, or a directory this process does not own, is left alone: it is not
+    this project's to empty.
+    """
+    root = Path(tempfile.gettempdir()) / staging.LEGACY_BASE_NAME
+    if root == base or root.is_symlink() or not root.is_dir():
+        return 0
+    try:
+        if root.lstat().st_uid != os.getuid():
+            return 0
+    except OSError:
+        return 0
+    removed = _prune_base(root, cutoff)
+    with contextlib.suppress(OSError):  # only when the last of it has gone
+        (root / CARVED_DIRECTORY).rmdir()
+    with contextlib.suppress(OSError):
+        root.rmdir()
+    return removed
 
 
 def _prune_legacy_captures(cutoff: float) -> int:

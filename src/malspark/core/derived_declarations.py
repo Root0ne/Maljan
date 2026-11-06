@@ -273,12 +273,12 @@ def _tokens(name: str) -> frozenset[str]:
 
 def _declares_itself(definition: Any) -> bool:
     """Whether the definition declares the tool under its ``_meta``."""
-    from malspark.tools.declared_facts import FACTS_META_KEY
+    from malspark.tools.declared_facts import facts_in_meta
 
     meta = _get(definition, "_meta")
     if meta is None:
         meta = _get(definition, "meta")
-    return isinstance(meta, Mapping) and meta.get(FACTS_META_KEY) is not None
+    return facts_in_meta(meta) is not None
 
 
 def _properties(input_schema: Any) -> dict[str, Mapping[str, Any]]:

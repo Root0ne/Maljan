@@ -54,6 +54,28 @@ _PREVIOUS_PROPERTY_PREFIX = f"x_{PREVIOUS_NAME}_"
 _PROPERTY_PREFIX = "x_malspark_"
 
 
+def with_current_property_names(value: Any) -> Any:
+    """``value`` with every ``x_<previous name>_*`` key, at any depth, under its current name.
+
+    A pure copy for a stored bundle read as JSON (the bundle endpoint, the run
+    diff); a key already under the current name wins over its previous-name twin.
+    """
+    if isinstance(value, dict):
+        out: dict[Any, Any] = {}
+        for key, item in value.items():
+            if isinstance(key, str) and key.startswith(_PREVIOUS_PROPERTY_PREFIX):
+                continue
+            out[key] = with_current_property_names(item)
+        for key, item in value.items():
+            if isinstance(key, str) and key.startswith(_PREVIOUS_PROPERTY_PREFIX):
+                renamed = _PROPERTY_PREFIX + key[len(_PREVIOUS_PROPERTY_PREFIX) :]
+                out.setdefault(renamed, with_current_property_names(item))
+        return out
+    if isinstance(value, list):
+        return [with_current_property_names(item) for item in value]
+    return value
+
+
 def current_property_names_in_place(bundle: dict[str, Any]) -> None:
     """Rename a raw bundle's and its objects' ``x_<previous name>_*`` keys, in place.
 

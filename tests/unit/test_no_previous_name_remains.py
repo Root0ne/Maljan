@@ -40,6 +40,16 @@ ALLOWED: dict[str, tuple[str | None, str]] = {
         "it, so it mirrors the constant to read an earlier settings export or evidence "
         "bundle as the same version.",
     ),
+    "apps/api/alembic/versions/20261107000000_server_env_names_take_the_new_prefix.py": (
+        'PREVIOUS_PREFIX = "',
+        "The revision that renames a stored server map's environment names restates "
+        "the previous prefix, as every revision restates what it acts on.",
+    ),
+    "apps/api/alembic/versions/20260915000000_drop_judgement_layer_settings.py": (
+        'PREVIOUS_ENV_PREFIX = "',
+        "The revision wrote two environment names under the previous prefix before the "
+        "rename; its downgrade reads either name back.",
+    ),
     "scripts/upgrade/rename-volumes-and-env.sh": (
         None,
         "Finds and copies the volumes, env keys, database, collections and bucket an "

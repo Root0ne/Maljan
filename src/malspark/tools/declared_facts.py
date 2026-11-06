@@ -27,9 +27,26 @@ from typing import Any
 
 from mcp.types import ToolAnnotations
 
+from malspark.core.previous_name import PREVIOUS_NAME
+
 # The key of a tool definition's ``_meta`` under which its server declares it.
 # Prefixed as MCP asks of a key that is not the protocol's own.
 FACTS_META_KEY = "malspark/tool_facts"
+# The same key under the product's previous name (``malspark.core.previous_name``),
+# which a server built before the rename, or one of a third party, still sends.
+PREVIOUS_FACTS_META_KEY = f"{PREVIOUS_NAME}/tool_facts"
+
+
+def facts_in_meta(meta: Any) -> Any:
+    """What a definition's ``_meta`` declares: under the current key, else the previous one.
+
+    ``None`` when it declares nothing under either, or ``meta`` is no mapping.
+    """
+    if not isinstance(meta, Mapping):
+        return None
+    held = meta.get(FACTS_META_KEY)
+    return held if held is not None else meta.get(PREVIOUS_FACTS_META_KEY)
+
 
 # What a call does beyond answering (``ToolFacts.effects``), in the words every
 # declaration uses: it runs nothing of the sample, reaches nothing beyond its

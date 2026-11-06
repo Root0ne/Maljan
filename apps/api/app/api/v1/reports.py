@@ -13,9 +13,9 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from malspark.core.logger import logger
-from malspark.core.previous_name import PREVIOUS_NAME
 from malspark.core.settings_overrides import redact_url
 from malspark.reporting.section_servers import with_source_servers
+from malspark.schemas.stix_models import with_current_property_names
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -30,30 +30,6 @@ from app.schemas.job import (
 from app.services.report_service import EnrichmentEnqueueError, ReportService, with_current_iocs
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
-
-# A bundle stored before the rename names its custom properties under the
-# previous product name (``malspark.core.previous_name``). It is served under
-# the current ones, so an earlier run's bundle reads as a new one does: its
-# ``x_malspark_published: false`` keeps it a draft, its confidences and
-# evidence references still show.
-_PREVIOUS_PROPERTY_PREFIX = f"x_{PREVIOUS_NAME}_"
-_PROPERTY_PREFIX = "x_malspark_"
-
-
-def _current_properties(value: Any) -> Any:
-    """``value`` with every custom property under the previous name renamed to the current one."""
-    if isinstance(value, dict):
-        return {
-            (
-                _PROPERTY_PREFIX + key[len(_PREVIOUS_PROPERTY_PREFIX) :]
-                if isinstance(key, str) and key.startswith(_PREVIOUS_PROPERTY_PREFIX)
-                else key
-            ): _current_properties(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_current_properties(item) for item in value]
-    return value
 
 
 def _get_service(db: AsyncSession = Depends(get_db)) -> ReportService:
@@ -257,7 +233,7 @@ async def get_stix_bundle(
         # pass the publish rule, never the export.
         return {
             "kept": True,
-            **_current_properties(report.judge_stix_bundle),
+            **with_current_property_names(report.judge_stix_bundle),
             "published": False,
             "notice": UNPUBLISHED_NOTICE,
         }
@@ -267,7 +243,10 @@ async def get_stix_bundle(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Report not found or STIX bundle not available",
         )
-    bundle = _current_properties(bundle)
+    # A bundle stored before the rename names its custom properties under the
+    # previous product name; served under the current ones, its
+    # ``x_malspark_published: false`` keeps it a draft.
+    bundle = with_current_property_names(bundle)
     if isinstance(bundle, dict) and bundle.get("x_malspark_published") is False:
         from malspark.schemas.stix_models import UNPUBLISHED_NOTICE
 

@@ -56,15 +56,30 @@ and named in `AUDIT_ANCHOR_DATABASE_URL` as it is.
 ## Qdrant
 
 The memory collections keep their old names (`maljan_cases_v2`,
-`maljan_function_hashes_v1`). Point `core.memory.qdrant.collection` and
-`core.memory.qdrant.function_hash_collection` at them in the console, or keep
-the new defaults and let memory start empty.
+`maljan_function_hashes_v1`). With `--qdrant-url <url>` (and the API key read
+from `QDRANT_API_KEY` in the env file, never printed), `--apply` creates the
+new default names as aliases of them where the new names are free, so memory
+reads what it held; without it the script prints the two requests. Or point
+`core.memory.qdrant.collection` and `core.memory.qdrant.function_hash_collection`
+at the old names in the console. The marker of the memory repair an earlier
+release finished is still found, so the repair does not run again.
 
 ## MinIO
 
-The stored samples are in the bucket `maljan-samples`; the API now uses
-`malspark-samples` and creates it on start. The script prints a short command
-that copies every object into the new bucket from inside the API container.
+The stored samples, the spilled ledger parts and, with the object-store audit
+anchor, the anchored audit heads (`audit-chain/head/`) are in the bucket
+`maljan-samples`, under its object lock, retention, legal holds and versions.
+Keep it: the compose file now passes `MINIO_BUCKET` to the API and the
+workers, and `--apply` sets `MINIO_BUCKET=maljan-samples` in the env file when
+the copied MinIO data holds that bucket.
+
+Do not let the API start on a new, empty bucket while an audit head is
+anchored in the old one: the anchor would read empty beside the database's
+head (`EMPTY_BESIDE_A_HEAD`), the next append would anchor afresh, and the
+anchored record from before the upgrade would no longer be the one checked. A
+copy into a new bucket also drops retention, legal holds and every version but
+the latest, so the copy command the script prints refuses a bucket with an
+object lock or any audit head.
 
 ## What else changes for an operator
 
@@ -96,6 +111,14 @@ report seals and job package signatures, the ledger chain's key label, the
 namespace MISP attribute uuids are derived in and the STIX producer identity's
 id (so a MISP instance or a STIX consumer that holds earlier exports sees the
 same attributes and the same producer), the prefix of the settings repair
-markers in the database, and the capture directory an earlier release left
-under the system temp directory. They are listed in
+markers in the database, the collection of the memory repair's markers, and
+the capture directory and the staging base an earlier release left under the
+system temp directory (both still swept on the staging TTL).
+
+What an installed component still sends or declares under the old name is
+read, and named in the log where it should move: a tool server's
+`maljan/tool_facts` declaration, a plugin in a `maljan.*` entry-point group,
+an environment variable still set as `MALJAN_*` (named at start, never its
+value), and a stored server map's `MALJAN_*` environment names (renamed by the
+migration in the clear map, and as they are read from an encrypted row). They are listed in
 `src/malspark/core/previous_name.py`.
