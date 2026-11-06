@@ -1,0 +1,220 @@
+name: Release
+
+# A pushed v* tag builds the sdist and the wheel, builds and pushes the
+# container images to ghcr.io, signs every artefact with cosign keyless,
+# attests its SLSA build provenance, and attaches the Python artefacts, their
+# signatures and the provenance to the tag's GitHub release (RELEASING.md).
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  python:
+    name: sdist and wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No cache: a release builds from nothing a pull request could have left.
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: The tag names the package version
+        run: |
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not name version ${version} in pyproject.toml"
+            exit 1
+          fi
+
+      - name: Build
+        run: uv build --sdist --wheel --no-sources --out-dir dist
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Attest build provenance
+        id: provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+      # Each artefact's keyless signature as a Sigstore bundle beside it, and
+      # the provenance bundle (a DSSE envelope around the in-toto SLSA
+      # statement) under the name a release's provenance is looked for by.
+      - name: Sign and collect
+        env:
+          PROVENANCE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          for artefact in dist/*.whl dist/*.tar.gz; do
+            cosign sign-blob --yes --bundle "${artefact}.sigstore.json" "${artefact}"
+          done
+          cp "${PROVENANCE}" "dist/malspark-${GITHUB_REF_NAME}.intoto.jsonl"
+          (cd dist && sha256sum -- *.whl *.tar.gz > SHA256SUMS)
+
+      - name: Upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: python-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  images:
+    name: Image (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # The compose stack's own builds, each from the context compose
+          # gives it. The console's NEXT_PUBLIC_* values are baked at build
+          # time; these are compose's defaults.
+          - name: backend
+            context: .
+            file: docker/Dockerfile.backend
+          - name: frontend
+            context: .
+            file: docker/Dockerfile.frontend
+            build-args: |
+              NEXT_PUBLIC_API_URL=http://localhost:8000
+              NEXT_PUBLIC_WS_URL=ws://localhost:8000
+              NEXT_PUBLIC_AUTH_DISABLED=false
+          - name: minio
+            context: docker
+            file: docker/Dockerfile.minio
+          - name: die-mcp
+            context: services
+            file: services/die-mcp/Dockerfile
+          - name: goresym-mcp
+            context: services
+            file: services/goresym-mcp/Dockerfile
+          - name: ilspy-mcp
+            context: services
+            file: services/ilspy-mcp/Dockerfile
+          - name: jadx-mcp
+            context: services
+            file: services/jadx-mcp/Dockerfile
+          - name: oletools-mcp
+            context: services
+            file: services/oletools-mcp/Dockerfile
+          - name: unblob-mcp
+            context: services
+            file: services/unblob-mcp/Dockerfile
+          - name: webcrack-mcp
+            context: services
+            file: services/webcrack-mcp/Dockerfile
+          - name: yarax-mcp
+            context: services
+            file: services/yarax-mcp/Dockerfile
+    env:
+      IMAGE: ghcr.io/root0ne/malspark-${{ matrix.name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      # The provenance is GitHub's attestation below, so Buildx adds none of
+      # its own and the pushed digest is the image manifest itself.
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          build-args: ${{ matrix.build-args }}
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Sign
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          # A storage record exists only for an organisation's repository and
+          # would need the artifact-metadata permission besides.
+          create-storage-record: false
+
+  release:
+    name: GitHub release
+    needs: [python, images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist
+
+      # The release the tag already has (one made in the web UI) gets the
+      # artefacts; otherwise a draft is made for the maintainer to publish.
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view "${GITHUB_REF_NAME}" --repo "${REPO}" > /dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" --repo "${REPO}" --verify-tag --draft \
+              --title "${GITHUB_REF_NAME}" --generate-notes
+          fi
+          gh release upload "${GITHUB_REF_NAME}" dist/* --repo "${REPO}" --clobber

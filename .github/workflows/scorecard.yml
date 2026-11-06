@@ -27,6 +27,10 @@ jobs:
         with:
           results_file: results.sarif
           results_format: sarif
+          # The fine-grained token (Administration: read) lets the check read
+          # the classic branch protection; without the secret the workflow's
+          # own token is used, as before (docs/scorecard-owner-steps.md).
+          repo_token: ${{ secrets.SCORECARD_TOKEN || github.token }}
           publish_results: true
 
       - name: Upload artifact
