@@ -283,6 +283,15 @@ LISTED = [SimpleNamespace(addresses=frozenset({0x1400}), id="listed.1")]
             ),
             id="an absence kept among distinct clauses on both sides",
         ),
+        pytest.param(
+            lambda t: kept_absence(
+                negated_clauses(
+                    "; ".join(f"name{i} mutex is not known" for i in range(len(t) // 26))
+                ),
+                "; ".join(f"name mutex{i} is not shown" for i in range(len(t) // 26)),
+            ),
+            id="an absence kept among clauses sharing its words",
+        ),
         pytest.param(lambda t: quote_stands(t[: len(t) // 2], [t]), id="a kept sentence's quote"),
         pytest.param(
             lambda t: _candidates(

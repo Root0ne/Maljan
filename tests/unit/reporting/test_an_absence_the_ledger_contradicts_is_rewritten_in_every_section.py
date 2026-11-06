@@ -577,7 +577,7 @@ def test_a_closing_negation_kept_on_no_source_section_5_speaks_of_is_left_out() 
 
 
 def test_a_closing_negation_kept_on_a_quoted_debate_round_is_counted_not_recorded() -> None:
-    denial = "The flag read was not attributed to a routine [ev_0002]."
+    denial = "The flag byte was not attributed to a routine [ev_0002]."
     closing = Passage(
         id="limitations",
         label="11. Limitations",
@@ -591,14 +591,14 @@ def test_a_closing_negation_kept_on_a_quoted_debate_round_is_counted_not_recorde
     debate = Passage(
         id="debate.1",
         label="debate round 1",
-        text="The flag read was not attributed to any routine this round.",
+        text="The flag byte was not attributed to any routine this round.",
         kind=DEBATE,
     )
     row = {
         "passage": "limitations",
         "sentence": denial,
         "sources": ["debate.1"],
-        "quote": "was not attributed to any routine",
+        "quote": "The flag byte was not attributed to any routine",
     }
     counts, found = apply_rows({"sentences": [{**row, "decision": "keep"}]}, [debate, closing])
     # A quote that passes every check: counted, not recorded (T-568 review ruling).

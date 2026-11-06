@@ -215,17 +215,14 @@ def kept_absence(absences: Iterable[str], rewrite: str) -> str | None:
     clauses on its own, never pooled. A clause that splits the absence ("0x10 was
     not read" from "0x10 and 0x20 were not read") names other addresses and is
     another statement. The rewrite's clauses are read once each, indexed by the
-    addresses they write; an absence is compared with at most
-    :data:`_COMPARED_CLAUSES` of them, so the read is linear in both texts (a
-    rewrite denying more than that many things on one address set is past any
-    sentence's length).
+    addresses they write and the beginnings of their words; an absence is compared
+    only with the clauses on its addresses sharing a word with it, at most
+    :data:`_COMPARED_CLAUSES` of those, so the read is linear in both texts and any
+    number of unrelated denials cannot hide the one that restates it.
     """
-    by_address: dict[frozenset[str], dict[frozenset[str], tuple[_Said, _Said]]] = {}
+    by_address: dict[frozenset[str], _Clauses] = {}
     for clause in negated_clauses(rewrite):
-        words = content_words(clause)
-        group = by_address.setdefault(_addresses(clause), {})
-        if words not in group and len(group) < _COMPARED_CLAUSES:
-            group[words] = (_Said(words), _Said(_prefix_denied(clause)))
+        by_address.setdefault(_addresses(clause), _Clauses()).add(clause)
     if not by_address:
         return None
     seen: set[tuple[frozenset[str], frozenset[str]]] = set()
@@ -236,7 +233,8 @@ def kept_absence(absences: Iterable[str], rewrite: str) -> str | None:
         seen.add((words, named))
         subject, denied = _subject(absence), _denied(absence)
         need = KEPT_SHARE * len(words)
-        for said, by_prefix in by_address.get(named, {}).values():
+        group = by_address.get(named)
+        for said, by_prefix in group.sharing(words) if group is not None else ():
             if said.count(words) >= need:
                 return absence
             if len(subject) < _SUBJECT_WORDS or said.count(subject) < len(subject):
@@ -249,9 +247,49 @@ def kept_absence(absences: Iterable[str], rewrite: str) -> str | None:
     return None
 
 
-# How many of a rewrite's denying clauses on one address set an absence is compared
-# with at most.
+# How many of a rewrite's denying clauses sharing a word with an absence, on its
+# address set, the absence is compared with at most.
 _COMPARED_CLAUSES = 64
+
+
+def _stem(word: str) -> str:
+    """The beginning two words held as one share (:data:`_STEM_FLOOR` characters)."""
+    return word[:_STEM_FLOOR]
+
+
+class _Clauses:
+    """A rewrite's denying clauses on one address set, each read once, indexed by the
+    beginnings of their words, so an absence is compared only with the clauses that share
+    a word with it: a clause sharing none states no absence of it, however many such
+    clauses the rewrite writes."""
+
+    def __init__(self) -> None:
+        self.said: list[tuple[_Said, _Said]] = []
+        self.seen: set[frozenset[str]] = set()
+        self.index: dict[str, list[int]] = {}
+
+    def add(self, clause: str) -> None:
+        words = content_words(clause)
+        if words in self.seen:
+            return
+        self.seen.add(words)
+        self.said.append((_Said(words), _Said(_prefix_denied(clause))))
+        place = len(self.said) - 1
+        for stem in {_stem(word) for word in words}:
+            self.index.setdefault(stem, []).append(place)
+
+    def sharing(self, words: Iterable[str]) -> list[tuple[_Said, _Said]]:
+        """The clauses sharing a word's beginning with ``words``, in the order they stand,
+        at most :data:`_COMPARED_CLAUSES` of them; each posting is read until then."""
+        found: set[int] = set()
+        for stem in sorted({_stem(word) for word in words}):
+            for place in self.index.get(stem, ()):
+                found.add(place)
+                if len(found) >= _COMPARED_CLAUSES:
+                    break
+            if len(found) >= _COMPARED_CLAUSES:
+                break
+        return [self.said[place] for place in sorted(found)]
 
 
 def _spaced(text: str) -> str:
@@ -339,6 +377,9 @@ def failure_counts(sentence: str) -> list[int]:
     out: list[int] = []
     last: tuple[int, int] | None = None  # (place, number) of the count in the clause
     skip_to = -1
+    # Calls counted before ("Of 158 tool calls, 12 hit cached answers and 4 failed"):
+    # a bare number right before a word saying they failed counts them.
+    calls_named = False
     for at, token in enumerate(tokens):
         if token in _BREAKS:
             last = None
@@ -348,7 +389,13 @@ def failure_counts(sentence: str) -> list[int]:
         value = _number(token)
         if value is not None:
             skip_to, counts_calls = _counted(tokens, at)
-            last = (at, value) if counts_calls else None
+            before = [t.lower() for t in tokens[max(0, at - 2) : at]]
+            if counts_calls and (before[-1:] == ["of"] or before == ["of", "the"]):
+                calls_named = True
+                last = None
+                continue
+            bare = calls_named and at + 1 < len(tokens) and tokens[at + 1].lower() in _FAILED_WORDS
+            last = (at, value) if counts_calls or bare else None
             continue
         if token.lower() in _FAILED_WORDS and last is not None:
             if at - last[0] <= _COUNT_REACH:

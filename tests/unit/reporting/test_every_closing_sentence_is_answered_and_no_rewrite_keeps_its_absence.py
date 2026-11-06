@@ -445,7 +445,6 @@ def test_a_number_given_failed_calls_is_held_to_the_ledger_s_count() -> None:
         "Hash resolution over 164 values failed for 12 of them, so 12 API slots stay unnamed.",
         "Two of the 11 DNS lookups the sample's calls made failed in the sandbox.",
         "4 of 158 functions failed to decompile, so their bodies are not read.",
-        "Of 158 tool calls, 12 hit cached answers and 4 failed.",
         "In 2 of the 3 emulations the hash failed to match.",
     ],
 )
@@ -802,3 +801,89 @@ def test_a_closing_rewrite_is_recorded_with_what_stood() -> None:
     done, _ = _ask(report, {"sentences": _settled(report, [])})
     records = [r["message"] for r in done.tally.unresolved if r["code"] == REWRITTEN_CODE]
     assert any(GATES[:40] in m and GATES_READ[:40] in m for m in records)
+
+
+# -- review round 2 ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("which", "source", "quote"),
+    [
+        # Another routine's sentence: the overlap was {body, read}.
+        ("C2", "payloads", "The body of 0x7acc was not read to its end"),
+        # Another subject's sentence: the overlap was {decoded, strings}.
+        ("C4", "persistence_detail", "No Run or RunOnce string appears in the decoded strings"),
+        ("C5", "persistence_detail", "No Run or RunOnce string appears in the decoded strings"),
+        # The overlap was only what is denied: {established, passed}.
+        (
+            "C3",
+            "evasion_antiforensics",
+            "Confidence is moderate: the information-class values passed to "
+            "SetFileInformationByHandle were not established.",
+        ),
+    ],
+)
+def test_haiku12_s_brute_forced_keeps_are_refused(which: str, source: str, quote: str) -> None:
+    passages, by_id, said = _haiku12_limitations()
+    assert quote.rstrip(".") in by_id[source].text
+    row = _row("limitations", said[which], "keep", [source], quote=quote)
+    found = agreement_violations({"sentences": [row]}, passages)
+    assert KEEP_UNQUOTED_CODE in [v.code for v in found], which
+
+
+def test_a_keep_resting_on_fewer_than_two_subject_words_is_recorded() -> None:
+    from maljan.reporting.section_agreement import Passage, apply_rows
+
+    sentence = "Packing is not established [ev_0002]."
+    closing = Passage(
+        id="limitations",
+        label="11. Limitations",
+        text=sentence,
+        kind="claim-led",
+        cites=frozenset({"ev_0002"}),
+        write=lambda _text: None,
+        closing=True,
+        held=(sentence,),
+    )
+    source = Passage(
+        id="packing_obfuscation",
+        label="5. Technical analysis, 'Packing'",
+        text="Packing is not established by any section entropy reading.",
+        kind="section 5",
+    )
+    row = {
+        "passage": "limitations",
+        "sentence": sentence,
+        "sources": ["packing_obfuscation"],
+        "decision": "keep",
+        "quote": "Packing is not established by any section entropy reading",
+    }
+    counts, found = apply_rows({"sentences": [row]}, [source, closing])
+    # One subject word: the keep passes, and is recorded, not only counted.
+    assert counts["held_kept"] == 1 and counts["dropped"] == 0
+    assert [v.code for v in found] == [HELD_KEPT_CODE]
+
+
+def test_a_restated_absence_is_found_among_many_unrelated_denials() -> None:
+    absence = ["the mutex name is not passed in that call"]
+    assert kept_absence(absence, "The code passes it [ev_1]; the mutex name is not passed.")
+    for decoys in (10, 63, 64, 70, 500):
+        rewrite = (
+            "The code passes runnung [ev_1]; "
+            + "; ".join(f"item{i} thing{i} is not shown" for i in range(decoys))
+            + "; the mutex name is not passed in that call."
+        )
+        assert kept_absence(absence, rewrite) == absence[0], decoys
+
+
+@pytest.mark.parametrize(
+    ("sentence", "counts"),
+    [
+        ("Of 158 tool calls, 12 hit cached answers and 4 failed.", [4]),
+        ("Of the 158 tool calls, 6 failed.", [6]),
+        ("4 of 158 tool calls failed and were not redone.", [4]),
+        ("Of 158 functions, 4 failed to decompile.", []),
+    ],
+)
+def test_calls_counted_before_the_number(sentence: str, counts: list[int]) -> None:
+    assert failure_counts(sentence) == counts

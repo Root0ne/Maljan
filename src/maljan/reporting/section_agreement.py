@@ -181,7 +181,6 @@ from maljan.reporting.absence_answers import (
     negated_clauses,
     quote_stands,
     said_of,
-    shares_words,
 )
 from maljan.reporting.models import (
     C2Channel,
@@ -2431,8 +2430,10 @@ def _answer_violations(
     sentence = span[2]
     keeping = row.decision == "keep" and passage.closing
     if keeping and row.sources:
-        texts = [s.text for s in sources if s is not None and s.kind in (FACT, SECTION_5, DEBATE)]
-        problem = _quote_problem(sentence, row.quote, texts)
+        named_sources = [
+            s for s in sources if s is not None and s.kind in (FACT, SECTION_5, DEBATE)
+        ]
+        problem = _quote_problem(sentence, row.quote, named_sources)
         if problem:
             out.append(
                 Violation(
@@ -2511,16 +2512,53 @@ _QUOTE_SHARED = 2
 _SPEAKING_SHOWN = 3
 
 
-def _quote_problem(sentence: str, quote: str, texts: Sequence[str]) -> str:
-    """What is wrong with a kept closing sentence's quote, or ``""``: it stands whole in a
-    named source (:func:`absence_answers.quote_stands`), shares at least
-    :data:`_QUOTE_SHARED` of the sentence's own words (a shared beginning counts), and
-    states an absence where the sentence does."""
-    if not quote_stands(quote, texts):
+# Words that say what an absence denies, not what it is about: an overlap on them
+# ties a quote to no particular subject ("established", "read").
+_ABSENCE_PREDICATES = frozenset(
+    (
+        "established establish known recovered read observed shown passed found appears "
+        "appear present attributed determined identified resolved confirmed listed"
+    ).split()
+)
+
+
+def kept_subject(sentence: str) -> frozenset[str]:
+    """What a kept closing sentence denies something of: its words before its first
+    negation, but the words saying what is denied (:data:`_ABSENCE_PREDICATES`)."""
+    return frozenset(word for word in absence_subject(sentence) if word not in _ABSENCE_PREDICATES)
+
+
+def quote_overlap(sentence: str, quote: str) -> int:
+    """How many of :func:`kept_subject`'s words the quote holds (a shared beginning
+    counts)."""
+    return said_of(quote).count(kept_subject(sentence))
+
+
+def _quote_problem(sentence: str, quote: str, sources: Sequence[Passage]) -> str:
+    """What is wrong with a kept closing sentence's quote, or ``""``.
+
+    It stands whole in a named source (:func:`absence_answers.quote_stands`); where
+    the sentence names addresses, the quote, or a fact it names, names one of them
+    (haiku12's "0x3868 was read only in part" kept on a sentence about 0x7acc); it
+    holds at least :data:`_QUOTE_SHARED` of what the sentence denies something of
+    (:func:`kept_subject`), at least half of those words where the quote names none
+    of the sentence's addresses, never the words saying what is denied ("decoded
+    strings" of another sentence, "established, passed"); and it states an absence
+    where the sentence does.
+    """
+    if not quote_stands(quote, [s.text for s in sources]):
         return "does not stand in a source it names"
-    words = content_words(sentence)
-    if not shares_words(quote, words, min(_QUOTE_SHARED, len(words))):
-        return "shares too few of the sentence's own words to state the same thing"
+    named = frozenset(_addresses_named(sentence))
+    by_quote = bool(named & set(_addresses_named(quote)))
+    by_fact = any(s.kind == FACT and not s.addresses.isdisjoint(named) for s in sources)
+    if named and not (by_quote or by_fact):
+        return "names none of the addresses the sentence names"
+    subject = kept_subject(sentence)
+    least = min(_QUOTE_SHARED, len(subject))
+    if not (by_quote or by_fact):
+        least = max(least, -(-len(subject) // 2))
+    if quote_overlap(sentence, quote) < least:
+        return "shares too few of the words the sentence denies something of"
     if carries_negation(sentence) and not carries_negation(quote):
         return "states no absence, while the sentence states one"
     return ""
@@ -3489,9 +3527,14 @@ def apply_rows(
                 if passage is not None and standing is not None and standing[2] in passage.held:
                     counts["held_kept"] += 1
                     # A closing sentence kept on a source whose quote passed every
-                    # check is counted; one kept on no source, or on a source a check
-                    # refused, is recorded with what it rests on (T-568).
-                    if row.sources and not found:
+                    # check, on two or more words of what it denies something of, is
+                    # counted; one kept on no source, on a source a check refused, or
+                    # on fewer of those words, is recorded with what it rests on (T-568).
+                    if (
+                        row.sources
+                        and not found
+                        and quote_overlap(standing[2], row.quote) >= _QUOTE_SHARED
+                    ):
                         continue
                     rests = (
                         f"{', '.join(_form(s) for s in row.sources)}, quoting "
