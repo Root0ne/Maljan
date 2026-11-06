@@ -1190,6 +1190,48 @@ class _BoundedStream(io.RawIOBase):
         return data
 
 
+# The most memory the xz and lzma decoder may take for one stream. A stream's
+# own header names its dictionary size, up to 4 GiB in the legacy .lzma form,
+# and the decoder allocates it before it reads a byte: a sample of a few bytes
+# could otherwise make the reader ask for 4 GiB. The strongest xz preset needs
+# 64 MiB of dictionary, so a real archive fits; a header asking for more is a
+# decoding error, and the file is tried as the next format.
+LZMA_MEMORY_LIMIT = 256 * 1024 * 1024
+
+
+class _FileOwningReader(io.BufferedReader):
+    """A buffered decoder that also closes the file it decodes from."""
+
+    def __init__(self, reader: io.RawIOBase, source: Any) -> None:
+        super().__init__(reader)
+        self._source = source
+
+    def close(self) -> None:
+        try:
+            super().close()
+        finally:
+            self._source.close()
+
+
+def _xz_reader(path: Path) -> io.BufferedReader:
+    """An xz or lzma stream of the file, decoded with at most ``LZMA_MEMORY_LIMIT`` of memory.
+
+    ``lzma.LZMAFile`` takes no memory limit when it reads, so the stream is
+    built the way it builds its own, with the limit given to the decoder.
+    """
+    import _compression
+
+    source = open(path, "rb")  # noqa: SIM115 - closed with the reader
+    reader = _compression.DecompressReader(
+        source,
+        lzma.LZMADecompressor,
+        trailing_error=lzma.LZMAError,
+        format=lzma.FORMAT_AUTO,
+        memlimit=LZMA_MEMORY_LIMIT,
+    )
+    return _FileOwningReader(reader, source)
+
+
 def _tar_openers() -> list[tuple[Any, tuple[type[BaseException], ...]]]:
     """How ``tarfile.open`` in its default mode tries a file, in its order, and what moves it on.
 
@@ -1208,7 +1250,7 @@ def _tar_openers() -> list[tuple[Any, tuple[type[BaseException], ...]]]:
     return [
         (lambda path: gzip.GzipFile(path, "rb"), (*tar_errors, OSError, EOFError, zlib.error)),
         (lambda path: bz2.BZ2File(path, "rb"), (*tar_errors, OSError, EOFError)),
-        (lambda path: lzma.LZMAFile(path, "rb"), (*tar_errors, lzma.LZMAError, EOFError)),
+        (_xz_reader, (*tar_errors, lzma.LZMAError, EOFError)),
         (lambda path: open(path, "rb"), tar_errors),  # noqa: SIM115 - closed by the caller
     ]
 
