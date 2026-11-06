@@ -276,6 +276,48 @@ def test_minio_is_built_from_the_release_its_tag_names() -> None:
     ]
 
 
+# The services whose image carries an x86-64-only program (T-581), and the
+# release asset each Dockerfile names for it. Ghidra's is built from
+# external/ghidra-mcp, outside this repository.
+X86_ONLY = {
+    "ghidra-mcp": None,
+    "die-mcp": "_amd64.deb",
+    "goresym-mcp": "GoReSym-linux.zip",
+    "yarax-mcp": "-x86_64-unknown-linux-gnu.tar.gz",
+    "webcrack-mcp": "-linux-x64.tar.xz",
+    "unblob-mcp": "sasquatch_1.0_amd64.deb",
+    "jadx-mcp": "_x64_linux_hotspot_",
+}
+# The services built or pulled for the host's own architecture.
+MULTI_ARCH = (
+    "backend-api",
+    "backend-worker",
+    "enrichment-worker",
+    "frontend",
+    "minio",
+    "postgres",
+    "redis",
+    "qdrant",
+)
+
+
+def test_only_the_x86_only_services_ask_for_amd64() -> None:
+    # On Apple Silicon a service whose image runs an x86-64 binary starts
+    # emulated rather than not at all; on an amd64 host the line changes
+    # nothing. A multi-arch service keeps the host's architecture.
+    config = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text())
+    services = config["services"]
+    declared = {name for name, service in services.items() if "platform" in service}
+    assert declared == set(X86_ONLY)
+    for name, asset in X86_ONLY.items():
+        assert services[name]["platform"] == "linux/amd64", name
+        if asset is not None:
+            dockerfile = ROOT / "services" / services[name]["build"]["dockerfile"]
+            assert asset in dockerfile.read_text(encoding="utf-8"), name
+    for name in MULTI_ARCH:
+        assert "platform" not in services[name], name
+
+
 def _workflow_service_images() -> dict[str, str]:
     images = {}
     for workflow in sorted((ROOT / ".github" / "workflows").glob("*.yml")):

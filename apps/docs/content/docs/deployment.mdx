@@ -172,6 +172,52 @@ analyser you do run (radare2, capa and YARA, a tool server of your own through
 `core.memory.backend` to `memory`. The shipped backend is `qdrant`, so until
 then every run reports long-term memory unavailable and goes on without it.
 
+## Apple Silicon (arm64)
+
+Malspark runs on an Apple Silicon Mac with the same compose file. The core
+services (`backend-api`, `backend-worker`, `enrichment-worker`, `frontend`,
+`minio`, `postgres`, `redis`, `qdrant`) build or pull native arm64 images. The
+services whose image carries an x86-64-only program declare
+`platform: linux/amd64` and run emulated, slower than native:
+
+| Service | Why it is x86-64 only |
+|---|---|
+| `ghidra-mcp` | Ghidra's release ships no `linux_arm_64` decompiler. |
+| `die-mcp` | DIE's amd64 `.deb`. |
+| `goresym-mcp` | GoReSym's x86-64 Linux build. |
+| `yarax-mcp` | yara-x's x86_64 Linux build. |
+| `webcrack-mcp` | Node's `linux-x64` build. |
+| `unblob-mcp` | sasquatch's amd64 `.deb`. |
+| `jadx-mcp` | Temurin's x64 JRE. |
+
+On an amd64 host the `platform:` lines change nothing.
+
+**Turn on x86-64 emulation.** In Docker Desktop, turn on *Use Rosetta for
+x86_64/amd64 emulation on Apple Silicon* under Settings → General. With Colima,
+start the VM on Apple's virtualisation framework with Rosetta:
+
+```bash
+colima start --vm-type vz --vz-rosetta --memory 32 --cpu 8
+```
+
+**Give the VM 24–32 GB of memory.** The default profiles' ceilings alone pass
+16 GB: the worker is capped at 8 GB, `ghidra-mcp` at 6 GB (`GHIDRA_MEM_LIMIT`)
+and `enrichment-worker` at 2 GB, on top of PostgreSQL, Redis, MinIO, Qdrant, the
+API and the frontend. A VM smaller than the sum has the kernel's OOM killer
+stop a container mid-analysis. Each sidecar profile you turn on adds its own
+memory ceiling.
+
+**A model server on the Mac.** The worker reaches a model server on the host at
+`host.docker.internal`. Ollama and LM Studio listen on `127.0.0.1` by default,
+which a container cannot reach; make the server listen on all interfaces, for
+Ollama with `OLLAMA_HOST=0.0.0.0` in the environment it starts from, for LM
+Studio with *Serve on Local Network* in its server settings. The server then
+also answers every machine that can reach the Mac: keep the macOS firewall on,
+or block the port from other hosts, since neither server asks for a key by
+default.
+
+Native arm64 images for every service are planned.
+
 ## Required secrets
 
 Every secret the core services need is declared with `:?`, so the stack
