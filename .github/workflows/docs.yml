@@ -10,17 +10,15 @@ on:
   push:
     branches: ["main"]
     paths: ["apps/docs/**", "docs/**", ".github/workflows/docs.yml"]
-  # A failed deployment needs a way to run again without an empty commit.
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Deployments queue rather than cancel: a Pages deployment stopped halfway
-# leaves the site on whichever half landed.
+# A newer push makes an older check of the same ref moot.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   check:
@@ -49,32 +47,3 @@ jobs:
       - name: Check the pages
         working-directory: apps/docs
         run: npm run check
-
-      # The old address, https://root0ne.github.io/Malspark/, now only sends
-      # readers on to the same page on malspark.com.
-      - name: Write the redirect site
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        working-directory: apps/docs
-        run: node scripts/pages-redirect.mjs "$RUNNER_TEMP/pages-redirect"
-
-      - name: Upload the redirect site
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: ${{ runner.temp }}/pages-redirect
-
-  deploy:
-    name: Deploy to GitHub Pages
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: check
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
