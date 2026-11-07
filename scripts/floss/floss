@@ -1,4 +1,4 @@
-#!/opt/floss/bin/python3 -IB
+#!/opt/floss/bin/python3 -ISB
 # FLOSS 3.1.1 from the backend image's own FLOSS environment, /opt/floss, on an
 # architecture FLARE publishes no standalone build for (arm64). The image
 # installs that environment from requirements.txt beside this file, every
@@ -6,36 +6,48 @@
 # server's floss tool finds it; the tool runs it only when its sha256 is the one
 # src/malspark/tools/emulated_strings.py pins for this file. -I keeps the
 # environment's interpreter from reading PYTHON* variables, the user's site
-# directory and the directory the copy it runs sits in; -B keeps it from
-# writing bytecode.
+# directory and the directory the copy it runs sits in; -S keeps it from
+# importing site, so no .pth file or sitecustomize in the environment runs
+# before the check below; -B keeps it from writing bytecode.
 #
-# Before FLOSS is imported, the environment is checked against what this file
-# pins, and nothing runs (exit 2) when it differs: the interpreter is the
-# environment's, FLOSS is the pinned release, the RECORD files pip wrote for
-# FLOSS, vivisect and viv-utils are the ones the image build wrote (their
-# sha256 below), every file each installed package's RECORD lists still has
-# the recorded sha256, every file in site-packages is one some RECORD lists
-# (so no module, .pth or sitecustomize was added), no compiled bytecode is
-# there to stand in for a checked source (the image installs with --no-compile
-# and nothing may write there), and the floss package imported is the one
-# FLOSS's RECORD lists.
+# Before FLOSS is imported, the environment's site-packages is checked against
+# what this file pins, and nothing runs (exit 2) when it differs: the
+# interpreter is the environment's; every file each installed package's RECORD
+# lists has the recorded sha256, and only a RECORD itself goes unhashed; every
+# file in site-packages is one some RECORD lists, so no module, .pth or
+# sitecustomize was added; no compiled bytecode is there to stand in for a
+# checked source (the image installs with --no-compile and nothing may write
+# there); FLOSS is the pinned release; one sha256 over every package's name and
+# RECORD is the one the image build gives on this machine, so no package was
+# added, removed or rewritten together with its RECORD (binary2strings, which
+# the image compiles from its sdist, is held to its name and version); and the
+# floss package found is the one FLOSS's RECORD lists. Only then is
+# site-packages put on the import path.
+#
+# The environment digest is re-pinned whenever requirements.txt changes: build
+# the image's floss-arm64 stage for each architecture and take the digest the
+# refusal names (scripts/floss/requirements.txt says so too).
 import base64
 import csv
 import hashlib
 import importlib.metadata
 import importlib.util
+import platform
 import sys
-import sysconfig
 from pathlib import Path
 
 sys.dont_write_bytecode = True
 
 PREFIX = "/opt/floss"
 VERSION = "3.1.1"
-RECORDS = {
-    "flare-floss": "78fa5d9e7cbb79018ba027d101c47e79d26bcb4e5062db8959f0db8525aa96c8",
-    "viv-utils": "0d8efa8f9d5ce6b78ef514b68748aeb18ddc610af1e0cd65dc78682831dbfb0d",
-    "vivisect": "0739323825fabfb722fabb8592d3fe6d2d96e9f37a7fab23b688ab5a757e72ce",
+# The packages built in the image rather than installed from a wheel, held to
+# their version: their compiled files differ from build to build.
+BUILT_HERE = {"binary2strings": "0.1.13"}
+# sha256 over every installed package's name and RECORD (see environment()),
+# per machine: the compiled wheels differ between the two.
+ENVIRONMENT = {
+    "x86_64": "df5c018388b7e3269680995df903271ac102590bd894fcd75869df33c2da9a22",
+    "aarch64": "95655dd853228c3a2c42289e2d4dba017ad96e479036c23ea54d14969e21c408",
 }
 
 
@@ -44,16 +56,26 @@ def refuse(why: str) -> None:
     sys.exit(2)
 
 
+def record_of(dist: importlib.metadata.Distribution) -> Path:
+    paths = [Path(str(dist.locate_file(f))) for f in dist.files or () if f.name == "RECORD"]
+    if len(paths) != 1:
+        refuse(f"{dist.metadata['Name']} has no single RECORD")
+    return paths[0].resolve()
+
+
 def recorded(dist: importlib.metadata.Distribution, name: str) -> set[Path]:
     """The files ``dist``'s RECORD lists, each checked against its recorded sha256."""
+    own = record_of(dist)
     files = set()
-    for row in csv.reader((dist.read_text("RECORD") or "").splitlines()):
+    for row in csv.reader(own.read_text(encoding="utf-8").splitlines()):
         if not row:
             continue
         target = Path(str(dist.locate_file(row[0]))).resolve()
         files.add(target)
         if len(row) < 2 or not row[1]:
-            continue  # the RECORD itself
+            if target == own:
+                continue
+            refuse(f"{name} records {row[0]} without a hash")
         algorithm, _, expected = row[1].partition("=")
         if algorithm != "sha256":
             refuse(f"{name} records {row[0]} with {algorithm}, not sha256")
@@ -66,51 +88,58 @@ def recorded(dist: importlib.metadata.Distribution, name: str) -> set[Path]:
     return files
 
 
-def check() -> None:
-    if sys.prefix != PREFIX:
-        refuse(f"the interpreter's environment is not {PREFIX}")
-    site = {Path(sysconfig.get_path(key)).resolve() for key in ("purelib", "platlib")}
+def environment(dists: dict[str, importlib.metadata.Distribution]) -> str:
+    """sha256 over each package's name and its RECORD, or its version when built here."""
+    digest = hashlib.sha256()
+    for name in sorted(dists):
+        if name in BUILT_HERE:
+            body = dists[name].version.encode()
+        else:
+            body = record_of(dists[name]).read_bytes()
+        digest.update(name.encode() + b"\0" + body + b"\0")
+    return digest.hexdigest()
+
+
+def check(site: Path) -> None:
+    if sys.executable != f"{PREFIX}/bin/python3":
+        refuse(f"the interpreter is not {PREFIX}/bin/python3")
+    dists: dict[str, importlib.metadata.Distribution] = {}
     listed: set[Path] = set()
     floss_files: set[Path] = set()
-    seen = set()
-    for dist in importlib.metadata.distributions(path=[str(path) for path in site]):
+    for dist in importlib.metadata.distributions(path=[str(site)]):
         name = (dist.metadata["Name"] or "").lower().replace("_", "-")
-        if name in seen:
+        if name in dists:
             refuse(f"{name} is installed twice")
-        seen.add(name)
+        dists[name] = dist
         files = recorded(dist, name)
         listed |= files
-        if name in RECORDS:
-            record = [
-                Path(str(dist.locate_file(f))) for f in dist.files or () if f.name == "RECORD"
-            ]
-            if (
-                len(record) != 1
-                or hashlib.sha256(record[0].read_bytes()).hexdigest() != RECORDS[name]
-            ):
-                refuse(f"{name}'s RECORD is not the one the image build wrote")
         if name == "flare-floss":
-            if dist.version != VERSION:
-                refuse(f"flare-floss is {dist.version}, not {VERSION}")
             floss_files = files
-    missing = set(RECORDS) - seen
-    if missing:
-        refuse(f"{', '.join(sorted(missing))} is not installed")
-    for root in site:
-        for path in root.rglob("*"):
-            if path.is_dir() and not path.is_symlink():
-                continue
-            if path.suffix == ".pyc":
-                refuse(f"compiled bytecode is in the environment ({path.name})")
-            if path.resolve() not in listed:
-                refuse(f"{path.relative_to(root)} is in site-packages but in no RECORD")
+    if "flare-floss" not in dists:
+        refuse("flare-floss is not installed")
+    if dists["flare-floss"].version != VERSION:
+        refuse(f"flare-floss is {dists['flare-floss'].version}, not {VERSION}")
+    for name, version in BUILT_HERE.items():
+        if name not in dists or dists[name].version != version:
+            refuse(f"{name} {version} is not installed")
+    for path in site.rglob("*"):
+        if path.is_dir() and not path.is_symlink():
+            continue
+        if path.suffix == ".pyc":
+            refuse(f"compiled bytecode is in the environment ({path.name})")
+        if path.resolve() not in listed:
+            refuse(f"{path.relative_to(site)} is in site-packages but in no RECORD")
+    found = environment(dists)
+    if found != ENVIRONMENT.get(platform.machine()):
+        refuse(f"the installed packages are not the ones the image build installs ({found})")
+    sys.path.append(str(site))
     spec = importlib.util.find_spec("floss")
     origin = Path(spec.origin).resolve() if spec and spec.origin else None
     if origin not in floss_files:
         refuse("the floss package found is not the one flare-floss's RECORD lists")
 
 
-check()
+check(Path(PREFIX, "lib", f"python{sys.version_info[0]}.{sys.version_info[1]}", "site-packages"))
 
 from floss.main import main  # noqa: E402
 

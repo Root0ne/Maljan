@@ -116,11 +116,11 @@ updates:
         versions: [">=6.0"]
     open-pull-requests-limit: 5
 
-  # The backend image's own FLOSS environment on arm64, pinned by hash. FLOSS
-  # itself moves with the standalone build src/malspark/tools/emulated_strings.py
-  # pins, never alone, and it takes networkx below 3.2, which a hashed file
-  # bumped entry by entry would not keep. setuptools is held at the release
-  # the unblob-mcp image pins, and moves with it.
+  # The backend image's own FLOSS environment on arm64, pinned by hash. The
+  # launcher scripts/floss/floss pins one sha256 over every installed
+  # package's RECORD, so no entry can move without a re-pin there
+  # (scripts/floss/requirements.txt says how): Dependabot opens no version
+  # update for it and the file is moved by hand, with the re-pin.
   - package-ecosystem: "pip"
     directory: "/scripts/floss"
     schedule:
@@ -128,14 +128,8 @@ updates:
       day: "monday"
     target-branch: "dev"
     labels: ["dependencies", "python"]
-    groups:
-      floss-minor-and-patch:
-        update-types: ["minor", "patch"]
     ignore:
-      - dependency-name: "flare-floss"
-      - dependency-name: "networkx"
-        versions: [">=3.2"]
-      - dependency-name: "setuptools"
+      - dependency-name: "*"
     open-pull-requests-limit: 5
 
   - package-ecosystem: "npm"

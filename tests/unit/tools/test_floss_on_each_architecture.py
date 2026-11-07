@@ -40,9 +40,9 @@ def test_the_launcher_is_the_file_the_module_pins() -> None:
     assert tool.FLOSS_LAUNCHER_SHA256 != tool.FLOSS_BINARY_SHA256
     first = launcher.read_text(encoding="utf-8").splitlines()[0]
     # The environment's own interpreter, isolated from the caller's variables,
-    # the user's site directory and the directory the run's copy sits in, and
-    # writing no bytecode.
-    assert first == "#!/opt/floss/bin/python3 -IB"
+    # the user's site directory and the directory the run's copy sits in, not
+    # importing site (so no .pth runs before the check) and writing no bytecode.
+    assert first == "#!/opt/floss/bin/python3 -ISB"
 
 
 def _fake(tmp_path: Path, name: str) -> Path:

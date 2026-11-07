@@ -7,6 +7,11 @@
 #   echo 'flare-floss==3.1.1' > req.in
 #   uv pip compile --universal --python-version 3.13 --generate-hashes --no-header req.in
 # and install with pip install --require-hashes --no-build-isolation -r requirements.txt.
+# The launcher (floss) pins one sha256 over every installed package's RECORD,
+# per machine, so a change here is a re-pin there: build docker/Dockerfile.backend's
+# floss-arm64 stage for linux/amd64 and linux/arm64 (CI's native-images
+# workflow does both), take the digest each refusal names into ENVIRONMENT,
+# then re-pin FLOSS_LAUNCHER_SHA256 in src/malspark/tools/emulated_strings.py.
 annotated-types==0.8.0 \
     --hash=sha256:13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7 \
     --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
