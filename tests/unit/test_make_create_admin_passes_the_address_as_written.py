@@ -89,12 +89,14 @@ def test_a_dry_run_prints_the_address_quoted_and_runs_nothing(
     assert not canary.exists()
 
 
-def test_the_address_may_come_from_the_environment(tmp_path: Path) -> None:
-    env = {**_env(tmp_path), "EMAIL": "env'@example.com"}
+def test_an_address_in_the_environment_is_not_read(tmp_path: Path) -> None:
+    # git and Debian's tools read an exported EMAIL: the user's own address.
+    env = {**_env(tmp_path), "EMAIL": "me@example.com"}
     run = subprocess.run(
         ["make", "-s", "create-admin"], cwd=ROOT, env=env, capture_output=True, text=True
     )
-    assert run.returncode == 0 and run.stdout.splitlines()[-1] == "[env'@example.com]"
+    assert run.returncode != 0 and run.stdout == ""
+    assert "an EMAIL in the environment is not read" in run.stderr
 
 
 def test_without_an_address_the_target_says_how_to_call_it(tmp_path: Path) -> None:

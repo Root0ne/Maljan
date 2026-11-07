@@ -83,9 +83,12 @@ make create-admin EMAIL=you@example.com
 docker compose -f docker/docker-compose.yml exec backend-api malspark create-admin you@example.com
 ```
 
+`make create-admin` reads `EMAIL` from its own command line only, never from
+the environment, where git and other tools keep the user's own address.
+
 | Argument or option | Meaning |
 | :-- | :-- |
-| `EMAIL` | The account's e-mail address, the one it signs in with. |
+| `EMAIL` | The account's e-mail address, exactly as it signs in with it. |
 | `--full-name` | The name of an account the command creates. Default `Administrator`. |
 | `--password-stdin` | Read a new account's password from standard input instead of asking for it (once, and without echo when standard input is a terminal). |
 
@@ -97,6 +100,10 @@ docker compose -f docker/docker-compose.yml exec backend-api malspark create-adm
   asked. Promoting an account that is already an admin changes nothing and
   says so. A deactivated account is promoted and stays deactivated, and the
   command says that it cannot sign in.
+- **An account whose address differs only in case** (`Kate@` against
+  `kate@`): sign-in compares the address exactly, so these are two accounts.
+  The command refuses, says how many there are, and changes nothing; give
+  the stored address exactly.
 
 A creation or a promotion is recorded in the audit log as `auth.role.grant`, with no actor (the command line is not an account) and the account as its resource.
 The command refuses, and changes nothing, when the database cannot be reached

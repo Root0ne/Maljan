@@ -107,7 +107,6 @@ async def grant_admin(
     address = checked_email(email)
     user = await _account(session, address)
     if user is not None:
-        address = user.email
         if user.role == UserRole.ADMIN:
             return AdminGrant("already_admin", user.id, address, user.is_active)
         user.role = UserRole.ADMIN
@@ -137,26 +136,30 @@ async def grant_admin(
 
 
 async def _account(session: AsyncSession, address: str) -> User | None:
-    """The account ``address`` names: its exact row, else the one row equal ignoring case.
+    """The account ``address`` names exactly, as sign-in compares it; None when there is none.
 
-    Sign-in compares the address exactly, so an exact row wins; an operator who
-    typed the stored address in another case means that account, not a second
-    one beside it. Two rows equal ignoring case are not chosen between.
+    A registration keeps the local part's case, so ``kate@`` and ``Kate@`` are
+    two accounts, and whoever registered the one the operator did not mean
+    must not be made admin by a case-blind match. An account that differs only
+    in case therefore refuses the command: nothing is promoted or created, and
+    the refusal names how many such accounts there are, never their addresses.
     """
     exact = (await session.execute(select(User).where(User.email == address))).scalar_one_or_none()
     if exact is not None:
         return exact
-    rows = (
-        (await session.execute(select(User).where(func.lower(User.email) == address.lower())))
-        .scalars()
-        .all()
-    )
-    if len(rows) > 1:
-        raise AdminAccountRefused(
-            f"{len(rows)} accounts match {address} ignoring case; give the address exactly as "
-            "it is stored."
+    similar = (
+        await session.execute(
+            select(func.count())
+            .select_from(User)
+            .where(func.lower(User.email) == func.lower(address))
         )
-    return rows[0] if rows else None
+    ).scalar_one()
+    if similar:
+        raise AdminAccountRefused(
+            f"{similar} account(s) differ from {address} only in case; give the stored address "
+            "exactly. Nothing was changed."
+        )
+    return None
 
 
 def database_state(connection: Any) -> str:

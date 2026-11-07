@@ -165,29 +165,46 @@ def test_an_address_that_is_not_one_is_refused(session: Session) -> None:
         _grant(session, _never, email="not-an-address")
 
 
-def test_the_stored_account_is_promoted_whatever_case_the_address_is_typed_in(
+def test_an_account_differing_only_in_case_refuses_and_nothing_changes(
     session: Session,
 ) -> None:
-    user = _user(session, UserRole.ANALYST)
-    user.email = "First@example.com"
+    # Someone registered kate@ before the operator ran the command for Kate@.
+    session.add(User(email="kate@example.com", hashed_password="h", full_name="K"))
     session.commit()
 
-    grant = _grant(session, _never, email="  FIRST@EXAMPLE.COM ")
-    session.commit()
+    with pytest.raises(AdminAccountRefused) as refused:
+        _grant(session, _never, email="Kate@example.com")
+    session.rollback()
 
-    assert grant.outcome == "promoted" and grant.email == "First@example.com"
-    assert session.query(User).count() == 1
-    assert session.query(User).one().role == UserRole.ADMIN
+    message = str(refused.value)
+    assert "1 account(s) differ from Kate@example.com only in case" in message
+    assert "kate@example.com" not in message
+    [user] = session.query(User).all()
+    assert user.email == "kate@example.com" and user.role == UserRole.ANALYST
 
 
-def test_two_accounts_equal_ignoring_case_are_not_chosen_between(session: Session) -> None:
+def test_several_accounts_differing_only_in_case_are_counted_not_named(
+    session: Session,
+) -> None:
     for address in ("First@example.com", "FIRST@example.com"):
         session.add(User(email=address, hashed_password="h", full_name="F"))
     session.commit()
 
-    with pytest.raises(AdminAccountRefused, match="give the address exactly"):
+    with pytest.raises(AdminAccountRefused, match="2 account") as refused:
         _grant(session, _never, email="first@example.com")
+    session.rollback()
+    assert "First@" not in str(refused.value) and "FIRST@" not in str(refused.value)
+    assert session.query(User).count() == 2
+    assert {u.role for u in session.query(User)} == {UserRole.ANALYST}
+    # The stored address, given exactly, is the one promoted.
     assert _grant(session, _never, email="FIRST@example.com").outcome == "promoted"
+
+
+def test_surrounding_spaces_are_dropped_as_the_registration_drops_them(
+    session: Session,
+) -> None:
+    _user(session, UserRole.ANALYST)
+    assert _grant(session, _never, email="  first@example.com ").outcome == "promoted"
 
 
 def test_an_address_registered_while_the_password_is_asked_for_is_refused(

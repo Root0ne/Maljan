@@ -176,13 +176,19 @@ dev-logs:
 # in it, the single quotes (each one inside written as '\'') keep the shell from
 # reading it, and `--` keeps an address that starts with `-` an argument. It is
 # unexported, since make expands an exported variable to put it in a recipe's
-# environment.
+# environment. It is read from the make command line only: an EMAIL exported in
+# the shell (git and Debian's tools read one) is someone's own address, not the
+# account meant here.
 unexport EMAIL
 QUOTED_EMAIL = '$(subst ','\'',$(value EMAIL))'
 
 create-admin:
+ifneq ($(origin EMAIL),command line)
+	@echo "usage: make create-admin EMAIL=you@example.com (on the make command line; an EMAIL in the environment is not read)" >&2; exit 2
+else
 	@[ -n $(QUOTED_EMAIL) ] || { echo "usage: make create-admin EMAIL=you@example.com" >&2; exit 2; }
 	cd docker && docker compose exec backend-api malspark create-admin -- $(QUOTED_EMAIL)
+endif
 
 # On the production stack, these are the two commands that make an edit real.
 fe-rebuild:
