@@ -79,15 +79,18 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Each image is built on a runner of its target's architecture, without
+  # emulation, and pushed by digest alone; the manifests job below joins an
+  # image's architectures under its tags. Every image is built for amd64 and
+  # arm64 but die-mcp, whose program has no arm64 Linux build (ghidra-mcp,
+  # the other, is not released here).
   images:
-    name: Image (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    name: Image (${{ matrix.name }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 90
     permissions:
       contents: read
       packages: write
-      id-token: write
-      attestations: write
     strategy:
       fail-fast: true
       matrix:
@@ -96,9 +99,23 @@ jobs:
           # gives it. The console's NEXT_PUBLIC_* values are baked at build
           # time; these are compose's defaults.
           - name: backend
+            arch: amd64
+            context: .
+            file: docker/Dockerfile.backend
+          - name: backend
+            arch: arm64
             context: .
             file: docker/Dockerfile.backend
           - name: frontend
+            arch: amd64
+            context: .
+            file: docker/Dockerfile.frontend
+            build-args: |
+              NEXT_PUBLIC_API_URL=http://localhost:8000
+              NEXT_PUBLIC_WS_URL=ws://localhost:8000
+              NEXT_PUBLIC_AUTH_DISABLED=false
+          - name: frontend
+            arch: arm64
             context: .
             file: docker/Dockerfile.frontend
             build-args: |
@@ -106,30 +123,71 @@ jobs:
               NEXT_PUBLIC_WS_URL=ws://localhost:8000
               NEXT_PUBLIC_AUTH_DISABLED=false
           - name: minio
+            arch: amd64
+            context: docker
+            file: docker/Dockerfile.minio
+          - name: minio
+            arch: arm64
             context: docker
             file: docker/Dockerfile.minio
           - name: die-mcp
+            arch: amd64
             context: services
             file: services/die-mcp/Dockerfile
           - name: goresym-mcp
+            arch: amd64
+            context: services
+            file: services/goresym-mcp/Dockerfile
+          - name: goresym-mcp
+            arch: arm64
             context: services
             file: services/goresym-mcp/Dockerfile
           - name: ilspy-mcp
+            arch: amd64
+            context: services
+            file: services/ilspy-mcp/Dockerfile
+          - name: ilspy-mcp
+            arch: arm64
             context: services
             file: services/ilspy-mcp/Dockerfile
           - name: jadx-mcp
+            arch: amd64
+            context: services
+            file: services/jadx-mcp/Dockerfile
+          - name: jadx-mcp
+            arch: arm64
             context: services
             file: services/jadx-mcp/Dockerfile
           - name: oletools-mcp
+            arch: amd64
+            context: services
+            file: services/oletools-mcp/Dockerfile
+          - name: oletools-mcp
+            arch: arm64
             context: services
             file: services/oletools-mcp/Dockerfile
           - name: unblob-mcp
+            arch: amd64
+            context: services
+            file: services/unblob-mcp/Dockerfile
+          - name: unblob-mcp
+            arch: arm64
             context: services
             file: services/unblob-mcp/Dockerfile
           - name: webcrack-mcp
+            arch: amd64
+            context: services
+            file: services/webcrack-mcp/Dockerfile
+          - name: webcrack-mcp
+            arch: arm64
             context: services
             file: services/webcrack-mcp/Dockerfile
           - name: yarax-mcp
+            arch: amd64
+            context: services
+            file: services/yarax-mcp/Dockerfile
+          - name: yarax-mcp
+            arch: arm64
             context: services
             file: services/yarax-mcp/Dockerfile
     env:
@@ -150,7 +208,88 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Tags and labels
+      - name: Labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+
+      # The provenance is GitHub's attestation on the manifest list, so Buildx
+      # adds none of its own and each pushed digest is the image manifest.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          build-args: ${{ matrix.build-args }}
+          platforms: linux/${{ matrix.arch }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: false
+          sbom: false
+
+      - name: Keep the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p digests
+          touch "digests/${DIGEST#sha256:}"
+
+      - name: Upload the digest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digests-${{ matrix.name }}-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifests:
+    name: Image manifest (${{ matrix.name }})
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: true
+      matrix:
+        name:
+          - backend
+          - frontend
+          - minio
+          - die-mcp
+          - goresym-mcp
+          - ilspy-mcp
+          - jadx-mcp
+          - oletools-mcp
+          - unblob-mcp
+          - webcrack-mcp
+          - yarax-mcp
+    env:
+      IMAGE: ghcr.io/root0ne/malspark-${{ matrix.name }}
+    steps:
+      - name: Download the digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digests-${{ matrix.name }}-*
+          path: digests
+          merge-multiple: true
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
@@ -159,34 +298,35 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
-      # The provenance is GitHub's attestation below, so Buildx adds none of
-      # its own and the pushed digest is the image manifest itself.
-      - name: Build and push
-        id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.file }}
-          build-args: ${{ matrix.build-args }}
-          push: true
-          provenance: false
-          sbom: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+      # One list per image, naming each architecture's pushed digest, under
+      # the release's tags; its digest is what is signed and attested.
+      - name: Create the manifest list
+        id: manifest
+        working-directory: digests
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          mapfile -t tags < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          args=()
+          for tag in "${tags[@]}"; do args+=(--tag "$tag"); done
+          for digest in *; do args+=("${IMAGE}@sha256:${digest}"); done
+          docker buildx imagetools create "${args[@]}"
+          digest="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
 
       - name: Sign
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.manifest.outputs.digest }}
         run: cosign sign --yes "${IMAGE}@${DIGEST}"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.manifest.outputs.digest }}
           push-to-registry: true
           # A storage record exists only for an organisation's repository and
           # would need the artifact-metadata permission besides.
@@ -194,7 +334,7 @@ jobs:
 
   release:
     name: GitHub release
-    needs: [python, images]
+    needs: [python, manifests]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

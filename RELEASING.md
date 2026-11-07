@@ -19,6 +19,12 @@ The images are the ones the compose stack builds: `backend`, `frontend`,
 `localhost:8000`, authentication on); a deployment that needs other values
 builds the console itself.
 
+Each image is a manifest list for `linux/amd64` and `linux/arm64`, each
+architecture built on a GitHub runner of its own without emulation, except
+`die-mcp`, which is `linux/amd64` only because Detect It Easy publishes no
+arm64 Linux build. The signature and the attestation are on the list's
+digest, which the tags name.
+
 Every signature is keyless: the signing certificate is issued by Sigstore to
 the release workflow's GitHub OIDC identity and the signature is recorded in
 the Rekor transparency log. There is no signing key to hold or rotate.
