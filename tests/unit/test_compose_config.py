@@ -282,7 +282,6 @@ def test_minio_is_built_from_the_release_its_tag_names() -> None:
 X86_ONLY = {
     "ghidra-mcp": None,
     "die-mcp": "_amd64.deb",
-    "goresym-mcp": "GoReSym-linux.zip",
 }
 # The sidecars built natively for amd64 and arm64 (T-573), and the two
 # release assets, one per architecture, each Dockerfile picks between.
@@ -295,6 +294,8 @@ NATIVE_SIDECARS = {
     "jadx-mcp": ("OpenJDK21U-jre_${jre_arch}_linux_hotspot_", "jre_arch=x64", "jre_arch=aarch64"),
     "webcrack-mcp": ("-linux-${node_arch}.tar.xz", "node_arch=x64", "node_arch=arm64"),
     "unblob-mcp": ("sasquatch_1.0_${deb_arch}.deb", "deb_arch=amd64", "deb_arch=arm64"),
+    # GoReSym's release has no arm64 build: that stage compiles the tag's source.
+    "goresym-mcp": ("GoReSym-linux.zip", "GOARCH=arm64 go build", "FROM goresym-${TARGETARCH}"),
 }
 # The services built or pulled for the host's own architecture.
 MULTI_ARCH = (
@@ -328,14 +329,14 @@ def test_only_the_x86_only_services_ask_for_amd64() -> None:
 
 
 def test_a_native_sidecar_pins_a_build_for_each_architecture() -> None:
-    # The image picks the asset for the architecture BuildKit builds for and
-    # stops on any other, each asset under a sha256 of its own.
+    # The image picks the build for the architecture BuildKit builds for, each
+    # under a sha256 of its own, and stops on any other: a case on TARGETARCH
+    # whose fallback fails, or a stage per architecture and none for the rest.
     services = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text())["services"]
     for name, needles in NATIVE_SIDECARS.items():
         dockerfile = ROOT / "services" / services[name]["build"]["dockerfile"]
         text = dockerfile.read_text(encoding="utf-8")
-        assert "ARG TARGETARCH" in text, name
-        assert re.search(r'case "\$\{TARGETARCH:-\$\(dpkg --print-architecture\)\}" in', text), name
+        assert re.search(r"^ARG TARGETARCH$", text, re.MULTILINE), name
         for needle in needles:
             assert needle in text, (name, needle)
         for arch in ("AMD64", "ARM64"):
@@ -343,7 +344,16 @@ def test_a_native_sidecar_pins_a_build_for_each_architecture() -> None:
                 name,
                 arch,
             )
-        assert re.search(r"^\s+\*\) echo .*>&2; exit 1 ;; \\$", text, re.MULTILINE), name
+        stage = re.search(r"^FROM (\S+)-\$\{TARGETARCH\} AS \S+$", text, re.MULTILINE)
+        if stage:
+            named = re.findall(r"^FROM .* AS (\S+)$", text, re.MULTILINE)
+            assert sorted(n for n in named if n.startswith(f"{stage[1]}-")) == [
+                f"{stage[1]}-amd64",
+                f"{stage[1]}-arm64",
+            ], name
+        else:
+            assert 'case "${TARGETARCH:-$(dpkg --print-architecture)}" in' in text, name
+            assert re.search(r"^\s+\*\) echo .*>&2; exit 1 ;; \\$", text, re.MULTILINE), name
 
 
 def _workflow_service_images() -> dict[str, str]:

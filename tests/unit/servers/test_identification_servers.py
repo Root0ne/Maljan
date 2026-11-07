@@ -680,8 +680,17 @@ def test_each_image_pins_the_release_its_install_hint_names(
     assert pinned == getattr(MODULES[key], constant)
     assert pinned in MODULES[key].PROGRAM.install
     # A digest on every base image, a checksum on every download, never root.
-    for base in re.findall(r"^FROM (\S+)", dockerfile, re.MULTILINE):
-        assert re.search(r"@sha256:[0-9a-f]{64}$", base), base
+    # A stage may start from an earlier one: the architecture's, picked by
+    # TARGETARCH, only when a stage exists for amd64 and for arm64.
+    froms = re.findall(r"^FROM (?:--platform=\S+ )?(\S+)(?: AS (\S+))?$", dockerfile, re.M)
+    assert len(froms) == len(re.findall(r"^FROM ", dockerfile, re.MULTILINE))
+    stages: set[str] = set()
+    for base, stage in froms:
+        if "${TARGETARCH}" in base:
+            assert {base.replace("${TARGETARCH}", arch) for arch in ("amd64", "arm64")} <= stages
+        elif base not in stages:
+            assert re.search(r"@sha256:[0-9a-f]{64}$", base), base
+        stages.add(stage)
     assert re.search(r"sha(256|512)sum -c -", dockerfile)
     (user,) = re.findall(r"^USER (\S+)$", dockerfile, re.MULTILINE)
     assert user.split(":")[0] != "0" and user != "root"

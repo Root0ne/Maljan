@@ -437,8 +437,6 @@ services:
       context: ../services
       dockerfile: goresym-mcp/Dockerfile
     image: malspark-goresym-mcp:3.4.1
-    # x86-64 only: the image unpacks GoReSym's x86-64 Linux build; an arm64 host runs it emulated.
-    platform: linux/amd64
     container_name: malspark-goresym-mcp
     environment:
       MCP_AUTH_TOKEN: ${GORESYM_MCP_AUTH_TOKEN:-}
