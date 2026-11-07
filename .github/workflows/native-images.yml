@@ -85,8 +85,19 @@ jobs:
           - name: backend
             context: .
             file: docker/Dockerfile.backend
+            # On arm64 it also times the launcher against a bare start of the
+            # same FLOSS, which is what the launcher's check costs.
             smoke: >-
-              floss --version &&
+              python -c "import subprocess, time; s = time.monotonic();
+              subprocess.run(['floss', '--version'], check=True);
+              print(f'floss --version took {time.monotonic() - s:.2f} s')" &&
+              if [ -x /opt/floss/bin/python3 ]; then
+              python -c "import subprocess, time; s = time.monotonic();
+              subprocess.run(['/opt/floss/bin/python3', '-ISB', '-c',
+              'import sys; sys.path.append(sys.argv[1]); sys.argv[1:] = [\"--version\"];
+              from floss.main import main; main()',
+              '/opt/floss/lib/python3.13/site-packages'], check=True);
+              print(f'a bare start took {time.monotonic() - s:.2f} s')"; fi &&
               python -c "from malspark.tools.emulated_strings import find_floss;
               path, reason = find_floss(); assert path, reason; print(path)"
           - name: frontend
