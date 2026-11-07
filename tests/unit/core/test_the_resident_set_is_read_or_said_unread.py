@@ -117,13 +117,18 @@ def test_one_reading_stands_for_a_second(monkeypatch: pytest.MonkeyPatch) -> Non
     assert len(calls) == 2, "a reading a second old is taken again"
 
 
-def test_ps_is_not_started_again_once_it_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("answer", [None, "not a number"], ids=["no_ps", "no_number"])
+def test_ps_is_not_started_again_once_it_failed_for_good(
+    monkeypatch: pytest.MonkeyPatch, answer: str | None
+) -> None:
     started: list[int] = []
     clock = [100.0]
 
-    def refuse(*_args: Any, **_kwargs: Any) -> Any:
+    def refuse(argv: list[str], **_kwargs: Any) -> Any:
         started.append(1)
-        raise subprocess.TimeoutExpired(["ps"], memprobe.PS_TIMEOUT_SECONDS)
+        if answer is None:
+            raise FileNotFoundError(2, "No such file or directory", "ps")
+        return subprocess.CompletedProcess(argv, 0, answer, "")
 
     monkeypatch.setattr(memprobe, "open", _no_proc, raising=False)
     monkeypatch.setattr(memprobe.subprocess, "run", refuse)
@@ -133,6 +138,32 @@ def test_ps_is_not_started_again_once_it_failed(monkeypatch: pytest.MonkeyPatch)
     clock[0] += 60
     assert memprobe.rss_mb() is None
     assert started == [1]
+
+
+def test_a_ps_that_timed_out_is_no_reading_for_its_window_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+    clock = [100.0]
+    answers = iter(["timeout", "20480"])
+
+    def run(argv: list[str], **_kwargs: Any) -> Any:
+        calls.append(list(argv))
+        answer = next(answers)
+        if answer == "timeout":
+            raise subprocess.TimeoutExpired(argv, memprobe.PS_TIMEOUT_SECONDS)
+        return subprocess.CompletedProcess(argv, 0, f" {answer}\n", "")
+
+    monkeypatch.setattr(memprobe, "open", _no_proc, raising=False)
+    monkeypatch.setattr(memprobe.subprocess, "run", run)
+    monkeypatch.setattr(memprobe.time, "monotonic", lambda: clock[0])
+
+    assert memprobe.rss_mb() is None
+    assert memprobe.rss_mb() is None
+    assert len(calls) == 1, "the window that timed out does not ask again"
+    clock[0] += memprobe.PS_READING_MAX_AGE_SECONDS
+    assert memprobe.rss_mb() == 20.0
+    assert len(calls) == 2
 
 
 def test_ps_is_looked_for_in_the_systems_directories_only(

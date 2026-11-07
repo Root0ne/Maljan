@@ -96,8 +96,9 @@ PS_TIMEOUT_SECONDS = 5.0
 PS_READING_MAX_AGE_SECONDS = 1.0
 # Where ``ps`` is looked for: the system's own, never one the job's PATH names.
 PS_SEARCH_PATH = "/bin:/usr/bin"
-# The last ``ps`` reading and when it was taken; ``failed`` once ``ps`` was
-# missing or gave no number, after which it is not started again.
+# The last ``ps`` reading and when it was taken (``None`` for a window whose
+# ``ps`` timed out); ``failed`` once ``ps`` was missing or gave no number,
+# after which it is not started again.
 _ps_lock = threading.Lock()
 _ps_reading: dict[str, Any] = {"at": None, "mb": None, "failed": False}
 
@@ -127,7 +128,8 @@ def _rss_mb_from_ps() -> float | None:
 
     One reading stands for ``PS_READING_MAX_AGE_SECONDS``; callers in that
     second share it rather than each starting ``ps``. Once ``ps`` is missing or
-    answers no number, it is not started again and the answer stays ``None``.
+    answers no number, it is not started again and the answer stays ``None``;
+    a ``ps`` that timed out is no reading for that window only.
     """
     with _ps_lock:
         if _ps_reading["failed"]:
@@ -149,8 +151,14 @@ def _rss_mb_from_ps() -> float | None:
                 check=False,
             ).stdout.strip()
             mb = round(int(shown) / 1024, 1)
-        except (OSError, ValueError, subprocess.SubprocessError):
+        except (FileNotFoundError, ValueError):
+            # No ps, or one that answers no number: that does not change.
             _ps_reading.update(at=None, mb=None, failed=True)
+            return None
+        except (OSError, subprocess.SubprocessError):
+            # A ps that hung or could not start this time: no reading for this
+            # window, and the next window asks again.
+            _ps_reading.update(at=now, mb=None)
             return None
         _ps_reading.update(at=now, mb=mb)
         return mb

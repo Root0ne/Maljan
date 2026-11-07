@@ -965,3 +965,40 @@ class TestAValueTheFilesystemWouldRefuse:
         assert len(error["message"]) < 400
         assert f"[Errno {errno.ENAMETOOLONG}] {os.strerror(errno.ENAMETOOLONG)}" in error["message"]
         assert error["message"].startswith("OSError: ")
+
+    def test_a_refusal_naming_a_descriptor_is_answered_not_raised(self, server: Any) -> None:
+        """An OSError raised on a descriptor names its number, not a path."""
+        import os
+
+        read, write = os.pipe()
+        os.close(read)
+        os.close(write)
+
+        answer = server._guard("strings", lambda: os.stat(read))
+
+        assert answer["error"]["message"].startswith("OSError: [Errno ")
+        assert answer["error"]["message"].endswith(repr(str(read)))
+
+    def test_a_hand_built_error_with_a_number_for_its_name_is_answered(self, server: Any) -> None:
+        def raises() -> dict[str, Any]:
+            raise OSError(2, "x", 12)
+
+        # OSError(2, ...) is built as its errno's subclass.
+        message = server._guard("strings", raises)["error"]["message"]
+        assert message == "FileNotFoundError: [Errno 2] x: '12'"
+
+    def test_words_that_cannot_be_said_fall_back_to_the_exceptions_own_bounded(
+        self, server: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def unsayable(_value: str) -> str:
+            raise RuntimeError("the echo itself failed")
+
+        monkeypatch.setattr(server, "_echoed", unsayable)
+
+        def raises() -> dict[str, Any]:
+            raise OSError(2, "x" * 1000, "/a/path")
+
+        message = server._guard("strings", raises)["error"]["message"]
+
+        assert message.startswith("FileNotFoundError: [Errno 2]")
+        assert len(message) <= server._FAILURE_CHARS + 1

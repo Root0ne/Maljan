@@ -467,6 +467,8 @@ _MAX_CARVED_LENGTH = 4096
 # thousand characters does not need all three thousand back to see what it
 # sent.
 _ECHOED_VALUE_CHARS = 80
+# The most of an exception's own words a refusal carries.
+_FAILURE_CHARS = 300
 
 # The quote characters a model wraps a value in when it copies it out of the
 # JSON it read. One matching pair is removed and nothing else is: no
@@ -592,12 +594,27 @@ def _failure_said(exc: BaseException) -> str:
     An ``OSError`` carries the path it was raised on, and its text quotes that
     path whole: a name the file system refused for its length is quoted back
     at that length, under a temporary directory whose own length varies by
-    host. The path is quoted as any refused value is (``_echoed``).
+    host. The path is quoted as any refused value is (``_echoed``). What an
+    OSError names may also be a descriptor (``os.stat(fd)``), shown as its
+    number. Saying the failure never fails in turn: whatever goes wrong here,
+    the answer is the exception's own words, bounded.
     """
-    if isinstance(exc, OSError) and exc.filename is not None:
-        words = f"[Errno {exc.errno}] {exc.strerror}" if exc.errno else str(exc.strerror or "")
-        return f"{type(exc).__name__}: {words}: {_echoed(os.fsdecode(exc.filename))}"
-    return f"{type(exc).__name__}: {exc}"
+    try:
+        named = exc.filename if isinstance(exc, OSError) else None
+        if named is not None:
+            shown = (
+                os.fsdecode(named) if isinstance(named, (str, bytes, os.PathLike)) else str(named)
+            )
+            words = f"[Errno {exc.errno}] {exc.strerror}" if exc.errno else str(exc.strerror or "")
+            return f"{type(exc).__name__}: {words}: {_echoed(shown)}"
+        return _bounded(f"{type(exc).__name__}: {exc}")
+    except Exception:  # noqa: BLE001 — the words of a failure must not raise past the guard
+        return _bounded(f"{type(exc).__name__}: {exc!s}")
+
+
+def _bounded(text: str) -> str:
+    """``text`` cut to ``_FAILURE_CHARS``, marked where it was cut."""
+    return text if len(text) <= _FAILURE_CHARS else f"{text[:_FAILURE_CHARS]}…"
 
 
 def _digest_of(target: Path) -> str:
