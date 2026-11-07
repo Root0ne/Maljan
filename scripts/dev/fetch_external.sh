@@ -48,6 +48,15 @@ SIGMA_URL="https://github.com/SigmaHQ/sigma.git"
 SIGMA_REF="r2026-07-01"
 SIGMA_DEST="$REPO_ROOT/data/sigma_rules"
 
+# A name that is no target is a typo, and fetching nothing for it would pass for success.
+known=" ${targets[*]%%|*} "
+for wanted in "$@"; do
+  if [[ "$known" != *" $wanted "* ]]; then
+    echo "  FAIL     no target named $wanted; the targets are:$known" >&2
+    exit 2
+  fi
+done
+
 mkdir -p "$EXTERNAL"
 
 for spec in "${targets[@]}"; do
@@ -65,8 +74,29 @@ for spec in "${targets[@]}"; do
       echo "  ok       $name at $have"
     else
       echo "  checkout $name -> $ref"
+      # The patches this script applied for the earlier pin come off first, so
+      # they do not stand in the checkout's way; only one that comes off
+      # cleanly is taken off, and nothing else in the tree is touched.
+      for applied in "$PATCHES/$name"-*.patch; do
+        [[ -f "$applied" ]] || continue
+        if git -C "$dest" apply --ignore-whitespace --reverse --check "$applied" 2>/dev/null; then
+          git -C "$dest" apply --ignore-whitespace --reverse "$applied"
+          # The lines it puts back carry the patch's line endings; a file that
+          # then differs from the checkout in those alone is the checkout's again.
+          while IFS=$'\t' read -r _ _ file; do
+            if git -C "$dest" diff --quiet --ignore-cr-at-eol -- "$file"; then
+              git -C "$dest" checkout --quiet -- "$file"
+            fi
+          done < <(git -C "$dest" apply --numstat "$applied")
+          echo "  unpatch  $name ${applied##*/}"
+        fi
+      done
       git -C "$dest" fetch --quiet --tags origin
-      git -C "$dest" checkout --quiet "$ref"
+      git -C "$dest" checkout --quiet "$ref" || {
+        echo "  FAIL     $name: cannot check out $ref; local changes in $dest are in the way" \
+          "(see git -C $dest status), or the ref is not there" >&2
+        exit 1
+      }
     fi
   elif [[ -e "$dest" ]]; then
     echo "  SKIP     $name exists and is not a git checkout: $dest" >&2

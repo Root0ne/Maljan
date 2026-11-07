@@ -165,6 +165,74 @@ class TestNamedTargetsAndAnotherDirectory:
         assert not (tree / "external").exists()
 
 
+class TestANewPin:
+    def _upstream_with_v2(self, tmp_path: Path) -> Path:
+        upstream = _upstream(tmp_path)
+        (upstream / "build.txt").write_bytes(b"version=1b\r\nname=tool\r\n")
+        _git(upstream, "commit", "--quiet", "-am", "next release")
+        _git(upstream, "tag", "v2")
+        return upstream
+
+    def _pin(self, tree: Path, ref: str) -> None:
+        script = tree / "scripts" / "dev" / "fetch_external.sh"
+        text = script.read_text(encoding="utf-8")
+        script.write_text(text.replace('|v1"', f'|{ref}"'), encoding="utf-8")
+
+    def test_the_old_pin_s_patch_comes_off_before_the_checkout(self, tmp_path: Path) -> None:
+        upstream = self._upstream_with_v2(tmp_path)
+        tree = _tree(tmp_path, upstream.as_uri())
+        assert _fetch(tree, "tool").returncode == 0
+        self._pin(tree, "v2")
+
+        done = _fetch(tree, "tool")
+
+        assert done.returncode == 0, done.stderr
+        assert "unpatch  tool tool-v1.patch" in done.stdout
+        dest = tree / "external" / "tool"
+        assert _git(dest, "rev-parse", "HEAD") == _git(upstream, "rev-parse", "v2^{commit}")
+        assert (dest / "build.txt").read_bytes() == b"version=1b\r\nname=tool\r\n"
+
+    def test_a_patched_tree_an_editor_converted_moves_to_the_new_pin(self, tmp_path: Path) -> None:
+        upstream = self._upstream_with_v2(tmp_path)
+        tree = _tree(tmp_path, upstream.as_uri())
+        assert _fetch(tree, "tool").returncode == 0
+        built = tree / "external" / "tool" / "build.txt"
+        built.write_bytes(built.read_bytes().replace(b"\r\n", b"\n"))
+        self._pin(tree, "v2")
+
+        done = _fetch(tree, "tool")
+
+        assert done.returncode == 0, done.stderr
+        assert built.read_bytes() == b"version=1b\r\nname=tool\r\n"
+
+    def test_a_local_change_in_the_way_stops_the_script_with_the_reason(
+        self, tmp_path: Path
+    ) -> None:
+        upstream = self._upstream_with_v2(tmp_path)
+        tree = _tree(tmp_path, upstream.as_uri(), patch=None)
+        assert _fetch(tree, "tool").returncode == 0
+        built = tree / "external" / "tool" / "build.txt"
+        built.write_bytes(b"an operator's own edit\n")
+        self._pin(tree, "v2")
+
+        done = _fetch(tree, "tool")
+
+        assert done.returncode == 1
+        assert "FAIL     tool: cannot check out v2; local changes" in done.stderr
+        assert built.read_bytes() == b"an operator's own edit\n"
+        assert not (tree / "capa-ran").exists()
+
+
+def test_a_name_that_is_no_target_stops_the_script(tmp_path: Path) -> None:
+    tree = _tree(tmp_path, _upstream(tmp_path).as_uri())
+
+    done = _fetch(tree, "tool", "toll")
+
+    assert done.returncode == 2
+    assert "FAIL     no target named toll; the targets are: tool other" in done.stderr
+    assert not (tree / "external").exists()
+
+
 def test_every_shipped_patch_names_a_pinned_target() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     pins = {
