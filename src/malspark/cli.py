@@ -404,6 +404,77 @@ def info() -> None:
     typer.echo(f"Registered Parsers: {parser_reg.list_parsers()}")
 
 
+@app.command("create-admin")
+def create_admin(
+    email: str = typer.Argument(help="The account's e-mail address, the one it signs in with."),
+    full_name: str = typer.Option(
+        "Administrator", "--full-name", help="The name of an account the command creates."
+    ),
+    password_stdin: bool = typer.Option(
+        False,
+        "--password-stdin",
+        help="Read a new account's password from standard input instead of asking for it.",
+    ),
+) -> None:
+    """Create an admin account, or promote an existing one, in the API's database.
+
+    Reads DATABASE_URL as the API does. A new account's password is asked for
+    on the terminal (or read from standard input), never taken from an argument.
+    """
+    try:
+        from app.services.admin_account import AdminAccountRefused
+        from app.services.admin_account import create_admin as grant
+    except ModuleNotFoundError as exc:
+        if not (exc.name or "").startswith("app"):
+            raise
+        typer.echo(
+            "create-admin needs the API package: install it with `uv sync --all-packages`, "
+            "or run the command in the backend-api container.",
+            err=True,
+        )
+        raise typer.Exit(2) from None
+    from pydantic import SecretStr
+
+    def read_password() -> SecretStr:
+        import sys
+
+        if password_stdin:
+            return SecretStr(sys.stdin.readline().rstrip("\r\n"))
+        if not sys.stdin.isatty():
+            raise AdminAccountRefused(
+                "There is no terminal to ask for the password on; pass --password-stdin "
+                "and write it to standard input."
+            )
+        return SecretStr(typer.prompt("Password", hide_input=True, confirmation_prompt=True))
+
+    async def run() -> Any:
+        from app.database import async_engine
+
+        try:
+            return await grant(email=email, full_name=full_name, password=read_password)
+        finally:
+            await async_engine.dispose()
+
+    try:
+        result = asyncio.run(run())
+    except AdminAccountRefused as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    except Exception as exc:  # noqa: BLE001 — a driver's text may carry the DSN or the hash
+        typer.echo(f"create-admin failed ({type(exc).__name__}).", err=True)
+        raise typer.Exit(1) from None
+    if result.outcome == "already_admin":
+        typer.echo(f"{result.email} is already an admin; nothing changed.")
+    elif result.outcome == "promoted":
+        typer.echo(
+            f"{result.email} is now an admin. Sign out and back in to see it in the console."
+        )
+    else:
+        typer.echo(f"Created the admin account {result.email}.")
+    if not result.is_active:
+        typer.echo(f"{result.email} is deactivated and cannot sign in until it is reactivated.")
+
+
 memory_app = typer.Typer(
     name="memory",
     help="Inspect and maintain the long-term case memory store.",

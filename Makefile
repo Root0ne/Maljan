@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck format setup migrate check ci-check pre-commit-run prepare-attck prepare-api-db docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs fe-rebuild worker-restart rebuild-ghidra external semgrep
+.PHONY: test lint typecheck format setup migrate check ci-check pre-commit-run prepare-attck prepare-api-db docker-build docker-up docker-down docker-logs dev-up dev-down dev-logs create-admin fe-rebuild worker-restart rebuild-ghidra external semgrep
 
 test:
 	uv run pytest tests/ -q
@@ -147,6 +147,15 @@ dev-down:
 dev-logs:
 	set -a; [ -f bootstrap.env ] && . ./bootstrap.env; set +a; \
 	docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml logs -f
+
+# The first admin account, or an existing account promoted, in the running
+# stack's API container (`malspark create-admin`, which reads the API's own
+# DATABASE_URL there). The password is asked for on the terminal, never taken
+# from the command line. Either stack: exec reaches the service by the compose
+# project's name, whichever files started it.
+create-admin:
+	@[ -n "$(EMAIL)" ] || { echo "usage: make create-admin EMAIL=you@example.com" >&2; exit 2; }
+	cd docker && docker compose exec backend-api malspark create-admin '$(EMAIL)'
 
 # On the production stack, these are the two commands that make an edit real.
 fe-rebuild:
