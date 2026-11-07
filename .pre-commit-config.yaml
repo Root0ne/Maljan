@@ -6,10 +6,11 @@ repos:
     rev: v5.0.0
     hooks:
       # Packet captures are bytes; a capture that reads as text is still one.
+      # A patch's blank context lines are a single space that must stay.
       - id: trailing-whitespace
-        exclude: ^tests/fixtures/pcap/
+        exclude: ^(tests/fixtures/pcap/|scripts/dev/patches/)
       - id: end-of-file-fixer
-        exclude: ^tests/fixtures/pcap/
+        exclude: ^(tests/fixtures/pcap/|scripts/dev/patches/)
       - id: check-yaml
       - id: check-toml
       - id: check-merge-conflict

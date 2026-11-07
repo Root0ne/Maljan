@@ -353,6 +353,17 @@ def test_every_action_is_pinned_by_commit_with_its_version() -> None:
             assert re.match(r"\s+# v\d", rest), f"{workflow.name}: {line.strip()}"
 
 
+def test_ghidra_is_built_against_the_release_its_patched_tree_names() -> None:
+    """The compose build arguments and the patched Dockerfile's defaults name one release."""
+    compose = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text(encoding="utf-8"))
+    args = compose["services"]["ghidra-mcp"]["build"]["args"]
+    (patch,) = (ROOT / "scripts" / "dev" / "patches").glob("ghidra-mcp-*.patch")
+    defaults = dict(
+        re.findall(r"^\+ARG (GHIDRA_[A-Z]+)=(\S+)$", patch.read_text(encoding="utf-8"), re.M)
+    )
+    assert args == defaults == {"GHIDRA_VERSION": "12.0.4", "GHIDRA_DATE": "20260303"}
+
+
 def _render_ghidra(tmp_path: Path, **extra: str) -> dict:
     compose_dir = tmp_path / "docker"
     compose_dir.mkdir(exist_ok=True)

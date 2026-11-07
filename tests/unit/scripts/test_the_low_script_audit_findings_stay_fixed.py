@@ -43,7 +43,8 @@ def test_fetch_external_does_not_accept_a_tree_ahead_of_the_pin(tmp_path: Path) 
     _git(repo, "tag", "pin-tag")
     harness = tmp_path / "loop.sh"
     harness.write_text(
-        f'set -u\nEXTERNAL="{tmp_path}/external"\ntargets=("tree|file:///nowhere|pin-tag")\n{loop}\n',
+        f'set -u\nEXTERNAL="{tmp_path}/external"\nPATCHES="{tmp_path}/patches"\n'
+        f'targets=("tree|file:///nowhere|pin-tag")\n{loop}\n',
         encoding="utf-8",
     )
 
