@@ -22,8 +22,9 @@ builds the console itself.
 Each image is a manifest list for `linux/amd64` and `linux/arm64`, each
 architecture built on a GitHub runner of its own without emulation, except
 `die-mcp`, which is `linux/amd64` only because Detect It Easy publishes no
-arm64 Linux build. The signature and the attestation are on the list's
-digest, which the tags name.
+arm64 Linux build. The list's digest, which the tags name, is signed together
+with each architecture's image (`cosign sign --recursive`), and the list and
+each architecture's image carry a provenance attestation of their own.
 
 Every signature is keyless: the signing certificate is issued by Sigstore to
 the release workflow's GitHub OIDC identity and the signature is recorded in

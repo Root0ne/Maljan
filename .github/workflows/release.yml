@@ -91,6 +91,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: true
       matrix:
@@ -208,11 +210,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The tags are not pushed here; they set the version the labels carry
+      # (1.2.3, as the manifests job tags it, not the tag's v1.2.3).
       - name: Labels
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       # The provenance is GitHub's attestation on the manifest list, so Buildx
       # adds none of its own and each pushed digest is the image manifest.
@@ -228,6 +235,18 @@ jobs:
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           provenance: false
           sbom: false
+
+      # Each architecture's image is attested as well as the list naming it,
+      # so a digest pulled for one platform verifies on its own.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          # A storage record exists only for an organisation's repository and
+          # would need the artifact-metadata permission besides.
+          create-storage-record: false
 
       - name: Keep the digest
         env:
@@ -292,6 +311,9 @@ jobs:
       - name: Tags
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          # Annotations for the list itself, which carries no labels.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
           images: ${{ env.IMAGE }}
           tags: |
@@ -299,7 +321,8 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
 
       # One list per image, naming each architecture's pushed digest, under
-      # the release's tags; its digest is what is signed and attested.
+      # the release's tags; its digest is signed with every image it names,
+      # and attested.
       - name: Create the manifest list
         id: manifest
         working-directory: digests
@@ -307,8 +330,10 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
           mapfile -t tags < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          mapfile -t annotations < <(jq -r '.annotations[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           args=()
           for tag in "${tags[@]}"; do args+=(--tag "$tag"); done
+          for annotation in "${annotations[@]}"; do args+=(--annotation "$annotation"); done
           for digest in *; do args+=("${IMAGE}@sha256:${digest}"); done
           docker buildx imagetools create "${args[@]}"
           digest="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)"
@@ -320,7 +345,7 @@ jobs:
       - name: Sign
         env:
           DIGEST: ${{ steps.manifest.outputs.digest }}
-        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+        run: cosign sign --yes --recursive "${IMAGE}@${DIGEST}"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
