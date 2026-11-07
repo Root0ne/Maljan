@@ -176,6 +176,23 @@ def test_logout_with_both_cookies_consumes_both(
     assert client.post("/api/v1/auth/logout").status_code == 204
     consumed = {c.args[1] for c in auth_module.refresh_token_consume.await_args_list}
     assert consumed == {"jti-current", "jti-old"}
+    assert auth_module._audit.await_count == 1  # one account, one row
+
+
+def test_logout_audits_once_per_account_whose_session_ends(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    accounts = {"jti-current": uuid.UUID(int=1), "jti-old": uuid.UUID(int=2)}
+    monkeypatch.setattr(
+        auth_module,
+        "decode_token",
+        lambda t: {"type": "refresh", "sub": str(accounts[t]), "jti": t},
+    )
+    client.cookies.set(REFRESH_COOKIE, "jti-current", path="/api/v1/auth")
+    client.cookies.set(PREVIOUS_REFRESH_COOKIE, "jti-old", path="/api/v1/auth")
+    assert client.post("/api/v1/auth/logout").status_code == 204
+    rows = [(c.args[1], c.args[2]) for c in auth_module._audit.await_args_list]
+    assert sorted(rows) == sorted((a, "auth.logout") for a in accounts.values())
 
 
 def test_logout_consumes_the_previous_cookie_and_clears_both(client: TestClient) -> None:

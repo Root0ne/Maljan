@@ -444,14 +444,15 @@ async def logout(
     # Both cookies when a browser holds both: the previous-name one's session
     # ends here too, never left live after a logout.
     held = [t for t in (malspark_refresh, _previous_refresh_cookie(request)) if t]
-    audited = False
+    # One audit row per account whose session ends here.
+    audited: set[object] = set()
     for token in dict.fromkeys(held):
         payload = decode_token(token) or {}
         if payload.get("type") != "refresh":
             continue
         await refresh_token_consume(payload.get("sub"), payload.get("jti", ""))
-        if not audited:
-            audited = True
+        if payload.get("sub") not in audited:
+            audited.add(payload.get("sub"))
             await _audit(
                 db,
                 uuid.UUID(payload["sub"]) if payload.get("sub") else None,

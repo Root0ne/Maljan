@@ -281,7 +281,7 @@ PREVIOUS_AUDIENCE = f"{PREVIOUS_NAME}-clients"
 # settings allow: every session opened before the upgrade has ended by then,
 # and a deployment of an earlier release that shares the secret is not
 # accepted for good.
-RENAME_RELEASED = datetime(2026, 11, 7, tzinfo=UTC)
+RENAME_RELEASED = datetime(2026, 11, 7, tzinfo=UTC)  # must equal the day the rename reaches main
 
 
 @functools.cache
