@@ -11,7 +11,8 @@ Two changes, both needed before the tag's image builds and its server starts:
   annotated tools the server registers by scanning, and were registered a
   second time by hand, which makes the HTTP server refuse the duplicate
   context at start. The manual registrations go, and the fixed endpoint
-  count drops by the two.
+  count drops by the two. In headless mode the scanned tools answer both
+  endpoints with "requires GUI mode"; no step of the platform calls either.
 
 The file's own line endings differ by checkout (the tag carries CRLF in the
 Dockerfile), so it is applied with --ignore-whitespace.
