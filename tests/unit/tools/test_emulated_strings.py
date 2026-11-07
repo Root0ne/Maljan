@@ -355,6 +355,29 @@ class TestTheExecutable:
             == tmp_path / ".local" / "share" / "malspark" / "tools" / "floss-3.1.1" / "floss"
         )
 
+    def test_a_build_installed_under_the_previous_name_is_found(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Installed by a release before the rename (T-579), and held to the pinned digest."""
+        import hashlib
+
+        from malspark.core.previous_name import PREVIOUS_NAME
+
+        monkeypatch.delenv("MALSPARK_FLOSS_PATH", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+        body = b"#!/bin/sh\n"
+        installed = tool.previous_install_path()
+        assert installed == (
+            tmp_path / ".local" / "share" / PREVIOUS_NAME / "tools" / "floss-3.1.1" / "floss"
+        )
+        installed.parent.mkdir(parents=True)
+        installed.write_bytes(body)
+        installed.chmod(0o755)
+
+        monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(body).hexdigest())
+        assert tool.find_floss() == (installed, "")
+
     def test_an_environment_handed_in_is_read_instead_of_this_process_s(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

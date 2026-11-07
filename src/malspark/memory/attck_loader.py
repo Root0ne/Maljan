@@ -38,6 +38,7 @@ from typing import Any
 
 from malspark.analysis.technique_ids import TECHNIQUE_ID_EXACT_RE
 from malspark.core.logger import logger
+from malspark.core.previous_name import PREVIOUS_NAME
 
 # Official, maintained MITRE ATT&CK STIX 2.1 source. This base is the moving
 # one: ``attck_update`` reads the release index and the immutable, versioned
@@ -66,7 +67,33 @@ ATTCK_BUNDLE_URLS: dict[str, str] = {
 ATTCK_BUNDLE_URL = ATTCK_BUNDLE_URLS["enterprise"]
 
 # Local cache directory — respects MALSPARK_ATTCK_CACHE env var
-_DEFAULT_CACHE_DIR = Path.home() / ".cache" / "malspark" / "attck"
+_CURRENT_CACHE_DIR = Path.home() / ".cache" / "malspark" / "attck"
+# Where a release before the product's rename (T-576) cached the catalogue
+# (``malspark.core.previous_name``).
+PREVIOUS_CACHE_DIR = Path.home() / ".cache" / PREVIOUS_NAME / "attck"
+
+
+def default_cache_dir(
+    current: Path = _CURRENT_CACHE_DIR, previous: Path = PREVIOUS_CACHE_DIR
+) -> Path:
+    """The cache directory when ``MALSPARK_ATTCK_CACHE`` is unset.
+
+    ``current``, unless it does not exist and ``previous`` does: then the
+    catalogue an earlier release cached is read and kept there, rather than an
+    empty directory made beside it (an offline host could not fill that one).
+    """
+    if not current.exists() and previous.is_dir():
+        logger.info(
+            "ATT&CK cache: reading the directory a release before the rename left (%s); "
+            "set MALSPARK_ATTCK_CACHE or move it to %s.",
+            previous,
+            current,
+        )
+        return previous
+    return current
+
+
+_DEFAULT_CACHE_DIR = default_cache_dir()
 ATTCK_CACHE_DIR = Path(os.environ.get("MALSPARK_ATTCK_CACHE", str(_DEFAULT_CACHE_DIR)))
 ATTCK_CACHE_FILES: dict[str, Path] = {
     domain: ATTCK_CACHE_DIR / f"{domain}-attack.json" for domain in DOMAINS

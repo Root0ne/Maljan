@@ -557,3 +557,18 @@ def test_a_mask_sent_back_under_the_previous_name_keeps_the_stored_value() -> No
     assert kept["analysis"]["env"] == {f"{NEW_ENV}X": "secret1", f"{NEW_ENV}Y": "secret2"}
     both = {"analysis": {"env": {f"{OLD_ENV}X": "old", f"{NEW_ENV}X": TOKEN_MASK}}}
     assert _keep_masked_env(both, stored)["analysis"]["env"] == {f"{NEW_ENV}X": "secret1"}
+
+
+# ---- the ATT&CK cache an earlier release left (T-579) ----------------------
+
+
+def test_the_attck_cache_an_earlier_release_left_is_read(tmp_path: Path) -> None:
+    from malspark.memory.attck_loader import PREVIOUS_CACHE_DIR, default_cache_dir
+
+    assert PREVIOUS_CACHE_DIR.parts[-2:] == (PREVIOUS_NAME, "attck")
+    current, previous = tmp_path / CURRENT_NAME / "attck", tmp_path / PREVIOUS_NAME / "attck"
+    assert default_cache_dir(current, previous) == current
+    previous.mkdir(parents=True)
+    assert default_cache_dir(current, previous) == previous
+    current.mkdir(parents=True)
+    assert default_cache_dir(current, previous) == current
