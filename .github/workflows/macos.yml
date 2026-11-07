@@ -25,7 +25,10 @@ jobs:
   test-macos:
     name: Test Suite (macOS arm64)
     runs-on: macos-15
-    timeout-minutes: 45
+    # The Linux job's single-process run of the same suites takes 70-85
+    # minutes; a bound under that would stop a run that is only slow. A test
+    # that hangs is named well before it: see faulthandler_timeout below.
+    timeout-minutes: 120
     env:
       # brew would update itself before every install; the job wants one formula.
       HOMEBREW_NO_AUTO_UPDATE: "1"
@@ -54,5 +57,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --all-packages
 
+      # A test still running after ten minutes has every thread's stack
+      # written to the log, so a hang names its test however the job ends.
       - name: Run unit and API tests
-        run: uv run pytest tests/unit tests/api -q --tb=short
+        run: uv run pytest tests/unit tests/api -q --tb=short -o faulthandler_timeout=600
