@@ -240,6 +240,12 @@ def test_every_pulled_and_base_image_is_pinned_by_digest() -> None:
         text = dockerfile.read_text(encoding="utf-8")
         stages = set(re.findall(rf"{FROM}\S+ AS (\S+)$", text, re.MULTILINE))
         for base in re.findall(rf"{FROM}(\S+)", text, re.MULTILINE):
+            # A stage picked by TARGETARCH starts from one of this file's own,
+            # and only when a stage exists for amd64 and for arm64 (T-573).
+            if "${TARGETARCH}" in base:
+                picked = {base.replace("${TARGETARCH}", arch) for arch in ("amd64", "arm64")}
+                assert picked <= stages, f"{dockerfile.name}: FROM {base}"
+                continue
             assert DIGEST.search(base), f"{dockerfile.name}: FROM {base}"
         for source in re.findall(r"COPY --from=(\S+)", text):
             if source not in stages:
