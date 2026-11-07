@@ -1,0 +1,132 @@
+name: Native images
+
+on:
+  # The images built natively for amd64 and arm64 pick a pinned download, or a
+  # build stage, per architecture, so either side can break while the other
+  # builds: when an asset or its digest moves, a base image changes, or a
+  # hashed requirement has no build for one of the two. Changes to those
+  # Dockerfiles, their requirements and the compose file build them, and so
+  # does a weekly run; other pull requests do not, since the backend takes
+  # minutes. Each architecture builds on a runner of its own, not emulated.
+  pull_request:
+    branches: ["main", "dev"]
+    paths:
+      - "docker/Dockerfile.backend"
+      - "scripts/floss/**"
+      - "services/cli-sidecar/requirements.txt"
+      - "services/goresym-mcp/Dockerfile"
+      - "services/jadx-mcp/Dockerfile"
+      - "services/unblob-mcp/Dockerfile"
+      - "services/unblob-mcp/requirements.txt"
+      - "services/webcrack-mcp/Dockerfile"
+      - "services/webcrack-mcp/package-lock.json"
+      - "services/yarax-mcp/Dockerfile"
+      - "docker/docker-compose.yml"
+      - ".github/workflows/native-images.yml"
+  push:
+    branches: ["dev"]
+    paths:
+      - "docker/Dockerfile.backend"
+      - "scripts/floss/**"
+      - "services/cli-sidecar/requirements.txt"
+      - "services/goresym-mcp/Dockerfile"
+      - "services/jadx-mcp/Dockerfile"
+      - "services/unblob-mcp/Dockerfile"
+      - "services/unblob-mcp/requirements.txt"
+      - "services/webcrack-mcp/Dockerfile"
+      - "services/webcrack-mcp/package-lock.json"
+      - "services/yarax-mcp/Dockerfile"
+      - "docker/docker-compose.yml"
+      - ".github/workflows/native-images.yml"
+  schedule:
+    - cron: "41 4 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.image.name }} on ${{ matrix.arch.platform }}
+    runs-on: ${{ matrix.arch.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+        # The smoke asks each image's program for its version, as the image's
+        # own user; the backend's also runs the analysis server's FLOSS probe,
+        # which checks the executable's pinned digest for the machine and asks
+        # it --version.
+        image:
+          - name: backend
+            context: .
+            file: docker/Dockerfile.backend
+            smoke: >-
+              floss --version &&
+              python -c "from malspark.tools.emulated_strings import find_floss;
+              path, reason = find_floss(); assert path, reason; print(path)"
+          - name: goresym-mcp
+            context: services
+            file: services/goresym-mcp/Dockerfile
+            smoke: GoReSym -about | head -n 1
+          - name: jadx-mcp
+            context: services
+            file: services/jadx-mcp/Dockerfile
+            smoke: java -version && java -cp /opt/jadx/jadx.jar jadx.cli.JadxCLI --version
+          - name: unblob-mcp
+            context: services
+            file: services/unblob-mcp/Dockerfile
+            smoke: unblob --version && test -x /usr/bin/sasquatch
+          - name: webcrack-mcp
+            context: services
+            file: services/webcrack-mcp/Dockerfile
+            smoke: node --version && test -d node_modules/webcrack
+          - name: yarax-mcp
+            context: services
+            file: services/yarax-mcp/Dockerfile
+            smoke: yr --version
+    env:
+      IMAGE: malspark-${{ matrix.image.name }}:native-ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Loaded into the runner's Docker, never pushed.
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
+          platforms: ${{ matrix.arch.platform }}
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          tags: ${{ env.IMAGE }}
+
+      - name: The image is the runner's architecture
+        env:
+          PLATFORM: ${{ matrix.arch.platform }}
+        run: |
+          built="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE")"
+          echo "built $built"
+          test "$built" = "$PLATFORM"
+
+      - name: Smoke
+        env:
+          SMOKE: ${{ matrix.image.smoke }}
+        run: docker run --rm "$IMAGE" sh -c "$SMOKE"
