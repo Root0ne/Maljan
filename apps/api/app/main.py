@@ -45,11 +45,12 @@ async def _probe_redis() -> None:
         await conn.aclose()
 
 
-async def _probe_minio() -> None:
+async def _probe_minio() -> dict[str, Any] | None:
     from app.services import object_store
 
-    # The MinIO SDK is synchronous — keep it off the event loop.
-    await asyncio.to_thread(object_store.probe)
+    # The MinIO SDK is synchronous — keep it off the event loop. A bucket an
+    # anonymous caller is let into answers with its own failure.
+    return await asyncio.to_thread(object_store.probe)
 
 
 async def _probe_memory() -> dict[str, Any]:

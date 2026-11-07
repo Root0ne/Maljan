@@ -384,9 +384,6 @@ class _Store:
         self.made.append(name)
         self.buckets.add(name)
 
-    def set_bucket_policy(self, name: str, policy: str) -> None:
-        return None
-
 
 @pytest.fixture
 def unsettled(monkeypatch: Any) -> Any:

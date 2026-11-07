@@ -57,9 +57,6 @@ class _Store:
     def make_bucket(self, bucket: str) -> None:
         self.exists = True
 
-    def set_bucket_policy(self, bucket: str, policy: str) -> None:
-        return None
-
     def put_object(self, bucket: str, path: str, data: Any, length: int, content_type: str) -> None:
         if self.refuses:
             raise OSError("connection refused")
