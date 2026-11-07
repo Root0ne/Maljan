@@ -283,10 +283,18 @@ X86_ONLY = {
     "ghidra-mcp": None,
     "die-mcp": "_amd64.deb",
     "goresym-mcp": "GoReSym-linux.zip",
-    "yarax-mcp": "-x86_64-unknown-linux-gnu.tar.gz",
     "webcrack-mcp": "-linux-x64.tar.xz",
     "unblob-mcp": "sasquatch_1.0_amd64.deb",
     "jadx-mcp": "_x64_linux_hotspot_",
+}
+# The sidecars built natively for amd64 and arm64 (T-573), and the two
+# release assets, one per architecture, each Dockerfile picks between.
+NATIVE_SIDECARS = {
+    "yarax-mcp": (
+        "-${triple}.tar.gz",
+        "triple=x86_64-unknown-linux-gnu",
+        "triple=aarch64-unknown-linux-gnu",
+    ),
 }
 # The services built or pulled for the host's own architecture.
 MULTI_ARCH = (
@@ -298,6 +306,7 @@ MULTI_ARCH = (
     "postgres",
     "redis",
     "qdrant",
+    *NATIVE_SIDECARS,
 )
 
 
@@ -316,6 +325,25 @@ def test_only_the_x86_only_services_ask_for_amd64() -> None:
             assert asset in dockerfile.read_text(encoding="utf-8"), name
     for name in MULTI_ARCH:
         assert "platform" not in services[name], name
+
+
+def test_a_native_sidecar_pins_a_build_for_each_architecture() -> None:
+    # The image picks the asset for the architecture BuildKit builds for and
+    # stops on any other, each asset under a sha256 of its own.
+    services = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text())["services"]
+    for name, needles in NATIVE_SIDECARS.items():
+        dockerfile = ROOT / "services" / services[name]["build"]["dockerfile"]
+        text = dockerfile.read_text(encoding="utf-8")
+        assert "ARG TARGETARCH" in text, name
+        assert re.search(r'case "\$\{TARGETARCH:-\$\(dpkg --print-architecture\)\}" in', text), name
+        for needle in needles:
+            assert needle in text, (name, needle)
+        for arch in ("AMD64", "ARM64"):
+            assert re.search(rf"^ARG \w+_{arch}_\w*SHA256=[0-9a-f]{{64}}$", text, re.MULTILINE), (
+                name,
+                arch,
+            )
+        assert re.search(r"^\s+\*\) echo .*>&2; exit 1 ;; \\$", text, re.MULTILINE), name
 
 
 def _workflow_service_images() -> dict[str, str]:

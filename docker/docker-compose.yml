@@ -490,8 +490,6 @@ services:
       context: ../services
       dockerfile: yarax-mcp/Dockerfile
     image: malspark-yarax-mcp:1.21.0
-    # x86-64 only: the image unpacks yara-x's x86_64 Linux build; an arm64 host runs it emulated.
-    platform: linux/amd64
     container_name: malspark-yarax-mcp
     environment:
       MCP_AUTH_TOKEN: ${YARAX_MCP_AUTH_TOKEN:-}
