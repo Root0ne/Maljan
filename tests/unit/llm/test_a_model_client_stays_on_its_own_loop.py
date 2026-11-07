@@ -24,6 +24,7 @@ import gc
 import json
 import os
 import socket
+import stat
 import threading
 from collections.abc import Callable, Coroutine, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -252,10 +253,11 @@ def _on_both(agent_loop: _LoopThread, call: Callable[[], Coroutine[Any, Any, Any
 
 
 def _socket_count() -> int:
+    """The sockets among this process's open descriptors (``/dev/fd`` lists them)."""
     count = 0
-    for name in os.listdir("/proc/self/fd"):
+    for name in os.listdir("/dev/fd"):
         try:
-            if os.readlink(f"/proc/self/fd/{name}").startswith("socket:"):
+            if stat.S_ISSOCK(os.fstat(int(name)).st_mode):
                 count += 1
         except OSError:
             continue

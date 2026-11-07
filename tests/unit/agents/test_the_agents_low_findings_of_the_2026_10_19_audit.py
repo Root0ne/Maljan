@@ -233,12 +233,28 @@ class TestEr3AChunkSeedIsSettledAndNotWrittenOver:
 class TestRw1TheReaderIsLinearInTheClaims:
     @staticmethod
     def _seconds(claims: int) -> float:
+        """The reader's CPU time over ``claims`` claims: the best of three, the collector off.
+
+        One reading on a shared runner carries whatever else the host did, and
+        a collection that lands inside the larger run is the interpreter's
+        cost, not the reader's; neither belongs in the ratio.
+        """
+        import gc
+
         from malspark.agents.repeat_watch import ClaimRepeatReader
 
         text = "".join(f"CLAIM: c{i}\n---\n```json\n{{}}\n```\n" for i in range(claims))
-        started = time.thread_time()
-        ClaimRepeatReader(None).feed(text)
-        return time.thread_time() - started
+        readings = []
+        for _ in range(3):
+            gc.collect()
+            gc.disable()
+            try:
+                started = time.thread_time()
+                ClaimRepeatReader(None).feed(text)
+                readings.append(time.thread_time() - started)
+            finally:
+                gc.enable()
+        return min(readings)
 
     def test_four_times_the_claims_cost_about_four_times_the_time(self) -> None:
         small = self._seconds(8_000)

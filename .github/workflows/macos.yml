@@ -1,0 +1,69 @@
+name: macOS Tests
+
+on:
+  push:
+    branches: ["main", "dev"]
+  pull_request:
+    branches: ["main", "dev", "feat/**"]
+
+# The workflow reads the repository and nothing else; it references no secrets.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The unit and API suites on Apple Silicon, where the host has no /proc, no
+  # prlimit, Mach-O system binaries and a C library whose UTF-8 locales share
+  # one case table. Not a required check: it shows where a test or the code
+  # assumes Linux. Neither suite needs a running service: a test that reads
+  # Postgres, Redis or Qdrant skips itself without its URL, as on the Linux
+  # job, and the compose tests skip where no docker CLI is installed, as on
+  # this runner.
+  test-macos:
+    name: Test Suite (macOS arm64)
+    runs-on: macos-15
+    # The suites' own run took 43 minutes on this runner, and the Linux job's
+    # takes 70-85; a bound near either would stop a run that is only slow. A
+    # test that hangs is named well before it: see faulthandler_timeout below.
+    timeout-minutes: 120
+    env:
+      # brew would update itself before every install; the job wants one formula.
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+
+      # The report renderer loads Pango through cffi at import time; the Linux
+      # runner image carries it, this one does not.
+      - name: Install Pango
+        run: brew install pango
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-packages
+
+      # A test still running after ten minutes has every thread's stack
+      # written to the log, so a hang names its test however the job ends.
+      # WeasyPrint loads Pango and GLib with dlopen, which does not look in
+      # Homebrew's /opt/homebrew/lib on its own; the variable is set on the
+      # command itself, because macOS drops DYLD_* variables on the way through
+      # the system's own shell.
+      - name: Run unit and API tests
+        run: >-
+          DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib"
+          uv run pytest tests/unit tests/api -q --tb=short -o faulthandler_timeout=600

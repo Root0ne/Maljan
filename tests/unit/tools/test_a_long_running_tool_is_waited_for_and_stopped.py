@@ -18,6 +18,7 @@ import time
 
 from malspark.providers.server_guard import ServerGuard
 from malspark.tools import children
+from tests.unit._process_table import running
 
 MANIFEST = {
     "capa": {"name": "capa", "timeout_s": None, "long_running": True},
@@ -41,13 +42,8 @@ class TestTheClientWaits:
 
 
 def _alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    # A zombie still answers; ask the table.
-    with open(f"/proc/{pid}/stat") as handle:
-        return handle.read().split()[2] != "Z"
+    # A zombie still answers a signal; the process table tells it apart.
+    return running(pid)
 
 
 class TestOneRunAtATime:

@@ -8,6 +8,9 @@ import io
 import os
 import threading
 import time
+from pathlib import Path
+
+import pytest
 
 from malspark.core.config import MCPServerConfig
 from malspark.core.settings_overrides import redact_url
@@ -91,6 +94,7 @@ def test_a_reused_pid_is_not_the_old_child(monkeypatch):
     assert b._child_pids == (10,)
 
 
+@pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="no procfs")
 def test_start_time_reads_field_22_of_proc_stat():
     assert servers._start_time(os.getpid()) not in (None, "")
     assert servers._start_time(2**22 + 12345) is None

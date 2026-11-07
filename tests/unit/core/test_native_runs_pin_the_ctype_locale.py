@@ -24,6 +24,12 @@ ROOT = Path(__file__).resolve().parents[3]
 TURKISH = "tr_TR.UTF-8"
 # The exit status a subprocess gives when the host has no Turkish locale.
 NO_TURKISH = 77
+# The exit status a subprocess gives when the host's Turkish locale folds a
+# capital I as ASCII does under a C library other than glibc: the C library
+# decides the fold (glibc's Turkish LC_CTYPE does not fold it; a C library whose
+# UTF-8 locales share one case table does), so there is no Turkish fold to show
+# or to repair on that host. Under glibc a fold there is a failure, never a skip.
+NO_TURKISH_FOLD = 78
 
 
 def _run(script: str, **environment: str) -> subprocess.CompletedProcess[str]:
@@ -48,6 +54,10 @@ def _run(script: str, **environment: str) -> subprocess.CompletedProcess[str]:
 def _finished(result: subprocess.CompletedProcess[str]) -> str:
     if result.returncode == NO_TURKISH:
         pytest.skip(f"{TURKISH} is not installed on this host, so the Turkish fold cannot be shown")
+    if result.returncode == NO_TURKISH_FOLD:
+        pytest.skip(
+            f"this host's {TURKISH} folds a capital I as ASCII does: no Turkish fold to show"
+        )
     assert result.returncode == 0, result.stderr
     return result.stdout
 
@@ -62,10 +72,12 @@ class TestUnderATurkishCtype:
         out = _finished(
             _run(
                 """
-                import locale, sys
+                import locale, platform, sys
                 if locale.setlocale(locale.LC_CTYPE) != "tr_TR.UTF-8":
                     sys.exit(77)
                 from malspark.core import ctype_locale
+                if ctype_locale.libc_folds_ascii() and platform.libc_ver()[0] != "glibc":
+                    sys.exit(78)  # no Turkish fold before the pin
                 assert not ctype_locale.libc_folds_ascii(), "the Turkish fold, before the pin"
                 chosen = ctype_locale.pin_character_classification()
                 assert chosen in ctype_locale.CANDIDATES, chosen
@@ -145,10 +157,12 @@ class TestWhatThePinLeavesAlone:
     def test_a_pin_with_no_candidate_keeps_the_locale_and_warns(self) -> None:
         result = _run(
             """
-            import locale, sys
+            import locale, platform, sys
             if locale.setlocale(locale.LC_CTYPE) != "tr_TR.UTF-8":
                 sys.exit(77)
             from malspark.core import ctype_locale
+            if ctype_locale.libc_folds_ascii() and platform.libc_ver()[0] != "glibc":
+                sys.exit(78)
             ctype_locale.CANDIDATES = ("xx_NO.SUCH-LOCALE",)
             said = []
             assert ctype_locale.pin_character_classification(
@@ -197,10 +211,12 @@ class TestTheEngineSelfTest:
         out = _finished(
             _run(
                 """
-                import locale, sys
+                import locale, platform, sys
                 if locale.setlocale(locale.LC_CTYPE) != "tr_TR.UTF-8":
                     sys.exit(77)
                 from malspark.core import ctype_locale
+                if ctype_locale.libc_folds_ascii() and platform.libc_ver()[0] != "glibc":
+                    sys.exit(78)
                 print(ctype_locale.yara_case_folding_problem())
                 """,
                 LC_CTYPE=TURKISH,

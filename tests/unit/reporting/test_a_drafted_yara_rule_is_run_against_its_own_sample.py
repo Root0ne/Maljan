@@ -777,9 +777,11 @@ class TestAnEngineThatFoldsCaseWronglyIsNotTrusted:
             _run(
                 textwrap.dedent(self.SHAPE)
                 + textwrap.dedent("""
-                import json, locale
+                import json, locale, platform
                 if locale.setlocale(locale.LC_CTYPE) != "tr_TR.UTF-8":
                     sys.exit(77)
+                if ctype_locale.libc_folds_ascii() and platform.libc_ver()[0] != "glibc":
+                    sys.exit(78)  # no Turkish fold for the failed pin to leave
                 ctype_locale.CANDIDATES = ("xx_NO.SUCH-LOCALE",)
                 assert ctype_locale.pin_character_classification() is None
                 found = check()

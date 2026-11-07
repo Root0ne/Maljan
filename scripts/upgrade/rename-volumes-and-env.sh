@@ -102,18 +102,33 @@ if ! command -v docker >/dev/null 2>&1; then
   echo "  docker is not on PATH; skipping the volumes"
 else
   existing="$(docker volume ls --format '{{.Name}}')"
-  declare -A target_from=()
+  # Each target and the volume copied into it, as two lists kept in step: an
+  # associative array needs bash 4, and macOS ships bash 3.2.
+  targets=()
+  sources=()
+  source_of() {
+    local i=0
+    while [ "$i" -lt ${#targets[@]} ]; do
+      if [ "${targets[$i]}" = "$1" ]; then
+        echo "${sources[$i]}"
+        return
+      fi
+      i=$((i + 1))
+    done
+  }
   for key in "${VOLUMES[@]}"; do
     for project in "${projects[@]}"; do
       from="${project}_${key}"
       grep -qxF -- "$from" <<<"$existing" || continue
       to="${NEW}_${key}"
-      if [ -n "${target_from[$to]:-}" ]; then
-        echo "  refuse: both ${target_from[$to]} and $from would become $to;" \
+      earlier="$(source_of "$to")"
+      if [ -n "$earlier" ]; then
+        echo "  refuse: both $earlier and $from would become $to;" \
           "name the old project with --from-project" >&2
         exit 1
       fi
-      target_from[$to]="$from"
+      targets+=("$to")
+      sources+=("$from")
       copy_volume "$from" "$to" "$key"
     done
   done
@@ -121,8 +136,8 @@ else
   while IFS= read -r from; do
     [ -n "$from" ] || continue
     covered=0
-    for to in "${!target_from[@]}"; do
-      [ "${target_from[$to]}" = "$from" ] && covered=1
+    for earlier in ${sources[@]+"${sources[@]}"}; do
+      [ "$earlier" = "$from" ] && covered=1
     done
     [ "$covered" -eq 1 ] && continue
     to="${from//$OLD/$NEW}"
@@ -130,12 +145,12 @@ else
     [ "$to" = "$from" ] && continue
     copy_volume "$from" "$to" ""
   done < <(grep -i -- "$OLD" <<<"$existing" || true)
-  [ ${#target_from[@]} -gt 0 ] || echo "  no volume of the projects ${projects[*]} found"
+  [ ${#targets[@]} -gt 0 ] || echo "  no volume of the projects ${projects[*]} found"
   echo "  The old volumes are kept. Once the new stack reads its data, remove them"
   echo "  with: docker volume rm <name>"
   # Does the MinIO data (the old volume, or the new one already there) hold
   # the old bucket?
-  minio_volume="${target_from[${NEW}_minio_data]:-}"
+  minio_volume="$(source_of "${NEW}_minio_data")"
   if [ -z "$minio_volume" ] && grep -qxF -- "${NEW}_minio_data" <<<"$existing"; then
     minio_volume="${NEW}_minio_data"
   fi

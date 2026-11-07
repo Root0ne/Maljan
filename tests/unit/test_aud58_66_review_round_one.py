@@ -123,7 +123,7 @@ def test_tb16_a_cap_that_cannot_be_set_still_tracks_the_child_and_says_so(
         def _refused(*_args: Any) -> None:
             raise PermissionError("no")
 
-        monkeypatch.setattr(emulated_strings.resource, "prlimit", _refused)
+        monkeypatch.setattr(emulated_strings.resource, "prlimit", _refused, raising=False)
     registered: list[Any] = []
     real = children.register
     monkeypatch.setattr(

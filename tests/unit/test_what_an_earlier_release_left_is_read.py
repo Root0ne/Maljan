@@ -504,6 +504,63 @@ def _script(tmp_path: Path, env_text: str, *args: str) -> tuple[str, str, str]:
     return done.stdout, env_file.read_text(encoding="utf-8"), log.read_text(encoding="utf-8")
 
 
+# A docker that lists the volumes LISTING names, one per line, and has none of them in use.
+LISTING_DOCKER = """#!/bin/sh
+echo "docker $*" >> "$STUB_LOG"
+case "$1 $2" in
+  "volume ls") [ -n "$LISTING" ] && printf '%s\\n' $LISTING ;;
+  "volume inspect") exit 1 ;;
+  "ps -q") : ;;
+esac
+exit 0
+"""
+
+
+def _listed(tmp_path: Path, listing: str, *args: str) -> Any:
+    """The script's plan over a docker that lists ``listing``, and its log."""
+    import subprocess
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    docker = bin_dir / "docker"
+    docker.write_text(LISTING_DOCKER, encoding="utf-8")
+    docker.chmod(0o755)
+    log = tmp_path / "log"
+    log.write_text("", encoding="utf-8")
+    return subprocess.run(
+        ["bash", str(SCRIPT), "--env-file", str(tmp_path / "absent"), *args],
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "STUB_LOG": str(log),
+            "LISTING": listing,
+        },
+        timeout=60,
+    )
+
+
+def test_the_script_refuses_two_old_projects_that_would_become_one_volume(
+    tmp_path: Path,
+) -> None:
+    done = _listed(tmp_path, f"{PREVIOUS_NAME}_minio_data docker_minio_data")
+    assert done.returncode == 1
+    assert (
+        f"refuse: both {PREVIOUS_NAME}_minio_data and docker_minio_data would become "
+        "malspark_minio_data"
+    ) in done.stderr
+    assert "--from-project" in done.stderr
+    assert "volume create" not in (tmp_path / "log").read_text(encoding="utf-8")
+
+
+def test_the_script_with_no_old_volume_says_so_and_copies_nothing(tmp_path: Path) -> None:
+    done = _listed(tmp_path, "", "--apply")
+    assert done.returncode == 0, done.stderr
+    assert f"no volume of the projects {PREVIOUS_NAME} docker found" in done.stdout
+    log = (tmp_path / "log").read_text(encoding="utf-8")
+    assert "volume create" not in log and "docker run" not in log
+
+
 @pytest.mark.parametrize("ending", ["\n", ""])
 def test_the_script_pins_the_old_bucket_on_its_own_line(tmp_path: Path, ending: str) -> None:
     out, env, log = _script(tmp_path, f"{OLD_ENV}UID=1{ending}", "--apply")

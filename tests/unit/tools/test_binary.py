@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from malspark.tools import binary as tool
+from tests.unit._elf_image import ELF_SOURCES, INTERP, LIBRARY, elf_bytes
 
 
 def _elf(machine: int = 0x3E) -> bytes:
@@ -286,15 +287,21 @@ class TestElfInfo:
         assert result["bitness"] == 64
         assert result["endianness"] == "little"
 
-    def test_a_real_system_binary_reports_its_interpreter_and_needed_libraries(self) -> None:
-        binary = Path("/bin/ls")
-        if not binary.is_file():
-            pytest.skip("no /bin/ls on this box")
+    @ELF_SOURCES
+    def test_a_dynamically_linked_binary_reports_its_interpreter_and_needed_libraries(
+        self, tmp_path: Path, source: str
+    ) -> None:
+        binary = tmp_path / "s.so"
+        binary.write_bytes(elf_bytes(source))
         result = tool.elf_info(str(binary))
-        assert result["sections"], "a system binary has sections"
-        # A dynamically linked binary names its loader; a static one would not,
-        # and then there is nothing to assert about linkage.
-        if result["interp"]:
+        assert result["sections"], "a linked binary has sections"
+        if source == "built":
+            assert result["interp"] == INTERP
+            assert result["needed"] == [LIBRARY]
+            assert {row["function"] for row in result["imports"]} >= {"malloc", "free"}
+        # The host's binary: a dynamically linked one names its loader; a static
+        # one would not, and then there is nothing to assert about linkage.
+        elif result["interp"]:
             assert result["interp"].startswith("/")
             assert result["needed"], "a dynamic binary needs at least one library"
 

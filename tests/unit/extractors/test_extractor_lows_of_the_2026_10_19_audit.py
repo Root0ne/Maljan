@@ -14,13 +14,12 @@ from malspark.extractors.network_extractor import _scored_domain
 from malspark.extractors.pe_extractor import _parse_elf_imports
 from malspark.extractors.sample_identity import _is_certificate_table, unparsed_container_reason
 from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from tests.unit._elf_image import ELF_SOURCES, elf_bytes
 
 
-def test_b_l1_every_elf_import_names_the_library_its_symbol_version_names() -> None:
-    binary = Path("/bin/ls")
-    if not binary.is_file():
-        pytest.skip("no system ELF to read")
-    rows = _parse_elf_imports(binary.read_bytes())
+@ELF_SOURCES
+def test_b_l1_every_elf_import_names_the_library_its_symbol_version_names(source: str) -> None:
+    rows = _parse_elf_imports(elf_bytes(source))
     assert any(r.function for r in rows)
     # Before: only the first import carried a library, and it was libraries[0].
     assert sum(1 for r in rows if r.dll == "libc.so.6") > 1

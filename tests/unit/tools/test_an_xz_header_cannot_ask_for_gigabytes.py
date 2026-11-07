@@ -26,10 +26,19 @@ FUZZER_INPUT = b"\nI" + b"\xff" * 200
 
 @pytest.fixture
 def capped_memory():
-    """At most 1 GiB of address space beyond what the process holds, so a 4 GiB ask fails."""
+    """At most 1 GiB of address space beyond what the process holds, so a 4 GiB ask fails.
+
+    The cap is the test's harness, not the defence (``LZMA_MEMORY_LIMIT`` is,
+    on any host): it needs the address space this process holds, read from
+    ``/proc/self/statm``. A host without that file cannot set the cap, and the
+    test is skipped there rather than run on an uncapped ask.
+    """
     soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    with open("/proc/self/statm") as statm:
-        held = int(statm.read().split()[0]) * resource.getpagesize()
+    try:
+        with open("/proc/self/statm") as statm:
+            held = int(statm.read().split()[0]) * resource.getpagesize()
+    except FileNotFoundError:
+        pytest.skip("no /proc/self/statm: the address space this process holds cannot be capped")
     cap = held + 1024 * 1024 * 1024
     if hard != resource.RLIM_INFINITY and hard < cap:
         cap = hard

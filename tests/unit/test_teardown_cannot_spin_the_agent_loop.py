@@ -41,6 +41,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -175,6 +176,11 @@ def loop_thread() -> Any:
         lt.stop()
 
 
+@pytest.mark.skipif(
+    not Path("/proc/self/task").is_dir(),
+    reason="a handle names and reaps its child from the process table at /proc/self/task; a "
+    "host without one is told so (test_a_host_without_a_process_table_is_told_so_once)",
+)
 class TestACleanupThatOverrunsTakesTheChildRatherThanCancelling:
     def test_the_child_is_dead_when_the_cleanup_budget_expires(
         self, deaf_child: subprocess.Popen[bytes], loop_thread: _LoopThread

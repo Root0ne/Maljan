@@ -25,6 +25,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.unit._docker_cli import docker_env
+
 ROOT = Path(__file__).resolve().parents[2]
 PRODUCTION = ROOT / "docker" / "docker-compose.yml"
 DEVELOPMENT = ROOT / "docker" / "docker-compose.dev.yml"
@@ -116,7 +118,7 @@ def test_the_overlay_replaces_the_read_only_mounts_when_compose_merges_them(
         flags = [arg for path in files for arg in ("-f", str(path))]
         out = subprocess.run(
             ["docker", "compose", "--env-file", str(empty_env), *flags, "config"],
-            env={**REQUIRED_ENV, "PATH": "/usr/bin:/bin"},
+            env=docker_env(REQUIRED_ENV),
             capture_output=True,
             text=True,
             check=True,

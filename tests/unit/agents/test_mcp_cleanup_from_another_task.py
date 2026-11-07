@@ -22,6 +22,7 @@ from mcp import StdioServerParameters
 
 from malspark.agents import mcp_client
 from malspark.agents.mcp_client import MCPLangChainToolkit
+from tests.unit._process_table import running
 
 SERVER = """
 import os, sys, time
@@ -42,16 +43,9 @@ if len(sys.argv) > 2:
 
 
 def _running(pid: int) -> bool:
-    try:
-        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
-            if line.startswith("State:"):
-                return "Z" not in line.split()[1]
-    except FileNotFoundError:
-        return False
-    return False
+    return running(pid)
 
 
-@pytest.mark.skipif(not Path("/proc").is_dir(), reason="reads the process table under /proc")
 @pytest.mark.parametrize("stubborn", [False, True], ids=["exits_on_eof", "ignores_eof"])
 def test_the_server_process_is_gone_after_a_close_from_another_task(
     tmp_path: Path, stubborn: bool

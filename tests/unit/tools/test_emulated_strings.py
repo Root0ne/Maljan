@@ -12,6 +12,7 @@ from __future__ import annotations
 import errno
 import json
 import os
+import resource
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -605,7 +606,11 @@ class TestTheChild:
 
         seen = json.loads(finished.stdout)
         scratch = tmp_path / "staging" / "floss"
-        assert seen["limit"] == tool.FLOSS_ADDRESS_SPACE_BYTES
+        if hasattr(resource, "prlimit"):
+            assert seen["limit"] == tool.FLOSS_ADDRESS_SPACE_BYTES
+        else:
+            # The cap is set with resource.prlimit; without it the run says so.
+            assert getattr(finished, "memory_cap_applied", True) is False
         assert seen["home"] == seen["tmp"] == seen["cwd"]
         assert Path(seen["home"]).parent == scratch
         assert Path(seen["home"]).name.startswith("run-")

@@ -27,11 +27,11 @@ decide it, and both are free:
     RSS that falls when the allocator is asked to release is fragmentation,
     conclusively.
 
-Everything here is cheap enough to leave on: one ``/proc`` read, two counters
-and a log line per pipeline node. The expensive modes — a ``gc`` census, or
-``tracemalloc`` snapshots — are opt-in through ``MALSPARK_MEMPROBE`` and are never
-the default, because ``tracemalloc`` costs 2-4x runtime and hundreds of MB of
-its own.
+Everything here is cheap enough to leave on: one ``/proc`` read (one ``ps`` run
+where there is no ``/proc``), two counters and a log line per pipeline node. The
+expensive modes — a ``gc`` census, or ``tracemalloc`` snapshots — are opt-in
+through ``MALSPARK_MEMPROBE`` and are never the default, because ``tracemalloc``
+costs 2-4x runtime and hundreds of MB of its own.
 """
 
 from __future__ import annotations
@@ -41,8 +41,11 @@ import ctypes
 import functools
 import gc
 import os
+import shutil
+import subprocess
 import sys
 import threading
+import time
 import tracemalloc
 from collections.abc import Callable
 from typing import Any
@@ -83,12 +86,32 @@ _last: dict[str, float] = {}
 _tracemalloc_prev: Any = None
 
 
-def rss_mb() -> float:
-    """Resident set size in MiB, or 0.0 where ``/proc`` is unavailable.
+# How long the ``ps`` reading of the resident set may take before it counts
+# as no reading.
+PS_TIMEOUT_SECONDS = 5.0
+# How long one ``ps`` reading stands for the resident set. A probe runs per
+# graph node, and two at a time around each; one ``ps`` a second at most is a
+# cost a host without ``/proc`` can carry, and a figure a second old is as good
+# to the recycle ceiling and the probes as a fresh one.
+PS_READING_MAX_AGE_SECONDS = 1.0
+# Where ``ps`` is looked for: the system's own, never one the job's PATH names.
+PS_SEARCH_PATH = "/bin:/usr/bin"
+# The last ``ps`` reading and when it was taken (``None`` for a window whose
+# ``ps`` timed out); ``failed`` once ``ps`` was missing or gave no number,
+# after which it is not started again.
+_ps_lock = threading.Lock()
+_ps_reading: dict[str, Any] = {"at": None, "mb": None, "failed": False}
+
+
+def rss_mb() -> float | None:
+    """Resident set size in MiB, or ``None`` where no reading could be taken.
 
     Deliberately reads ``VmRSS`` from ``/proc/self/status`` rather than taking a
     psutil dependency: it is the same number ``ps -eo rss`` prints, so readings
-    here are directly comparable to the ones measured from a shell.
+    here are directly comparable to the ones measured from a shell. Where there
+    is no ``/proc`` the same number is asked of ``ps -o rss= -p <pid>`` (KiB on
+    every Unix that has it): the current resident set, never the peak
+    ``getrusage`` keeps. ``None`` is no reading, never zero megabytes.
     """
     try:
         with open("/proc/self/status", encoding="utf-8") as handle:
@@ -97,7 +120,48 @@ def rss_mb() -> float:
                     return round(int(line.split()[1]) / 1024, 1)
     except (OSError, ValueError, IndexError):
         pass
-    return 0.0
+    return _rss_mb_from_ps()
+
+
+def _rss_mb_from_ps() -> float | None:
+    """This process's resident set as ``ps`` reports it, in MiB, or ``None``.
+
+    One reading stands for ``PS_READING_MAX_AGE_SECONDS``; callers in that
+    second share it rather than each starting ``ps``. Once ``ps`` is missing or
+    answers no number, it is not started again and the answer stays ``None``;
+    a ``ps`` that timed out is no reading for that window only.
+    """
+    with _ps_lock:
+        if _ps_reading["failed"]:
+            return None
+        now = time.monotonic()
+        taken = _ps_reading["at"]
+        if taken is not None and now - taken < PS_READING_MAX_AGE_SECONDS:
+            kept: float | None = _ps_reading["mb"]
+            return kept
+        ps = shutil.which("ps", path=PS_SEARCH_PATH)
+        try:
+            if ps is None:
+                raise FileNotFoundError("ps")
+            shown = subprocess.run(  # noqa: S603 — fixed argv, no shell
+                [ps, "-o", "rss=", "-p", str(os.getpid())],
+                capture_output=True,
+                text=True,
+                timeout=PS_TIMEOUT_SECONDS,
+                check=False,
+            ).stdout.strip()
+            mb = round(int(shown) / 1024, 1)
+        except (FileNotFoundError, ValueError):
+            # No ps, or one that answers no number: that does not change.
+            _ps_reading.update(at=None, mb=None, failed=True)
+            return None
+        except (OSError, subprocess.SubprocessError):
+            # A ps that hung or could not start this time: no reading for this
+            # window, and the next window asks again.
+            _ps_reading.update(at=now, mb=None)
+            return None
+        _ps_reading.update(at=now, mb=mb)
+        return mb
 
 
 _libc: Any = None
@@ -126,7 +190,10 @@ def malloc_trim() -> float:
         _libc.malloc_trim(0)
     except (OSError, AttributeError):
         return 0.0
-    return round(before - rss_mb(), 1)
+    after = rss_mb()
+    if before is None or after is None:
+        return 0.0
+    return round(before - after, 1)
 
 
 def _agent_loop_tasks() -> tuple[int, list[str]]:
@@ -177,7 +244,7 @@ def probe(label: str, **extra: Any) -> dict[str, Any]:
         return _probe(label, **extra)
     except Exception as exc:  # noqa: BLE001 — see above
         logger.debug("memprobe(%s) failed: %s", label, exc)
-        return {"rss_mb": 0.0}
+        return {"rss_mb": None}
 
 
 def _probe(label: str, **extra: Any) -> dict[str, Any]:
@@ -189,9 +256,10 @@ def _probe(label: str, **extra: Any) -> dict[str, Any]:
     blocks = sys.getallocatedblocks()
     loop_task_count, loop_task_names = _agent_loop_tasks()
     with _lock:
-        d_rss = round(rss - _last.get("rss", rss), 1)
+        d_rss = round(rss - _last.get("rss", rss), 1) if rss is not None else None
         d_blocks = blocks - int(_last.get("blocks", blocks))
-        _last["rss"] = rss
+        if rss is not None:
+            _last["rss"] = rss
         _last["blocks"] = blocks
 
     reading: dict[str, Any] = {
@@ -218,11 +286,15 @@ def _probe(label: str, **extra: Any) -> dict[str, Any]:
     if current_mode == "tracemalloc":
         reading["top_alloc"] = _tracemalloc_delta()
 
+    rss_text = (
+        f"rss={rss:.1f}MB ({d_rss:+.1f})"
+        if rss is not None and d_rss is not None
+        else "rss=not read"
+    )
     logger.info(
-        "memprobe %s: rss=%.1fMB (%+.1f) blocks=%d (%+d) threads=%d loop_tasks=%d%s",
+        "memprobe %s: %s blocks=%d (%+d) threads=%d loop_tasks=%d%s",
         label,
-        reading["rss_mb"],
-        reading["d_rss_mb"],
+        rss_text,
         reading["blocks"],
         reading["d_blocks"],
         reading["threads"],
