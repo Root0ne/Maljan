@@ -136,17 +136,34 @@ docker-logs:
 # from docker/.env for compose variable substitution; bootstrap.env (repo
 # root, gitignored) is sourced here too so the same file also covers `make
 # migrate` and any bare host process you run outside Docker.
+#
+# COMPOSE_FILE_EXTRA adds compose files of your own after the shipped file and
+# the overlay, each as one more `-f`, so it wins over both: a port moved, a
+# volume added, a service turned off on this host. Several are space-separated:
+#
+#   COMPOSE_FILE_EXTRA=docker/local.yml make dev-up
+#   make dev-up COMPOSE_FILE_EXTRA="docker/local.yml docker/gpu.yml"
+#
+# Give the same value to dev-down and dev-logs. A path on the command line is
+# read from the repository root; paths inside the file are read from docker/,
+# the first file's directory. Compose reads docker-compose.override.yml on its
+# own only when it is given no -f, and these targets give it two, so an
+# override file is read here only when it is named in COMPOSE_FILE_EXTRA. The
+# docker-* targets pass no -f, so they do read docker/docker-compose.override.yml.
+DEV_COMPOSE = docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml \
+	$(foreach file,$(COMPOSE_FILE_EXTRA),-f $(file))
+
 dev-up:
 	set -a; [ -f bootstrap.env ] && . ./bootstrap.env; set +a; $(COMPOSE_IDS) \
-	docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d
+	$(DEV_COMPOSE) up -d
 
 dev-down:
 	set -a; [ -f bootstrap.env ] && . ./bootstrap.env; set +a; \
-	docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml --profile '*' down
+	$(DEV_COMPOSE) --profile '*' down
 
 dev-logs:
 	set -a; [ -f bootstrap.env ] && . ./bootstrap.env; set +a; \
-	docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml logs -f
+	$(DEV_COMPOSE) logs -f
 
 # The first admin account, or an existing account promoted, in the running
 # stack's API container (`malspark create-admin`, which reads the API's own
