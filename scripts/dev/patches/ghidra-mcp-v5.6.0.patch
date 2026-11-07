@@ -1,11 +1,17 @@
-ghidra-mcp v5.6.0: build the headless server.
+ghidra-mcp v5.6.0: build and start the headless server.
 
 Applied by scripts/dev/fetch_external.sh after it checks out the pinned tag.
+Two changes, both needed before the tag's image builds and its server starts:
 
 - docker/Dockerfile: the tag's pom.xml builds against Ghidra 12.0.4 while its
   Dockerfile still downloads 12.0.3, so `mvn package` cannot find the 12.0.4
   jars. The defaults move to the release the pom names. The compose file
   passes the same two values as build arguments.
+- GhidraMCPHeadlessServer.java: /create_folder and /delete_file are served by
+  annotated tools the server registers by scanning, and were registered a
+  second time by hand, which makes the HTTP server refuse the duplicate
+  context at start. The manual registrations go, and the fixed endpoint
+  count drops by the two.
 
 The file's own line endings differ by checkout (the tag carries CRLF in the
 Dockerfile), so it is applied with --ignore-whitespace.
@@ -24,3 +30,39 @@ diff --git a/docker/Dockerfile b/docker/Dockerfile
  
  # Install build dependencies
  RUN apt-get update && apt-get install -y \
+diff --git a/src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java b/src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java
+--- a/src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java
++++ b/src/main/java/com/xebyte/headless/GhidraMCPHeadlessServer.java
+@@ -376,11 +376,6 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
+ 
+         // --- Project Organization ---
+ 
+-        safeContext("/create_folder", exchange -> {
+-            Map<String, String> params = parsePostParams(exchange);
+-            sendResponse(exchange, endpointHandler.createFolder(params.get("path"), params.get("program")));
+-        });
+-
+         safeContext("/move_file", exchange -> {
+             Map<String, String> params = parsePostParams(exchange);
+             sendResponse(exchange, endpointHandler.moveFile(params.get("filePath"), params.get("destFolder")));
+@@ -391,11 +386,6 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
+             sendResponse(exchange, endpointHandler.moveFolder(params.get("sourcePath"), params.get("destPath")));
+         });
+ 
+-        safeContext("/delete_file", exchange -> {
+-            Map<String, String> params = parsePostParams(exchange);
+-            sendResponse(exchange, endpointHandler.deleteFile(params.get("filePath")));
+-        });
+-
+         // --- Server Endpoints ---
+ 
+         safeContext("/server/connect", exchange -> {
+@@ -518,7 +508,7 @@ public class GhidraMCPHeadlessServer implements GhidraLaunchable {
+     private int countEndpoints() {
+         // registeredEndpointCount = annotation-scanned (shared services + HeadlessManagementService)
+         // 31 = infrastructure + schema + remaining manual createContext registrations
+-        return registeredEndpointCount + 31;
++        return registeredEndpointCount + 29;
+     }
+ 
+     public void stop() {
