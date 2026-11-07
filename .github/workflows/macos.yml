@@ -25,6 +25,10 @@ jobs:
   test-macos:
     name: Test Suite (macOS arm64)
     runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      # brew would update itself before every install; the job wants one formula.
+      HOMEBREW_NO_AUTO_UPDATE: "1"
 
     steps:
       - name: Checkout
