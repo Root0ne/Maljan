@@ -198,9 +198,17 @@ FLOSS, the analysis server's emulating string decoder, is native too. On amd64
 the backend image installs FLARE's standalone x86-64 build, as before; on
 arm64, for which FLARE publishes none, it installs the same release, FLOSS
 3.1.1, from PyPI into an environment of its own, every package by hash, behind
-a launcher the analysis server checks by its own pinned sha256. Either way the
-server asks the executable its version before it reports the `floss` tool
-available.
+a launcher the analysis server checks by its own pinned sha256. The launcher
+checks every installed file against its package's RECORD, and the RECORD
+files of FLOSS and vivisect against pins of its own, before it starts FLOSS.
+Either way the server asks the executable its version, and expects 3.1.1,
+before it reports the `floss` tool available. Outside the image,
+`scripts/install_floss.sh` on an arm64 Linux host installs the x86-64 build
+only when x86-64 emulation is registered with the kernel, and otherwise points
+to the backend image.
+
+The release publishes every image for `linux/amd64` and `linux/arm64` but
+`die-mcp`, which is `linux/amd64` only.
 
 **Rosetta is required** for the emulated services, and `ghidra-mcp` runs in
 the default profiles. They need Rosetta, not Docker's default QEMU user-mode
