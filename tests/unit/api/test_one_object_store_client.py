@@ -73,6 +73,17 @@ class _Store:
         return [name for name, _ in self.calls]
 
 
+@pytest.fixture(autouse=True)
+def _no_settled_bucket() -> Any:
+    """These tests are about one client and the policy, so the bucket choice is
+    settled on the configured name up front; the choice between the configured
+    and the previous bucket has its own tests."""
+    object_store._SETTLED.clear()
+    object_store._SETTLED[settings.minio_bucket] = settings.minio_bucket
+    yield
+    object_store._SETTLED.clear()
+
+
 def _policy(store: _Store) -> dict[str, Any]:
     [args] = [args for name, args in store.calls if name == "set_bucket_policy"]
     assert args[0] == settings.minio_bucket

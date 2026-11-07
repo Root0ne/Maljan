@@ -89,6 +89,12 @@ copy into a new bucket also drops retention, legal holds and every version but
 the latest, so the copy command the script prints refuses a bucket with an
 object lock or any audit head.
 
+A running API settles on the bucket it found once and keeps it. Before the
+copy, stop uploads (no new submissions, no sandbox reports arriving); after
+it, restart the `backend-api`, `backend-worker` and `enrichment-worker`
+services, so they move to the new bucket together. An object written to the old bucket
+between the copy and the restart would otherwise be missing from the new one.
+
 ## What else changes for an operator
 
 - Container names, images and networks: `malspark-*`.

@@ -246,8 +246,9 @@ async def get_stix_bundle(
     # A bundle stored before the rename names its custom properties under the
     # previous product name; served under the current ones, its
     # ``x_malspark_published: false`` keeps it a draft.
-    bundle = with_current_property_names(bundle)
-    if isinstance(bundle, dict) and bundle.get("x_malspark_published") is False:
+    current: dict[Any, Any] = with_current_property_names(bundle)
+    bundle = current
+    if bundle.get("x_malspark_published") is False:
         from malspark.schemas.stix_models import UNPUBLISHED_NOTICE
 
         return {"published": False, "notice": UNPUBLISHED_NOTICE, "bundle": bundle}

@@ -78,7 +78,7 @@ def bucket(store: Any | None = None) -> str:
     lock) stay where they are. Settled once per configured name; a store that
     cannot answer leaves the configured name, asked again next time.
     """
-    name = settings.minio_bucket
+    name: str = settings.minio_bucket
     if name in _SETTLED:
         return _SETTLED[name]
     from app.config import get_settings

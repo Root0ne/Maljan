@@ -295,7 +295,7 @@ read as empty beside the database's head and the next append would anchor anew.
 Only a bucket with no object lock and no audit head may be copied instead; this
 copy refuses any other (run it with the new stack up and MINIO_BUCKET unset):
 
-docker compose -f docker/docker-compose.yml exec -T api python - <<'PY'
+docker compose -f docker/docker-compose.yml exec -T backend-api python - <<'PY'
 from minio.commonconfig import CopySource
 from minio.error import S3Error
 from app.config import settings
@@ -317,6 +317,11 @@ if not store.bucket_exists(new):
 for item in store.list_objects(old, recursive=True):
     store.copy_object(new, item.object_name, CopySource(old, item.object_name))
 PY
+
+Stop uploads before this copy, and restart the backend-api, backend-worker and
+enrichment-worker services once it finishes: a running API keeps the bucket
+it settled on, so anything written to the old bucket before the restart would
+be missing from the new one.
 
 Redis: queued jobs and job ownership keys carry the old prefix; let the old
 queue drain before stopping it, or resubmit what was queued.
