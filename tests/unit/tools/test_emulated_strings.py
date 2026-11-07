@@ -9,7 +9,9 @@ the tool's words for every way the child can fail.
 
 from __future__ import annotations
 
+import errno
 import json
+import os
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -470,6 +472,66 @@ class TestTheBuildMustRunHere:
 
         assert "exited with 3" in (tool.floss_unavailable() or "")
         assert count.read_text().count("x") == 2
+
+    def test_a_staging_directory_refused_is_a_reason_and_never_an_exception(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The manifest asks while the server starts, so the probe must answer."""
+        self._pinned(tmp_path, monkeypatch, b"#!/bin/sh\n")
+        real = tmp_path / "real-base"
+        real.mkdir()
+        link = tmp_path / "linked-base"
+        link.symlink_to(real)
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(link))
+
+        reason = tool.floss_unavailable()
+
+        assert reason == "floss cannot be executed on this host: RuntimeError"
+        # Not remembered: once staging is usable, the next probe asks again.
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
+        assert tool.floss_unavailable() is None
+
+    def test_a_timeout_is_not_remembered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        slow = tmp_path / "slow"
+        slow.touch()
+        self._pinned(
+            tmp_path, monkeypatch, f'#!/bin/sh\n[ -e "{slow}" ] && exec sleep 30\nexit 0\n'.encode()
+        )
+        monkeypatch.setattr(tool, "_PROBE_TIMEOUT_S", 1)
+
+        assert "did not answer --version" in (tool.floss_unavailable() or "")
+        slow.unlink()
+        assert tool.floss_unavailable() is None
+
+    @pytest.mark.parametrize(
+        ("number", "remembered"),
+        [
+            (errno.ENOEXEC, True),
+            (errno.ENOENT, True),
+            (errno.EACCES, True),
+            (errno.EAGAIN, False),
+            (errno.ENOSPC, False),
+        ],
+    )
+    def test_only_an_exec_error_of_the_file_itself_is_remembered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, number: int, remembered: bool
+    ) -> None:
+        self._pinned(tmp_path, monkeypatch, b"#!/bin/sh\n")
+        calls: list[int] = []
+
+        def refused(*_args: Any, **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+            calls.append(1)
+            raise OSError(number, os.strerror(number))
+
+        monkeypatch.setattr(tool, "_run", refused)
+
+        first = tool.floss_unavailable()
+        second = tool.floss_unavailable()
+
+        assert first == second == f"floss cannot be executed on this host: {os.strerror(number)}"
+        assert len(calls) == (1 if remembered else 2)
 
     def test_the_run_leaves_nothing_in_staging(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -35,6 +35,7 @@ once costs one emulation.
 from __future__ import annotations
 
 import contextlib
+import errno
 import hashlib
 import json
 import os
@@ -129,6 +130,9 @@ _RUNS: dict[tuple[str, int, int, int, int], str | None] = {}
 # 63 MB before it answers, a few seconds natively and several times that under
 # an emulator; a build that has not answered by then is not one a run can use.
 _PROBE_TIMEOUT_S = 60
+# The errors an exec of the file itself gives every time: a format this kernel
+# does not load, a loader or interpreter that is not there, no permission.
+_LASTING_EXEC_ERRORS = frozenset({errno.ENOEXEC, errno.ENOENT, errno.EACCES})
 
 # The name the verified copy of the build is written under, inside the run's
 # own directory.
@@ -248,9 +252,11 @@ def _does_not_run(path: Path) -> str | None:
     The right bytes are not yet a working tool: an executable built for another
     machine, or one whose loader or libraries are missing, has the pinned digest
     and still never runs. So the build is run once, as every run is (a verified
-    copy, its own directory, a wall clock), asking only its version. The
-    verdict is remembered per size, mtime, inode and ctime, as the digest's is.
-    The reason quotes the end of what the child wrote and never a host path.
+    copy, its own directory, a wall clock), asking only its version. A verdict
+    the file gives every time is remembered per size, mtime, inode and ctime, as
+    the digest's is. No failure of the probe escapes it: the capability manifest
+    asks while the server starts. The reason quotes the end of what the child
+    wrote and never a host path.
     """
     try:
         info = path.stat()
@@ -260,9 +266,15 @@ def _does_not_run(path: Path) -> str | None:
     if key in _RUNS:
         return _RUNS[key]
     reason: str | None = None
+    # Only an answer that the same file gives every time is remembered: an exit
+    # status, the digest, or an exec the kernel refuses for the file itself. A
+    # timeout, a full disk or a process limit says more about this moment than
+    # about the build, so the next probe asks again.
+    lasting = True
     try:
         done = _run([str(path), "--version"], _PROBE_TIMEOUT_S, pinned=path)
     except subprocess.TimeoutExpired:
+        lasting = False
         reason = (
             f"floss cannot be executed on this host: it did not answer --version "
             f"within {_PROBE_TIMEOUT_S} s"
@@ -270,7 +282,13 @@ def _does_not_run(path: Path) -> str | None:
     except NotThePinnedBuild as exc:
         reason = f"floss is not installed: {exc}"
     except OSError as exc:
+        lasting = exc.errno in _LASTING_EXEC_ERRORS
         reason = f"floss cannot be executed on this host: {exc.strerror or type(exc).__name__}"
+    except Exception as exc:  # noqa: BLE001 - a probe answers; it never stops the server
+        # A staging directory refused as unsafe, for one: its message names a
+        # host path, so only the kind of failure is said.
+        lasting = False
+        reason = f"floss cannot be executed on this host: {type(exc).__name__}"
     else:
         if done.returncode != 0:
             tail = done.stderr
@@ -281,7 +299,8 @@ def _does_not_run(path: Path) -> str | None:
                 f"floss cannot be executed on this host: --version exited with "
                 f"{done.returncode}" + (f": {tail}" if tail else "")
             )
-    _RUNS[key] = reason
+    if lasting:
+        _RUNS[key] = reason
     return reason
 
 
