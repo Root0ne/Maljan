@@ -586,6 +586,20 @@ def _echoed(value: str) -> str:
     return repr(shown)
 
 
+def _failure_said(exc: BaseException) -> str:
+    """An exception as a refusal says it: its type and words, the path in them bounded.
+
+    An ``OSError`` carries the path it was raised on, and its text quotes that
+    path whole: a name the file system refused for its length is quoted back
+    at that length, under a temporary directory whose own length varies by
+    host. The path is quoted as any refused value is (``_echoed``).
+    """
+    if isinstance(exc, OSError) and exc.filename is not None:
+        words = f"[Errno {exc.errno}] {exc.strerror}" if exc.errno else str(exc.strerror or "")
+        return f"{type(exc).__name__}: {words}: {_echoed(os.fsdecode(exc.filename))}"
+    return f"{type(exc).__name__}: {exc}"
+
+
 def _digest_of(target: Path) -> str:
     """The sha256 of a file, remembered while its size and mtime are unchanged.
 
@@ -816,7 +830,7 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
         # manifest that has nothing to say about this argument.
         return tool_error(
             code_for_exception(exc),
-            f"{type(exc).__name__}: {exc}",
+            _failure_said(exc),
             tool=tool,
             remediation=CARVED_REMEDIATION if _asked_for_a_carved_file(kwargs) else None,
         )

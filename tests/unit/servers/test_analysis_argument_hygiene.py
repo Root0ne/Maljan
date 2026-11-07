@@ -949,3 +949,19 @@ class TestAValueTheFilesystemWouldRefuse:
         error = server.strings(path=str(sample), carved_path="y" * 3000, min_len=4)["error"]
 
         assert len(error["message"]) < 400
+
+    def test_a_file_system_refusal_quotes_its_path_bounded(self, server: Any) -> None:
+        """However long the path an OSError was raised on, and whatever its errno is here."""
+        import errno
+        import os
+
+        refused = "/" + "t" * 900 + "/" + "y" * 3000
+
+        def too_long() -> dict[str, Any]:
+            raise OSError(errno.ENAMETOOLONG, os.strerror(errno.ENAMETOOLONG), refused)
+
+        error = server._guard("strings", too_long)["error"]
+
+        assert len(error["message"]) < 400
+        assert f"[Errno {errno.ENAMETOOLONG}] {os.strerror(errno.ENAMETOOLONG)}" in error["message"]
+        assert error["message"].startswith("OSError: ")
