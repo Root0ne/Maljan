@@ -137,8 +137,8 @@ def _minio_client() -> Any:
 
 
 def _put_object_blocking(path: str, blob: bytes, *, content_type: str = "application/json") -> None:
-    # The bucket is created the one way every path creates it, with the
-    # anonymous-deny policy (``object_store.ensure_bucket``).
+    # The bucket is created the one way every path creates it, private
+    # (``object_store.ensure_bucket``), and written only while it stays so.
     object_store.put_bytes(_minio_client(), path, blob, content_type=content_type)
 
 

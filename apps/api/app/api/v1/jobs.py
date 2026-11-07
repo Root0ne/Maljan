@@ -908,6 +908,8 @@ async def get_job_evidence_object(
         )
     try:
         response = await asyncio.to_thread(object_store.open_object, object_store.client(), key)
+    except object_store.StoreNotPrivate:
+        raise
     except Exception as exc:  # noqa: BLE001 — the store's failure is logged, not served
         logger.warning(
             f"Evidence object {log_safe(key)} could not be read: {log_safe(type(exc).__name__)}",

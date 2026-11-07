@@ -45,11 +45,12 @@ async def _probe_redis() -> None:
         await conn.aclose()
 
 
-async def _probe_minio() -> None:
+async def _probe_minio() -> dict[str, Any] | None:
     from app.services import object_store
 
-    # The MinIO SDK is synchronous — keep it off the event loop.
-    await asyncio.to_thread(object_store.probe)
+    # The MinIO SDK is synchronous — keep it off the event loop. A bucket an
+    # anonymous caller is let into answers with its own failure, a required one.
+    return await asyncio.to_thread(object_store.probe)
 
 
 async def _probe_memory() -> dict[str, Any]:
@@ -316,6 +317,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Run `alembic upgrade head` from your deploy pipeline instead."
         )
 
+    # Whether the object store's bucket is private, asked once at start, once
+    # its name settles; a bucket anyone can read is logged at ERROR and
+    # samples are refused until it is fixed, but the API starts either way.
+    import asyncio as _asyncio
+
+    from app.services import object_store
+
+    try:
+        await _asyncio.wait_for(
+            _asyncio.to_thread(object_store.check_privacy_at_start), _PROBE_TIMEOUT_SECONDS
+        )
+    except Exception as exc:
+        logger.warning(
+            "MinIO bucket privacy not checked at start: %s", log_safe(type(exc).__name__)
+        )
+
     from app.services.migration_state import CHECK_FAILED, check_revision_at_start
 
     try:
@@ -441,6 +458,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Database connections closed")
 
 
+async def store_not_private_response(_request: Any, exc: Exception) -> Any:
+    """503 for a sample or a sandbox report while the bucket lets an anonymous caller in.
+
+    Fail closed (``object_store.require_private``): nothing is taken into or
+    served from a store anyone can read. The log names what it allows.
+    """
+    from fastapi.responses import JSONResponse
+
+    from app.services.object_store import StoreNotPrivate
+
+    return JSONResponse(status_code=503, content={"detail": StoreNotPrivate.detail})
+
+
 async def stored_value_refused_response(_request: Any, exc: Exception) -> Any:
     """409 for a request that read the settings while a stored value is refused.
 
@@ -523,6 +553,11 @@ def create_app() -> FastAPI:
 
     app.add_exception_handler(StoredValueRefused, stored_value_refused_response)
 
+    # ── An object store anyone can read ──────────────────────
+    from app.services.object_store import StoreNotPrivate
+
+    app.add_exception_handler(StoreNotPrivate, store_not_private_response)
+
     # ── Routes ───────────────────────────────────────────────
     from app.api.v1.audit import router as audit_router
     from app.api.v1.auth import router as auth_router
@@ -596,7 +631,11 @@ def create_app() -> FastAPI:
         # readiness bit.
         # Only components the API cannot serve requests without are allowed to
         # flip the overall status; optional subsystems are reported but not fatal.
-        required = ("database", "redis")
+        # A component may mark its own failure required: the object store does
+        # for a bucket an anonymous caller is let into.
+        required = {"database", "redis"} | {
+            name for name, c in components.items() if c.get("required")
+        }
         if any(components.get(name, {}).get("ok") is False for name in required):
             body["status"] = "degraded"
         elif any(c.get("ok") is False for c in components.values()):

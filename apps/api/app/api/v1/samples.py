@@ -56,8 +56,8 @@ def _store_sample_bytes_blocking(storage_path: str, source: str, content_type: s
 async def store_sample_bytes(*, storage_path: str, source: Any, content_type: str) -> None:
     """Put one sample's bytes in the object store, off the event loop.
 
-    Everything the store needs doing for an upload — the bucket check, the
-    deny-anonymous policy a fresh bucket gets, and the transfer itself — is
+    Everything the store needs doing for an upload — the privacy check, the
+    bucket check and the transfer itself — is
     synchronous, and a sample may be a hundred megabytes. On the loop that is
     a hundred megabytes during which this process answers no request, sends no
     WebSocket frame and fails its own health check; in a thread it is one
@@ -393,6 +393,8 @@ async def upload_sample(
                 source=tmp_path,
                 content_type=detected_mime or "application/octet-stream",
             )
+        except object_store.StoreNotPrivate:
+            raise
         except Exception as exc:
             # Best-effort cleanup: remove the half-inserted DB row so the
             # caller can retry instead of getting a phantom 409.

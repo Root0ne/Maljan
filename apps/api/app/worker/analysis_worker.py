@@ -3324,6 +3324,10 @@ async def run_analysis(ctx: dict, job_id: str) -> dict[str, Any]:
             static_sample_path = global_mirror_path(
                 static_sample_paths, app.container.config.static
             )
+        except object_store.StoreNotPrivate:
+            # A bucket anyone can read: the job stops here, said, rather than
+            # running on without its sample (``object_store.require_private``).
+            raise StatedFailure(object_store.StoreNotPrivate.detail) from None
         except Exception as exc:
             logger.warning(
                 "Failed to download sample from MinIO: %s. Sandbox submission skipped.",

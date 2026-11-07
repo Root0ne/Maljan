@@ -267,6 +267,9 @@ def test_minio_is_built_from_the_release_its_tag_names() -> None:
     assert minio["container_name"] == "malspark-minio"
     assert set(minio["environment"]) == {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"}
     assert "/minio/health/live" in " ".join(minio["healthcheck"]["test"])
+    # No capability and no way to gain one (T-575); root, for the volume's owner.
+    assert minio["cap_drop"] == ["ALL"] and not minio.get("cap_add")
+    assert minio["security_opt"] == ["no-new-privileges:true"]
     # The build copies nothing from docker/, where docker/.env lives, and is
     # sent none of it.
     assert not re.search(r"^(COPY|ADD) (?!--from=)", text, re.MULTILINE)
