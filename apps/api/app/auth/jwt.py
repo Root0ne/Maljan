@@ -16,9 +16,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import jwt
+from malspark.core.previous_name import PREVIOUS_NAME
 from pydantic import SecretStr
 
-from app.config import settings
+from app.config import APISettings, settings
 
 # ``app.runtime_config`` is imported lazily inside the two token builders
 # below, not at module scope: it transitively imports ``app.database``,
@@ -230,6 +231,9 @@ def is_current_generation(payload: dict[str, Any], user: Any) -> bool:
 # Domain label for the key the client fingerprint is hashed under, derived
 # from the signing secret so the signing key itself never keys anything else.
 _FINGERPRINT_LABEL = b"malspark-refresh-client-fingerprint-v1"
+# The label a release before the product's rename (T-576) hashed under: a grace
+# record it wrote still matches the client that wrote it.
+_PREVIOUS_FINGERPRINT_LABEL = f"{PREVIOUS_NAME}-refresh-client-fingerprint-v1".encode("ascii")
 # An IPv6 client's privacy extensions rotate the low 64 bits; the /64 is the
 # stable part that names the client's network.
 IPV6_FINGERPRINT_PREFIX = 64
@@ -251,9 +255,32 @@ def client_fingerprint(ip: str, user_agent: str) -> str:
     Held in a refresh token's reuse grace record so a second use inside the
     window can be told apart by client without storing the address itself.
     """
-    key = hmac.new(_secret().encode(), _FINGERPRINT_LABEL, hashlib.sha256).digest()
+    return _fingerprint(_FINGERPRINT_LABEL, ip, user_agent)
+
+
+def previous_client_fingerprint(ip: str, user_agent: str) -> str:
+    """The same client's fingerprint as a release before the rename wrote it."""
+    return _fingerprint(_PREVIOUS_FINGERPRINT_LABEL, ip, user_agent)
+
+
+def _fingerprint(label: bytes, ip: str, user_agent: str) -> str:
+    key = hmac.new(_secret().encode(), label, hashlib.sha256).digest()
     material = f"{_coarse_address(ip)}\n{user_agent}".encode()
     return hmac.new(key, material, hashlib.sha256).hexdigest()
+
+
+# The issuer and audience a release before the product's rename (T-576) minted
+# its tokens under, by default (``malspark.core.previous_name``). A session
+# opened before the upgrade is still read while the deployment keeps the
+# shipped default: the signing secret is the same, so only the label moved.
+PREVIOUS_ISSUER = f"{PREVIOUS_NAME}-api"
+PREVIOUS_AUDIENCE = f"{PREVIOUS_NAME}-clients"
+
+
+def _accepted(configured: str, field: str, previous: str) -> list[str]:
+    """``configured``, and ``previous`` while ``configured`` is the shipped default."""
+    default = APISettings.model_fields[field].default
+    return [configured, previous] if configured == default else [configured]
 
 
 def decode_token(token: str) -> dict[str, Any] | None:
@@ -277,8 +304,8 @@ def decode_token(token: str) -> dict[str, Any] | None:
                     token,
                     candidate,
                     algorithms=[settings.jwt_algorithm],
-                    audience=settings.jwt_audience,
-                    issuer=settings.jwt_issuer,
+                    audience=_accepted(settings.jwt_audience, "jwt_audience", PREVIOUS_AUDIENCE),
+                    issuer=_accepted(settings.jwt_issuer, "jwt_issuer", PREVIOUS_ISSUER),
                 ),
             )
         except jwt.PyJWTError:
