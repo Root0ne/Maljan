@@ -26,6 +26,7 @@ from app.worker.analysis_worker import (
     _sweep_orphan_jobs,
     claim_job,
     job_owner_key,
+    previous_job_owner_key,
     sweep_orphans_forever,
 )
 from tests.integration._session_probe import SessionFactory, updates_to
@@ -101,6 +102,28 @@ async def test_a_job_another_worker_is_holding_is_left_alone() -> None:
     factory = _factory([_row(theirs, age_seconds=JOB_OWNER_TTL_SECONDS + 600)])
 
     await _sweep_orphan_jobs(factory, _redis({job_owner_key(str(theirs)): "otherhost:4242"}))
+
+    assert updates_to(factory, "analysis_jobs") == []
+
+
+@pytest.mark.asyncio
+async def test_a_heartbeat_under_the_previous_name_holds_the_job() -> None:
+    """A worker of a release before the rename (T-576) still running its job beside this one."""
+    from malspark.core.previous_name import PREVIOUS_NAME
+
+    running = uuid.uuid4()
+    pending = uuid.uuid4()
+    factory = _factory(
+        [
+            _row(running, age_seconds=JOB_OWNER_TTL_SECONDS + 60),
+            _row(pending, age_seconds=JOB_OWNER_TTL_SECONDS + 60, status="pending"),
+        ]
+    )
+    key = previous_job_owner_key(str(running))
+    assert key == f"{PREVIOUS_NAME}:job-owner:{running}"
+    held = {key: "oldhost:1", previous_job_owner_key(str(pending)): "oldhost:1"}
+
+    await _sweep_orphan_jobs(factory, _redis(held))
 
     assert updates_to(factory, "analysis_jobs") == []
 

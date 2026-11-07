@@ -20,9 +20,11 @@ from __future__ import annotations
 import hashlib
 import hmac
 import uuid
+from collections.abc import Mapping
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
+from malspark.core.previous_name import PREVIOUS_NAME
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +34,7 @@ from app.auth.jwt import (
     create_refresh_token,
     decode_token,
     is_current_generation,
+    previous_client_fingerprint,
     session_claims,
 )
 from app.auth.password import hash_password, verify_password
@@ -70,6 +73,22 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 REFRESH_COOKIE = "malspark_refresh"
 REFRESH_COOKIE_PATH = "/api/v1/auth"
+# The cookie a release before the product's rename (T-576) set
+# (``malspark.core.previous_name``). A browser still holding it keeps its
+# session: it is read when the current cookie is absent, and cleared beside it.
+PREVIOUS_REFRESH_COOKIE = f"{PREVIOUS_NAME}_refresh"
+
+
+def _previous_refresh_cookie(request: Request) -> str | None:
+    """The previous-name refresh cookie the client sent, or ``None``."""
+    held = getattr(request, "cookies", None)
+    value = held.get(PREVIOUS_REFRESH_COOKIE) if isinstance(held, Mapping) else None
+    return value if isinstance(value, str) and value else None
+
+
+def _refresh_cookie(request: Request, current: str | None) -> str | None:
+    """The refresh cookie the client sent: the current one, else the previous-name one."""
+    return current or _previous_refresh_cookie(request)
 
 
 def _set_refresh_cookie(response: Response, token: str, refresh_days: int) -> None:
@@ -88,16 +107,24 @@ def _set_refresh_cookie(response: Response, token: str, refresh_days: int) -> No
         path=REFRESH_COOKIE_PATH,
         max_age=refresh_days * 86400,
     )
+    # A browser that still holds the previous-name cookie never keeps it beside
+    # the new session: its token would stay live until it expired.
+    _delete_cookie(response, PREVIOUS_REFRESH_COOKIE)
 
 
-def _clear_refresh_cookie(response: Response) -> None:
+def _delete_cookie(response: Response, name: str) -> None:
     response.delete_cookie(
-        REFRESH_COOKIE,
+        name,
         path=REFRESH_COOKIE_PATH,
         httponly=True,
         samesite="lax",
         secure=bool(settings.cookie_secure),
     )
+
+
+def _clear_refresh_cookie(response: Response) -> None:
+    for name in (REFRESH_COOKIE, PREVIOUS_REFRESH_COOKIE):
+        _delete_cookie(response, name)
 
 
 def _email_tag(email: str) -> str:
@@ -315,6 +342,7 @@ async def refresh_token(
     ``fingerprint_match``. A token minted under an earlier generation is
     refused as revoked without moving the generation again.
     """
+    malspark_refresh = _refresh_cookie(request, malspark_refresh)
     if not malspark_refresh:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No refresh session")
 
@@ -328,9 +356,9 @@ async def refresh_token(
 
     user_id = payload.get("sub")
     jti = payload.get("jti", "")
-    fingerprint = client_fingerprint(
-        await request_client_ip(request), request.headers.get("user-agent", "")
-    )
+    client_ip = await request_client_ip(request)
+    user_agent = request.headers.get("user-agent", "")
+    fingerprint = client_fingerprint(client_ip, user_agent)
     # Consume and open the grace window in one atomic step (see
     # ``throttle.ROTATE_SCRIPT``).
     consumed = await refresh_token_rotate(user_id, jti, fingerprint)
@@ -357,7 +385,10 @@ async def refresh_token(
         reason = "refresh_reuse"
         if grace.fingerprint is not None:
             # Used again within ``refresh_reuse_grace_seconds`` of its rotation.
-            match = hmac.compare_digest(grace.fingerprint, fingerprint)
+            # A grace record a release before the rename wrote is under its label.
+            match = hmac.compare_digest(grace.fingerprint, fingerprint) or hmac.compare_digest(
+                grace.fingerprint, previous_client_fingerprint(client_ip, user_agent)
+            )
             await audit.record(
                 "auth.refresh.reuse_in_grace",
                 resource_type="auth",
@@ -410,10 +441,18 @@ async def logout(
     A missing or already-consumed cookie is not an error: logout is
     idempotent so a client can call it defensively without checking state.
     """
-    if malspark_refresh:
-        payload = decode_token(malspark_refresh) or {}
-        if payload.get("type") == "refresh":
-            await refresh_token_consume(payload.get("sub"), payload.get("jti", ""))
+    # Both cookies when a browser holds both: the previous-name one's session
+    # ends here too, never left live after a logout.
+    held = [t for t in (malspark_refresh, _previous_refresh_cookie(request)) if t]
+    # One audit row per account whose session ends here.
+    audited: set[object] = set()
+    for token in dict.fromkeys(held):
+        payload = decode_token(token) or {}
+        if payload.get("type") != "refresh":
+            continue
+        await refresh_token_consume(payload.get("sub"), payload.get("jti", ""))
+        if payload.get("sub") not in audited:
+            audited.add(payload.get("sub"))
             await _audit(
                 db,
                 uuid.UUID(payload["sub"]) if payload.get("sub") else None,
@@ -496,7 +535,7 @@ async def update_me(
         # generation the database never reached, and the old ones still valid.
         await db.commit()
         if credential_changed:
-            await _consume_callers_refresh(user, malspark_refresh)
+            await _consume_callers_refresh(user, _refresh_cookie(request, malspark_refresh))
             await clear_login_throttle(user.email)
             await runtime_config.get("jwt_access_token_expire_minutes")
             refresh_days = await runtime_config.get("jwt_refresh_token_expire_days")

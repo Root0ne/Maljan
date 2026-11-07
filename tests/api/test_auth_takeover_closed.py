@@ -36,6 +36,7 @@ from app.auth.jwt import (  # noqa: E402
     create_access_token,
     create_refresh_token,
     decode_token,
+    previous_client_fingerprint,
     session_claims,
     token_generation,
 )
@@ -401,6 +402,24 @@ def test_the_same_client_inside_the_grace_window_revokes_nothing(
     offline.record.assert_awaited_once()
     assert offline.record.await_args.args == ("auth.refresh.reuse_in_grace",)
     # The operator's row says whether the client matched, and nothing else.
+    assert offline.record.await_args.kwargs["details"] == {"fingerprint_match": True}
+
+
+def test_a_grace_record_under_the_previous_label_is_the_same_client(
+    offline: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Written by a release before the rename (T-579): the same client, nothing revoked."""
+    revoke = AsyncMock()
+    monkeypatch.setattr(auth_module, "_revoke_for_reuse", revoke)
+    stored = previous_client_fingerprint("testclient", "testclient")
+    assert stored != TESTCLIENT_FINGERPRINT
+    user, _, r = _replay_in_grace(offline, stored)
+
+    assert r.status_code == 401
+    assert r.json()["detail"] == "Refresh token was just rotated; use the current session."
+    revoke.assert_not_awaited()
+    offline.revoke_sessions.assert_not_awaited()
+    assert user.token_generation == 0
     assert offline.record.await_args.kwargs["details"] == {"fingerprint_match": True}
 
 

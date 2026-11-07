@@ -34,6 +34,7 @@ import time
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 
+from malspark.core.previous_name import PREVIOUS_NAME
 from malspark.providers.base import DEFAULT_WORK_DIR
 
 from app.config import settings
@@ -77,6 +78,13 @@ def temp_dir() -> Path:
 # never written to, chmodded, swept, cleared or exported.
 MIRROR_MARKER = ".malspark-mirror"
 MIRROR_MARKER_TEXT = "A sample mirror directory of the Malspark worker.\n"
+# The marker and text a release before the product's rename (T-576) wrote
+# (``malspark.core.previous_name``): a directory it created is still the
+# worker's own, read under either.
+PREVIOUS_MIRROR_MARKER = f".{PREVIOUS_NAME}-mirror"
+PREVIOUS_MIRROR_MARKER_TEXT = (
+    f"A sample mirror directory of the {PREVIOUS_NAME.capitalize()} worker.\n"
+)
 
 # The SHA-256 every copy the worker writes is named by.
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -117,21 +125,28 @@ def _marker_is_the_workers(dir_fd: int) -> bool | None:
     """``True`` for the worker's own marker, ``False`` for any other, ``None`` for none.
 
     The worker's own is a regular file, never a link, owned by this process's
-    user and holding exactly ``MIRROR_MARKER_TEXT``.
+    user and holding exactly ``MIRROR_MARKER_TEXT``. With no such file, the
+    marker a release before the rename wrote is read the same way
+    (``PREVIOUS_MIRROR_MARKER`` holding ``PREVIOUS_MIRROR_MARKER_TEXT``).
     """
-    try:
-        fd = os.open(MIRROR_MARKER, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
-    except FileNotFoundError:
-        return None
-    except OSError:
-        return False
-    try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+    for name, text in (
+        (MIRROR_MARKER, MIRROR_MARKER_TEXT),
+        (PREVIOUS_MIRROR_MARKER, PREVIOUS_MIRROR_MARKER_TEXT),
+    ):
+        try:
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+        except FileNotFoundError:
+            continue
+        except OSError:
             return False
-        return os.read(fd, len(MIRROR_MARKER_TEXT) + 1) == MIRROR_MARKER_TEXT.encode()
-    finally:
-        os.close(fd)
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
+                return False
+            return os.read(fd, len(text) + 1) == text.encode()
+        finally:
+            os.close(fd)
+    return None
 
 
 def _write_marker(dir_fd: int) -> None:

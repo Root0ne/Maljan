@@ -31,6 +31,7 @@ from malspark.agents.base_agent import CANCEL_DELIVERY_GRACE
 from malspark.core.cancellation import Cancellation, JobCancelled
 from malspark.core.config import MEDIATOR_AGENT_NAME
 from malspark.core.config import Settings as _CoreSettings
+from malspark.core.previous_name import PREVIOUS_NAME
 from malspark.core.report_formats import declarations_in_effect, recorded_signature_scale
 from malspark.core.settings_catalog import core_catalog
 from malspark.core.settings_overrides import (
@@ -1694,6 +1695,11 @@ def arm_the_exit_guard(grace: float | None = None) -> None:
 # so a second worker's job is never mistaken for an abandoned one. The value is
 # for the log; the sweep reads only whether the key is there.
 JOB_OWNER_KEY_PREFIX = "malspark:job-owner:"
+# The prefix a worker of a release before the product's rename (T-576) writes
+# its heartbeat under (``malspark.core.previous_name``). While one still runs
+# its job beside this release, the sweep reads that heartbeat too, so its job
+# is not taken for an abandoned one.
+PREVIOUS_JOB_OWNER_KEY_PREFIX = f"{PREVIOUS_NAME}:job-owner:"
 JOB_OWNER_TTL_SECONDS = 90
 JOB_OWNER_REFRESH_SECONDS = 30
 # How long the release in the job's ``finally`` may wait on Redis. The worker
@@ -1725,6 +1731,11 @@ def canonical_job_id(job_id: str) -> str:
 def job_owner_key(job_id: str) -> str:
     """Where this job's owner writes that it is still running it."""
     return f"{JOB_OWNER_KEY_PREFIX}{canonical_job_id(job_id)}"
+
+
+def previous_job_owner_key(job_id: str) -> str:
+    """Where a worker of a release before the rename writes the same heartbeat."""
+    return f"{PREVIOUS_JOB_OWNER_KEY_PREFIX}{canonical_job_id(job_id)}"
 
 
 # The jobs this process is running right now, under the one spelling. The sweep
@@ -1930,13 +1941,23 @@ async def live_owners(redis_conn: Any, job_ids: list[str]) -> set[str] | None:
         return set()
     global _QUEUE_UNREADABLE_SAID
     try:
-        held = await redis_conn.mget([job_owner_key(job_id) for job_id in job_ids])
+        held = await redis_conn.mget(
+            [
+                key
+                for job_id in job_ids
+                for key in (job_owner_key(job_id), previous_job_owner_key(job_id))
+            ]
+        )
     except Exception as exc:  # noqa: BLE001 — an unreadable queue is not a verdict
         _log_unreadable_queue(type(exc).__name__)
         return None
     # Readable again, so the next outage is worth saying out loud as well.
     _QUEUE_UNREADABLE_SAID = False
-    return {job_id for job_id, value in zip(job_ids, held, strict=False) if value is not None}
+    return {
+        job_id
+        for index, job_id in enumerate(job_ids)
+        if any(value is not None for value in held[2 * index : 2 * index + 2])
+    }
 
 
 async def queued_or_owned(redis_conn: Any, job_ids: list[str]) -> set[str] | None:
@@ -1958,6 +1979,7 @@ async def queued_or_owned(redis_conn: Any, job_ids: list[str]) -> set[str] | Non
         for job_id in job_ids
         for key in (
             job_owner_key(job_id),
+            previous_job_owner_key(job_id),
             job_key_prefix + job_id,
             in_progress_key_prefix + job_id,
         )
@@ -1971,7 +1993,7 @@ async def queued_or_owned(redis_conn: Any, job_ids: list[str]) -> set[str] | Non
     return {
         job_id
         for index, job_id in enumerate(job_ids)
-        if any(value is not None for value in values[3 * index : 3 * index + 3])
+        if any(value is not None for value in values[4 * index : 4 * index + 4])
     }
 
 

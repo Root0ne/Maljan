@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import { THEME_STORAGE_KEY } from "./themeScript";
+import { PREVIOUS_THEME_STORAGE_KEY, THEME_STORAGE_KEY } from "./themeScript";
 
 /**
  * Light or dark for the new analysis page.
@@ -28,7 +28,8 @@ let chosen: UiTheme | null = null;
 
 function readStored(): string | null {
   try {
-    return window.localStorage.getItem(KEY) ?? chosen;
+    // The choice a release before the rename remembered, when none is under the current key.
+    return window.localStorage.getItem(KEY) ?? window.localStorage.getItem(PREVIOUS_THEME_STORAGE_KEY) ?? chosen;
   } catch {
     return chosen;
   }

@@ -14,7 +14,12 @@ import { describe, expect, it } from "vitest";
 import { COMPLETED_JOB, MALWARE_REPORT, REPORT } from "../../../../e2e/report-fixture";
 import type { JobDTO } from "@/lib/api";
 import { resolveTheme } from "@/components/analysis/theme";
-import { THEME_BOOT_SCRIPT, THEME_STORAGE_KEY } from "@/components/analysis/themeScript";
+import {
+  PREVIOUS_THEME_STORAGE_KEY,
+  THEME_BOOT_SCRIPT,
+  THEME_STORAGE_KEY,
+} from "@/components/analysis/themeScript";
+import { PREVIOUS_NAME_FORMAT_PREFIX } from "@/lib/previousName";
 import {
   CONFIDENCE_WHY,
   ANALYSIS_TABS,
@@ -467,6 +472,26 @@ describe("the switches", () => {
       runInNewContext(THEME_BOOT_SCRIPT, sandbox);
       expect(attrs["data-ui-theme"]).toBe(want);
       expect(resolveTheme(stored, prefersLight)).toBe(want);
+    }
+  });
+
+  it("read the choice a release before the rename remembered when none is under the current key", () => {
+    expect(PREVIOUS_THEME_STORAGE_KEY).toBe(`${PREVIOUS_NAME_FORMAT_PREFIX.slice(0, -1)}.ui-theme`);
+    expect(THEME_BOOT_SCRIPT).toContain(JSON.stringify(PREVIOUS_THEME_STORAGE_KEY));
+    for (const [held, want] of [
+      [{ [PREVIOUS_THEME_STORAGE_KEY]: "light" }, "light"],
+      [{ [THEME_STORAGE_KEY]: "dark", [PREVIOUS_THEME_STORAGE_KEY]: "light" }, "dark"],
+    ] as const) {
+      const attrs: Record<string, string> = {};
+      const stored: Record<string, string> = held;
+      const sandbox = {
+        location: { pathname: "/analysis/job-1/behaviour" },
+        localStorage: { getItem: (k: string) => stored[k] ?? null },
+        window: { matchMedia: () => ({ matches: false }) },
+        document: { documentElement: { setAttribute: (k: string, v: string) => (attrs[k] = v) } },
+      };
+      runInNewContext(THEME_BOOT_SCRIPT, sandbox);
+      expect(attrs["data-ui-theme"]).toBe(want);
     }
   });
 
