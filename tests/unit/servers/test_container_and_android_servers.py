@@ -1117,8 +1117,11 @@ def test_the_unblob_image_installs_only_hashed_wheels_of_the_pinned_release() ->
     dockerfile = _dockerfile("unblob")
     assert "--require-hashes --only-binary=:all:" in dockerfile
     assert "UNBLOB_CARVE_ROOT=/tmp/carved" in dockerfile
-    # sasquatch, the one extractor not from Debian, by the release's checksum.
-    assert re.findall(r"^ARG SASQUATCH_DEB_SHA256=([0-9a-f]{64})$", dockerfile, re.MULTILINE)
+    # sasquatch, the one extractor not from Debian, by the release's checksum,
+    # one package per architecture.
+    assert re.findall(
+        r"^ARG SASQUATCH_(AMD64|ARM64)_DEB_SHA256=[0-9a-f]{64}$", dockerfile, re.MULTILINE
+    ) == ["AMD64", "ARM64"]
     assert "sha256sum -c -" in dockerfile
     pinned = (SERVICES / "unblob-mcp" / "requirements.txt").read_text(encoding="utf-8")
     assert f"unblob=={unblob.UNBLOB_VERSION} \\" in pinned

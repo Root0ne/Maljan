@@ -612,8 +612,6 @@ services:
       context: ../services
       dockerfile: unblob-mcp/Dockerfile
     image: malspark-unblob-mcp:26.6.4
-    # x86-64 only: the image installs sasquatch's amd64 .deb; an arm64 host runs it emulated.
-    platform: linux/amd64
     container_name: malspark-unblob-mcp
     environment:
       MCP_AUTH_TOKEN: ${UNBLOB_MCP_AUTH_TOKEN:-}
