@@ -1,10 +1,13 @@
 # The Python packages the unblob-mcp image installs, with their hashes: unblob
 # 26.6.4 and what it needs, and the MCP SDK release every cli-sidecar image
 # installs, held to the versions ../cli-sidecar/requirements.txt pins.
-# setuptools (which fs, a dependency of pyfatfs, imports) is held at 84.1.0,
-# the first release past GHSA-xmj3-9gf7-h52w.
+# setuptools (which fs, a dependency of pyfatfs, imports) is held at 84.2.1,
+# past GHSA-xmj3-9gf7-h52w.
+# lzallright stays below 0.3.0 and plotext below 6.0: jefferson and ubi-reader
+# ask for lzallright<0.3.0 and unblob for plotext<6.0, so a pin past either
+# leaves pip no resolution.
 # Regenerate from the repository root with
-#   printf 'mcp==1.30.0\nunblob==26.6.4\nsetuptools==84.1.0\n' > req.in
+#   printf 'mcp==1.30.0\nunblob==26.6.4\nsetuptools==84.2.1\n' > req.in
 #   uv pip compile --universal --python-version 3.12 --generate-hashes --no-header \
 #       -c services/cli-sidecar/requirements.txt req.in
 # and install with pip install --require-hashes -r requirements.txt.
@@ -517,20 +520,24 @@ lz4==4.4.5 \
     --hash=sha256:f9b8bde9909a010c75b3aea58ec3910393b758f3c219beed67063693df854db0 \
     --hash=sha256:ff1b50aeeec64df5603f17984e4b5be6166058dcf8f1e26a3da40d7a0f6ab547
     # via unblob
-lzallright==0.3.0 \
-    --hash=sha256:4d1dab2ac18f68d0381f0a81cf7616891c8da5d1669f9132f18188e76b8757d9 \
-    --hash=sha256:51a5c0c8ae9944d0b8f46ac13c14a98af0cc8a8aaa3f6bee3c6b0a66e01a4cec \
-    --hash=sha256:752c73b2efc2814b59115ffd64c3f5512aff034ef0b7569d4219cf9f8c7c7757 \
-    --hash=sha256:7d21c78c83054dc03ec3b79f62bf761fcee599a09a9a284f19abce5fd868baf1 \
-    --hash=sha256:7d455127be7592f8335a2784a4aa8aee54071fa94eb788ada6cb8e7a97bede8c \
-    --hash=sha256:829000d31997934911a7fd3f5b40b0574ad01c141cc40760a535cca80c2db2a6 \
-    --hash=sha256:8e75e4de4da03c04b4ebf4d51fddd45e7e2c3116e2bce147c7959c26b627b515 \
-    --hash=sha256:af7df63c8487192088e199720b5e6a971319c7dd5e0c6b31d96d3ca3eac54691 \
-    --hash=sha256:ccb17933d7cd90e24c70921c1cbf5da933afef5b03e8cd6c9ef9b87b8db1a214 \
-    --hash=sha256:de64ce1e4a8db6f96cba153a56f81c78cb04709df36bb12e2e77591fff6775ce \
-    --hash=sha256:e1d352799ec36a5f2969b1d05e6c5a20c16431cc4a46fccd15ecf72afea303d3 \
-    --hash=sha256:ef280e1e4bfb54b2cbe1be763f573480dcd154ba677947938cb048251eb36a47 \
-    --hash=sha256:fd414a9c9b3a5992fb809ff86588b08d47453556873e3f6085ab1351f1c50ff3
+lzallright==0.2.6 \
+    --hash=sha256:0022a1bbaac84380fe1a143066cbd535b42563cbe39c38b2435b1d96a06d9ff4 \
+    --hash=sha256:10549563dcc9360a3e6c622ef79a91b9ed0e11fa3ff5ca7a4a19de436841c97d \
+    --hash=sha256:15917d4e5aadf601b58da0bbf034c5715853fffe843a3ee4b5040ae0e5d954ad \
+    --hash=sha256:2c59c0375cb4893f8b15745a92b8f9b8c3612f99a91e981c2d464e7d81be1c2d \
+    --hash=sha256:32056f4305289f7b319c1c4599976ba076d08c2e0c09e7624dc22870b4417215 \
+    --hash=sha256:5719ba092d1ba7157e8236fdff9e82b6186aaf23d8d23c994f3b1cd31b83dd9a \
+    --hash=sha256:5e9f6f6ea4a00ed6767b984b10edbb076707efcf3a83e29a819cc6467c8d3b6f \
+    --hash=sha256:80a4cd499c9a3e20b1e65682afae402ee17ff135e84cca347ae87149fb285348 \
+    --hash=sha256:af34c732607aa95a4c791b1e7b65088433d98d02d373a73be7a0b2a12112583b \
+    --hash=sha256:bad91a3b9dde691a1aef2201f5d5dfa478ded10095383f76504532859a84fb48 \
+    --hash=sha256:c6ffcda4ae2868c97b6bb3de03ad478c9b64a1025bd204e295e377b5370c6379 \
+    --hash=sha256:c733d7cbcd253c1ae70b49164b047e24db0f797148a2fda976663e34e3245114 \
+    --hash=sha256:d3945571f95292abcd20bf771b89c0790f3a819febab80336fa97d37f11ffd2f \
+    --hash=sha256:d5895100ddd2bc55cf85b0743c2c7797bd49fd0f2ff90bbdde6fb99a34cb586b \
+    --hash=sha256:d85ce6456a9fd546752e98cc81337eb8b9c22ef583d9c43eec079ed221f3c8b4 \
+    --hash=sha256:e73574775f3b34172fef0c8c04c469aff43aaa181dc27e5f6cbcc6531fe87111 \
+    --hash=sha256:e765d575792746d9c08d2f3b8daa18fbb9c921eb74e7fff52f58991688e539be
     # via
     #   jefferson
     #   ubi-reader
@@ -553,13 +560,9 @@ mdurl==0.1.2 \
     --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8 \
     --hash=sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba
     # via markdown-it-py
-plotext==6.1.0 \
-    --hash=sha256:4fec26b86ad32b3597de5861cfbf0023bb5ae02250f0ca940b12b069bccf43e6 \
-    --hash=sha256:60c85326da5454db482c9b1357c9ba385bae4a05c9dd498ff604e80458e03e3b \
-    --hash=sha256:6b729ce6376c5c1c2152fe85e0449dcc54879d0923b3c6c8d1670108245c6f84 \
-    --hash=sha256:6c035440296be20e539ee70d4de07290d84bb0c9017bb3bc5867a8b3f9cead56 \
-    --hash=sha256:bfafad58a20da6c279e722481b5c3e67a9c8c54bde722d414c5ceffe71b7c652 \
-    --hash=sha256:e59f54cedfb56129e2aec1f885869fe13903fdd4e6f18a10301e71a7d5b9851c
+plotext==5.3.2 \
+    --hash=sha256:394362349c1ddbf319548cfac17ca65e6d5dfc03200c40dfdc0503b3e95a2283 \
+    --hash=sha256:52d1e932e67c177bf357a3f0fe6ce14d1a96f7f7d5679d7b455b929df517068e
     # via unblob
 pluggy==1.7.0 \
     --hash=sha256:7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec \
@@ -1073,6 +1076,7 @@ typing-extensions==4.16.0 \
     #   mcp
     #   pydantic
     #   pydantic-core
+    #   pydantic-settings
     #   pyzstd
     #   referencing
     #   starlette

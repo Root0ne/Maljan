@@ -103,9 +103,17 @@ updates:
     groups:
       unblob-minor-and-patch:
         update-types: ["minor", "patch"]
+    # A hashed file is bumped entry by entry, without the bounds the packages
+    # that need an entry put on it: jefferson and ubi-reader take lzallright
+    # below 0.3.0, unblob takes plotext below 6.0. A bump past either leaves
+    # the image build no resolution.
     ignore:
       - dependency-name: "mcp"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "lzallright"
+        versions: [">=0.3.0"]
+      - dependency-name: "plotext"
+        versions: [">=6.0"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: "npm"
