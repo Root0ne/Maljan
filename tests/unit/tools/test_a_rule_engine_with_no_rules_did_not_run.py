@@ -350,6 +350,13 @@ class TestOnlyAHostPathIsMasked:
         said = host_paths_masked(f"read /tmp/x/rules.yml, /etc/passwd and {parent}/other/r.yml")
         assert said == f"read {OUTSIDE_PROJECT}, {OUTSIDE_PROJECT} and {OUTSIDE_PROJECT}"
 
+    def test_a_path_in_another_hosts_layout_is_masked_on_any_host(self) -> None:
+        """macOS's temporary directory resolves under /private, its users under /Users."""
+        said = host_paths_masked(
+            "read /private/var/folders/2s/xy/T/pytest-0/rules.yml and /Users/someone/r.yml"
+        )
+        assert said == f"read {OUTSIDE_PROJECT} and {OUTSIDE_PROJECT}"
+
     def test_the_words_alone_decide_never_the_host(self) -> None:
         # Under a host root, whether or not it is there; elsewhere, kept even
         # where it is there (``/proc`` is on every Linux host).

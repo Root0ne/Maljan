@@ -169,8 +169,14 @@ _ABSOLUTE_PATH = re.compile(
 # The directories a host keeps its own files under. A path that starts with one
 # of them is the host's layout; anything else that reads as one (an HTTP route,
 # ``/api/v1/jobs``) is left as written. Nothing is looked up on the host, so
-# the same words mask the same way wherever they are rendered.
-HOST_ROOTS = ("/home", "/tmp", "/opt", "/var", "/root", "/srv", "/mnt", "/media", "/usr", "/etc")
+# the same words mask the same way wherever they are rendered. The list is the
+# union of the layouts a host may have, not the running host's alone: the
+# second line is macOS's (its temporary and variable directories resolve under
+# /private, its users under /Users), so a path written there is masked too.
+HOST_ROOTS = (
+    *("/home", "/tmp", "/opt", "/var", "/root", "/srv", "/mnt", "/media", "/usr", "/etc"),
+    *("/private", "/Users", "/Volumes", "/Library", "/System", "/Applications"),
+)
 
 # What a path off the project is shown as: the host's layout is not the reader's.
 OUTSIDE_PROJECT = "a path outside the project"
