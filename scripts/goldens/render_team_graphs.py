@@ -7,7 +7,7 @@ seeded team either shows up in the diagram on the next run or fails the smoke
 test that checks the two agree.
 
 Deliberately no graphing library. A team is rows of boxes with a few
-labelled arrows, placed by ``maljan.core.team_layout`` (the layout the
+labelled arrows, placed by ``malspark.core.team_layout`` (the layout the
 console's team preview draws too), and hand-written SVG keeps the output
 diffable, dependency free and readable in both light and dark pages — the
 colours are the two the existing ``apps/docs/public/assets/architecture.svg`` uses.
@@ -54,11 +54,11 @@ def _esc(value: object) -> str:
 def render(name: str, profile: Any) -> str:
     """One team, top to bottom in run order, placed by the shared team layout.
 
-    ``maljan.core.team_layout`` decides each stage's row and column, the same
+    ``malspark.core.team_layout`` decides each stage's row and column, the same
     layout the console's team preview draws; every seeded team is one chain,
     so each is the single column this page has always shown.
     """
-    from maljan.core.team_layout import layout_team
+    from malspark.core.team_layout import layout_team
 
     layout = layout_team(list(profile.stages))
     rows = max(layout.rows, 1)
@@ -137,7 +137,7 @@ def asset_path(name: str) -> Path:
 
 def render_all() -> list[Path]:
     """Write one SVG per seeded team and return what was written."""
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     # Store-only: an operator's environment never reaches a committed asset.
     profiles = build_settings({}).agents.profiles

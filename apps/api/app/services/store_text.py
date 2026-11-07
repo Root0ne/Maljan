@@ -30,7 +30,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from maljan.utils.written_forms import pack_escaped
+from malspark.utils.written_forms import pack_escaped
 
 # The characters PostgreSQL refuses in text and jsonb: the NUL and every
 # surrogate code point (only a lone one can reach a Python ``str``).

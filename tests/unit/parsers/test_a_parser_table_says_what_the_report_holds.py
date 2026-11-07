@@ -13,9 +13,9 @@
 
 from __future__ import annotations
 
-from maljan.parsers.base_parser import BaseParser
-from maljan.parsers.dynamic_parser import DynamicParser
-from maljan.parsers.network_parser import REPUTATION_HEADING, NetworkParser
+from malspark.parsers.base_parser import BaseParser
+from malspark.parsers.dynamic_parser import DynamicParser
+from malspark.parsers.network_parser import REPUTATION_HEADING, NetworkParser
 
 # ------------------------------------------------------------- B-M2
 

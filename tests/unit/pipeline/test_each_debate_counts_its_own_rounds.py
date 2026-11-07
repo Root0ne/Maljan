@@ -14,8 +14,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from maljan.core.config import MEDIATOR_AGENT_NAME
-from maljan.pipeline.routing import (
+from malspark.core.config import MEDIATOR_AGENT_NAME
+from malspark.pipeline.routing import (
     CONVERGENCE,
     HARD_LIMIT,
     debate_rounds,
@@ -24,7 +24,7 @@ from maljan.pipeline.routing import (
     route_within_limit,
     with_debate_start,
 )
-from maljan.pipeline.state import AgentArgument
+from malspark.pipeline.state import AgentArgument
 
 
 def _mediation() -> AgentArgument:
@@ -131,9 +131,9 @@ class TestWhereADebateBeganIsRecordedOnce:
         assert "debate_starts" not in with_debate_start({}, "debate", {"is_consensus": None})
 
     def test_the_negotiation_node_writes_it(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.pipeline.nodes import make_negotiation_node
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.core.config import Settings
+        from malspark.pipeline.nodes import make_negotiation_node
+        from malspark.schemas.evidence import EvidenceCounter
         from tests.unit.pipeline.test_evidence_ledger_channel import (
             _JudgeContainer,
             _mediates_with_a_tool_call,
@@ -168,10 +168,10 @@ class TestTheSecondDebatesFirstMediationIsItsFirst:
     def test_it_is_never_checked_for_sycophancy(self) -> None:
         from unittest.mock import patch
 
-        from maljan.core.config import Settings
-        from maljan.pipeline import nodes
-        from maljan.schemas.evidence import EvidenceCounter
-        from maljan.schemas.isr_models import AgentISR
+        from malspark.core.config import Settings
+        from malspark.pipeline import nodes
+        from malspark.schemas.evidence import EvidenceCounter
+        from malspark.schemas.isr_models import AgentISR
         from tests.unit.pipeline.test_evidence_ledger_channel import (
             _JudgeContainer,
             _mediates_with_a_tool_call,

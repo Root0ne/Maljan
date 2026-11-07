@@ -31,7 +31,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from maljan.core.model_assignments import (
+from malspark.core.model_assignments import (
     ModelAssignment,
     assignment_chain_for,
     builder_role,

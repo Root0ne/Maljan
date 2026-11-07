@@ -20,8 +20,8 @@ def _accepted(field: str, value: str) -> bool:
 
 def test_the_job_accepts_exactly_the_registry_ids():
     """The job schema reads the registries; there is no copied list to fall behind."""
-    from maljan.llm.provider_base import provider_names
-    from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
+    from malspark.llm.provider_base import provider_names
+    from malspark.providers.registry import sandbox_provider_ids, static_provider_ids
 
     for field, ids in (
         ("static_provider", static_provider_ids()),
@@ -33,7 +33,7 @@ def test_the_job_accepts_exactly_the_registry_ids():
 
 
 def test_a_provider_registered_at_runtime_is_accepted_at_submit():
-    from maljan.providers import registry
+    from malspark.providers import registry
 
     @registry.register_sandbox_provider("acme-sandbox")
     class _Acme:  # noqa: B903 — a registration only needs the class
@@ -102,8 +102,8 @@ _SETTING_OF = {
 
 
 def _registered(field: str) -> list[str]:
-    from maljan.llm.provider_base import provider_names
-    from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
+    from malspark.llm.provider_base import provider_names
+    from malspark.providers.registry import sandbox_provider_ids, static_provider_ids
 
     return {
         "llm_provider": provider_names,
@@ -163,7 +163,7 @@ def test_every_id_the_job_schema_refuses_is_a_422_at_submit(client, field):
 
 
 def test_a_sandbox_registered_at_runtime_is_accepted_and_builds():
-    from maljan.providers import registry
+    from malspark.providers import registry
 
     @registry.register_sandbox_provider("acme-sandbox")
     class _Acme:  # noqa: B903 — a registration only needs the class

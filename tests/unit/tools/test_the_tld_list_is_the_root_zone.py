@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from maljan.core.paths import resolve_data
-from maljan.tools.strings import _KNOWN_TLDS, iocs_from_text, read_tld_list
+from malspark.core.paths import resolve_data
+from malspark.tools.strings import _KNOWN_TLDS, iocs_from_text, read_tld_list
 from tests.linear_cost import assert_scales
 
 
@@ -78,7 +78,7 @@ def test_the_sweep_extracts_everything_it_extracted_with_the_shorter_list() -> N
 def test_the_mailbox_reader_finds_what_the_mailbox_regex_finds() -> None:
     import random
 
-    from maljan.tools.strings import _EMAIL_RE, emails_in
+    from malspark.tools.strings import _EMAIL_RE, emails_in
 
     rng = random.Random(7)
     alphabet = b"ab.@-+_%c1 x"
@@ -90,7 +90,7 @@ def test_the_mailbox_reader_finds_what_the_mailbox_regex_finds() -> None:
 
 
 def test_the_mailbox_reader_is_linear_on_a_long_run_with_no_at() -> None:
-    from maljan.tools.strings import emails_in
+    from malspark.tools.strings import emails_in
 
     def read(count: int) -> Callable[[], None]:
         dotted, ats = b"a." * count + b"x", b"a@" * count

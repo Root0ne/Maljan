@@ -1,6 +1,6 @@
 """Read the retired ATT&CK cache-age variable once into the setting that replaced it.
 
-``MALJAN_ATTCK_MAX_AGE_DAYS`` said how many days the cached ATT&CK bundles
+``MALSPARK_ATTCK_MAX_AGE_DAYS`` said how many days the cached ATT&CK bundles
 were kept before the loader downloaded them again. The interval is the
 ``core.validation.attck_refresh_days`` setting now, edited in the console, and
 the variable is read no more.
@@ -37,13 +37,13 @@ branch_labels = None
 depends_on = None
 
 # Variable -> the settings key that now holds it, and that key's shipped value
-# (``maljan.core.settings_annotations.RETIRED_ENVIRONMENT``, copied: a revision
+# (``malspark.core.settings_annotations.RETIRED_ENVIRONMENT``, copied: a revision
 # imports no application code).
 READS: dict[str, tuple[str, int]] = {
-    "MALJAN_ATTCK_MAX_AGE_DAYS": ("core.validation.attck_refresh_days", 7),
+    "MALSPARK_ATTCK_MAX_AGE_DAYS": ("core.validation.attck_refresh_days", 7),
 }
 
-# The setting's upper bound (``maljan.core.config.ATTCK_REFRESH_DAYS_MAX``,
+# The setting's upper bound (``malspark.core.config.ATTCK_REFRESH_DAYS_MAX``,
 # derived the same way here: a revision imports no application code).
 REFRESH_DAYS_MAX = (date(9999, 12, 31) - date(2100, 1, 1)).days
 

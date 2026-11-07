@@ -21,8 +21,8 @@ import pytest
 from scripts.calibration import cases
 from scripts.calibration.cases import FORMATS, SPLITS, Entry
 
-from maljan.tools import upx
-from maljan.tools.string_blobs import decode_string_blobs
+from malspark.tools import upx
+from malspark.tools.string_blobs import decode_string_blobs
 from tests.unit.tools import synthetic_upx as su
 from tests.unit.tools.synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
 

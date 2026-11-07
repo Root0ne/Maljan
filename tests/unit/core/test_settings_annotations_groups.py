@@ -1,7 +1,7 @@
 """Task 2: the read-only group's wording reflects that it is deployment
 config, not a place any remaining application setting lives."""
 
-from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
+from malspark.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
 
 
 def test_system_group_is_titled_deployment_read_only():

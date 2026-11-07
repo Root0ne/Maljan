@@ -21,19 +21,19 @@ from typing import Any
 
 import pytest
 
-from maljan.providers.sandbox_tools import sandbox_network
-from maljan.reporting.ledger_projection import network_from_ledger
-from maljan.reporting.models import (
+from malspark.providers.sandbox_tools import sandbox_network
+from malspark.reporting.ledger_projection import network_from_ledger
+from malspark.reporting.models import (
     JudgeIndicator,
     MalwareReport,
     NetworkDomain,
     NetworkIOCs,
     NetworkIP,
 )
-from maljan.reporting.renderers.stix_renderer import emulation_kwargs, publish_answer, publishes
-from maljan.schemas.evidence import build_entry
-from maljan.schemas.isr_models import AgentISR, Artifact, ClaimEvidence
-from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+from malspark.reporting.renderers.stix_renderer import emulation_kwargs, publish_answer, publishes
+from malspark.schemas.evidence import build_entry
+from malspark.schemas.isr_models import AgentISR, Artifact, ClaimEvidence
+from malspark.schemas.sandbox_report import triage_overview_to_sandbox_report
 from tests.unit.reporting._sandbox_fact import answered_the_sandbox_fact
 
 DOC = "198.51.100.23"
@@ -132,7 +132,7 @@ class TestTheNormalisedFlowSaysWhichProcessMadeIt:
     def test_with_no_matched_format_the_reading_formats_declared_name_marks_the_row(
         self, monkeypatch: Any
     ) -> None:
-        from maljan.schemas import sandbox_report
+        from malspark.schemas import sandbox_report
 
         named = {"triage": "Triage", "acme": "AcmeBox"}
         monkeypatch.setattr(sandbox_report, "reader_display_name", lambda reader: named[reader])
@@ -154,7 +154,7 @@ class TestTheNormalisedFlowSaysWhichProcessMadeIt:
     def test_neither_reader_function_assumes_its_format_or_its_provider(self) -> None:
         import inspect
 
-        from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
+        from malspark.schemas.sandbox_report import cape_report_to_sandbox_report
 
         for function in (cape_report_to_sandbox_report, triage_overview_to_sandbox_report):
             parameters = inspect.signature(function).parameters
@@ -162,7 +162,7 @@ class TestTheNormalisedFlowSaysWhichProcessMadeIt:
                 assert parameters[name].default is inspect.Parameter.empty, (function, name)
 
     def test_the_built_in_reader_records_its_own_id(self) -> None:
-        from maljan.providers.sandbox.readers import report_reader
+        from malspark.providers.sandbox.readers import report_reader
 
         overview = {"sample": {"id": "t1", "target": "invoice.exe", "sha256": "a" * 64}}
         reader = report_reader("triage")

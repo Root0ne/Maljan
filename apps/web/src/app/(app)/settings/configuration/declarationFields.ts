@@ -1,7 +1,7 @@
 /**
  * The server editor's Declaration section: reading what an operator typed.
  *
- * A server's declaration (`maljan.core.tool_declarations`) is the facts the
+ * A server's declaration (`malspark.core.tool_declarations`) is the facts the
  * platform reads about the server and its tools instead of a table of tool
  * names. The API validates every field and answers with one message per bad
  * field, which the editor shows on the server; these readers only turn the

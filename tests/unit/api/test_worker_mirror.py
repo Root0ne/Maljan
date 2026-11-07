@@ -24,7 +24,7 @@ def test_no_mirror_when_the_provider_does_not_need_one():
 
 
 def test_the_mirror_path_comes_from_the_provider_spec():
-    from maljan.providers.base import MirrorSpec
+    from malspark.providers.base import MirrorSpec
 
     spec = MirrorSpec(work_subdir=".work", container_prefix="/data/samples")
     host, container = mirror_target_for(_Provider(True, spec), sha256="b" * 64, extension=".exe")
@@ -35,7 +35,7 @@ def test_the_mirror_path_comes_from_the_provider_spec():
 
 def test_a_ghidra_spec_still_yields_the_container_path():
     """Regression: the empty-prefix branch below must not touch this path."""
-    from maljan.providers.base import MirrorSpec
+    from malspark.providers.base import MirrorSpec
 
     spec = MirrorSpec(work_subdir=".work", container_prefix="/data/samples")
     host, container = mirror_target_for(_Provider(True, spec), sha256="d" * 64, extension=".exe")
@@ -45,7 +45,7 @@ def test_a_ghidra_spec_still_yields_the_container_path():
 def test_an_empty_container_prefix_yields_the_host_path_itself():
     """A co-located server (radare2's stdio r2mcp) has no separate container
     mount: the analyst-facing path is the same path the worker mirrored to."""
-    from maljan.providers.base import MirrorSpec
+    from malspark.providers.base import MirrorSpec
 
     spec = MirrorSpec(work_subdir=".work", container_prefix="")
     host, analyst_path = mirror_target_for(_Provider(True, spec), sha256="c" * 64, extension=".exe")
@@ -53,8 +53,8 @@ def test_an_empty_container_prefix_yields_the_host_path_itself():
 
 
 def test_the_r2_provider_gets_its_own_host_path_as_the_analyst_path():
-    from maljan.core.config import Settings
-    from maljan.providers.static.r2 import R2StaticProvider
+    from malspark.core.config import Settings
+    from malspark.providers.static.r2 import R2StaticProvider
 
     cfg = Settings(_env_file=None)
     cfg.static.provider = "r2"
@@ -76,7 +76,7 @@ def test_the_r2_provider_gets_its_own_host_path_as_the_analyst_path():
 
 def test_the_host_directory_follows_the_specs_subdirectory(tmp_path, monkeypatch):
     from app.worker import sample_files
-    from maljan.providers.base import MirrorSpec
+    from malspark.providers.base import MirrorSpec
 
     monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path))
 
@@ -95,8 +95,8 @@ def test_the_r2_mirror_path_has_no_hidden_segment(tmp_path, monkeypatch):
     """The property the live failure came down to: r2mcp refuses a path with a
     ``/.`` segment, so no part of the mirror path may be hidden."""
     from app.worker import sample_files
-    from maljan.core.config import Settings
-    from maljan.providers.static.r2 import R2StaticProvider
+    from malspark.core.config import Settings
+    from malspark.providers.static.r2 import R2StaticProvider
 
     monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path))
 
@@ -169,7 +169,7 @@ def test_two_providers_landing_on_one_host_path_still_copy_once(tmp_path, monkey
     used to cover with Ghidra and r2, before BUG 10 gave those two separate
     directories. Any pair that shares a mirror subdirectory still copies once."""
     from app.worker import analysis_worker, sample_files
-    from maljan.providers.base import MirrorSpec
+    from malspark.providers.base import MirrorSpec
 
     monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path))
     monkeypatch.setattr(analysis_worker, "profile_static_providers", lambda _c: ["one", "two"])

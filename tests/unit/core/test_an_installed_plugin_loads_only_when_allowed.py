@@ -42,13 +42,13 @@ from tests.unit._plugin_doubles import (
     withdraw_every_plugin,
 )
 
-from maljan.core import plugins
-from maljan.core.config import Settings
-from maljan.llm import registry as llm_registry
-from maljan.llm.provider_base import LLMProvider, facts_of, provider_names
-from maljan.memory import store_factory
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.providers import registry
+from malspark.core import plugins
+from malspark.core.config import Settings
+from malspark.llm import registry as llm_registry
+from malspark.llm.provider_base import LLMProvider, facts_of, provider_names
+from malspark.memory import store_factory
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.providers import registry
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -110,7 +110,7 @@ class TestNothingRunsUntilItIsAllowed:
         self, installed: dict[str, list[FakePoint]], caplog: pytest.LogCaptureFixture
     ) -> None:
         acme = FakePoint("acme", AcmeStatic)
-        other = FakePoint("other", OtherStatic, dist="maljan-other", version="0.1")
+        other = FakePoint("other", OtherStatic, dist="malspark-other", version="0.1")
         installed["static"] += [acme, other]
         with caplog.at_level(logging.INFO):
             allow("static:acme")
@@ -118,7 +118,7 @@ class TestNothingRunsUntilItIsAllowed:
         assert "acme" in ids and "other" not in ids
         assert registry.static_provider_class("acme") is AcmeStatic
         assert (acme.loads, other.loads) == (1, 0)
-        assert "Loaded plugin static:acme from maljan-acme 1.2.3." in caplog.text
+        assert "Loaded plugin static:acme from malspark-acme 1.2.3." in caplog.text
 
     def test_each_kind_loads_from_its_own_group(
         self, installed: dict[str, list[FakePoint]]
@@ -172,7 +172,7 @@ class TestDiscoveryReadsMetadataOnly:
             tmp_path,
             "acme_listed_plugin",
             "4.5.6",
-            "maljan.static_providers",
+            "malspark.static_providers",
             "acme_listed",
             f"from pathlib import Path\nPath({str(marker)!r}).write_text('yes')\n"
             "raise RuntimeError('the plugin module was imported')\n",
@@ -211,9 +211,9 @@ class TestDiscoveryReadsMetadataOnly:
             tmp_path,
             "acme_loaded_plugin",
             "1.0",
-            "maljan.static_providers",
+            "malspark.static_providers",
             "acme_loaded",
-            "from maljan.providers.base import StaticCapabilities, StaticProvider\n"
+            "from malspark.providers.base import StaticCapabilities, StaticProvider\n"
             "class Provider(StaticProvider):\n"
             "    @classmethod\n"
             "    def from_settings(cls, cfg):\n"
@@ -245,12 +245,12 @@ class TestEveryShippedProviderRegistersFirst:
             tmp_path,
             "acme_cross_plugin",
             "1.0",
-            "maljan.static_providers",
+            "malspark.static_providers",
             "acme_cross",
-            "from maljan.memory import store_factory\n"
-            "from maljan.llm.provider_base import provider_names\n"
+            "from malspark.memory import store_factory\n"
+            "from malspark.llm.provider_base import provider_names\n"
             "SEEN = {'memory': list(store_factory.memory_backends()), 'llm': provider_names()}\n"
-            "from maljan.providers.base import StaticCapabilities, StaticProvider\n"
+            "from malspark.providers.base import StaticCapabilities, StaticProvider\n"
             "class Provider(StaticProvider):\n"
             "    @classmethod\n"
             "    def from_settings(cls, cfg):\n"
@@ -261,11 +261,11 @@ class TestEveryShippedProviderRegistersFirst:
         )
         script = (
             "import json, sys\n"
-            "from maljan.core import plugins\n"
-            "assert 'maljan.memory.store_factory' not in sys.modules\n"
+            "from malspark.core import plugins\n"
+            "assert 'malspark.memory.store_factory' not in sys.modules\n"
             "plugins.load_allowed(['static:acme_cross'], ('static',))\n"
             "import acme_cross_plugin\n"
-            "from maljan.memory import store_factory\n"
+            "from malspark.memory import store_factory\n"
             "print(json.dumps({'state': plugins.records('static')['acme_cross'].state,\n"
             "  'error': plugins.records('static')['acme_cross'].error,\n"
             "  'seen': acme_cross_plugin.SEEN,\n"
@@ -360,7 +360,7 @@ class TestABuiltInIdAlwaysWins:
     def test_two_packages_declaring_one_name_are_both_refused_with_that_cause(
         self, installed: dict[str, list[FakePoint]]
     ) -> None:
-        first = FakePoint("acme", AcmeStatic, dist="maljan-acme", version="1.0")
+        first = FakePoint("acme", AcmeStatic, dist="malspark-acme", version="1.0")
         second = FakePoint("acme", OtherStatic, dist="acme-fork", version="2.0")
         installed["static"] += [first, second]
         allow("static:acme")
@@ -368,7 +368,7 @@ class TestABuiltInIdAlwaysWins:
         assert (first.loads, second.loads) == (0, 0)
         assert "two installed packages declare it" in plugins.records("static")["acme"].error
         refused = plugins.id_refusal("static", "acme", ["static:acme"])
-        assert "two installed packages declare it (acme-fork 2.0 and maljan-acme 1.0)" in refused
+        assert "two installed packages declare it (acme-fork 2.0 and malspark-acme 1.0)" in refused
         assert "accepted once" not in refused
 
 
@@ -377,7 +377,7 @@ class TestABrokenPluginIsReportedAndLeftOut:
         self, installed: dict[str, list[FakePoint]], caplog: pytest.LogCaptureFixture
     ) -> None:
         installed["static"] += [
-            FakePoint("broken", ImportError("acme_sdk is not installed"), dist="maljan-broken"),
+            FakePoint("broken", ImportError("acme_sdk is not installed"), dist="malspark-broken"),
             FakePoint("acme", AcmeStatic),
         ]
         with caplog.at_level(logging.WARNING):
@@ -385,7 +385,7 @@ class TestABrokenPluginIsReportedAndLeftOut:
         ids = registry.static_provider_ids()
         assert "acme" in ids and "broken" not in ids
         assert plugins.failures("static") == {"broken": "ImportError: acme_sdk is not installed"}
-        assert "static:broken from maljan-broken 1.2.3 failed to load" in caplog.text
+        assert "static:broken from malspark-broken 1.2.3 failed to load" in caplog.text
         static = next(kind for kind in plugins.listing() if kind["kind"] == "static")
         rows = {row["name"]: row for row in static["plugins"]}
         assert (rows["broken"]["state"], rows["broken"]["process_state"]) == ("allowed", "failed")
@@ -415,10 +415,10 @@ class TestABrokenPluginIsReportedAndLeftOut:
     @pytest.mark.parametrize(
         ("kind", "provides", "said"),
         [
-            ("static", NotAProvider, "not a subclass of maljan.providers.base.StaticProvider"),
+            ("static", NotAProvider, "not a subclass of malspark.providers.base.StaticProvider"),
             ("static", HalfStatic, "leaves abstract methods unwritten (capabilities)"),
-            ("sandbox", AcmeStatic, "not a subclass of maljan.providers.base.SandboxProvider"),
-            ("llm", NotAProvider, "not a subclass of maljan.llm.provider_base.LLMProvider"),
+            ("sandbox", AcmeStatic, "not a subclass of malspark.providers.base.SandboxProvider"),
+            ("llm", NotAProvider, "not a subclass of malspark.llm.provider_base.LLMProvider"),
             ("llm", LLMProvider, "has no build_model method"),
             ("memory", "a string", "which is not callable"),
             ("memory", lambda: None, "registered no memory backend named 'acme'"),
@@ -446,8 +446,8 @@ class TestABrokenPluginIsReportedAndLeftOut:
     def test_a_job_naming_a_failed_plugin_says_why(
         self, installed: dict[str, list[FakePoint]]
     ) -> None:
-        from maljan.core.exceptions import LLMError
-        from maljan.providers.errors import ProviderConfigurationError
+        from malspark.core.exceptions import LLMError
+        from malspark.providers.errors import ProviderConfigurationError
 
         installed["static"].append(FakePoint("broken", ImportError("no sdk")))
         installed["llm"].append(FakePoint("broken_llm", ImportError("no client")))
@@ -492,13 +492,13 @@ class TestAMemoryPluginNotAllowed:
         self, installed: dict[str, list[FakePoint]]
     ) -> None:
         installed["memory"].append(
-            FakePoint("VectorHub", memory_plugin("vectorhub"), dist="maljan-vectorhub")
+            FakePoint("VectorHub", memory_plugin("vectorhub"), dist="malspark-vectorhub")
         )
         cfg = Settings(_env_file=None, memory={"backend": "vectorhub"})
         with pytest.raises(store_factory.MemoryBackendNotConfiguredError) as missing:
             store_factory.build_memory_store(cfg)
         assert missing.value.unavailable is True
-        assert "the installed memory plugins are VectorHub (maljan-vectorhub 1.2.3)" in (
+        assert "the installed memory plugins are VectorHub (malspark-vectorhub 1.2.3)" in (
             missing.value.reason
         )
         assert "must be the backend id it registers" in missing.value.reason
@@ -621,7 +621,7 @@ class TestACheckOfAnLLMPluginsOwnFactsWaitsForItsLoad:
     def test_a_per_agent_address_and_effort_are_judged_where_the_plugin_is_loaded(
         self, installed: dict[str, list[FakePoint]]
     ) -> None:
-        from maljan.core.config import ModelChoice
+        from malspark.core.config import ModelChoice
 
         installed["llm"].append(FakePoint("acme_llm", llm_with_block("acme_llm")))
         choice = {
@@ -642,7 +642,7 @@ class TestACheckOfAnLLMPluginsOwnFactsWaitsForItsLoad:
             ModelChoice.model_validate({**choice, "base_url": None})
 
     def test_an_id_no_package_declares_is_judged_at_once(self) -> None:
-        from maljan.core.config import ModelChoice
+        from malspark.core.config import ModelChoice
 
         with pytest.raises(ValidationError, match="base_url is only supported"):
             ModelChoice.model_validate(

@@ -17,26 +17,26 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.core.declared_reading import FACTS_VERSION, SERVED_CLAIMS_KEY, SERVED_KEY
-from maljan.reporting.ledger_report import (
+from malspark.core.declared_reading import FACTS_VERSION, SERVED_CLAIMS_KEY, SERVED_KEY
+from malspark.reporting.ledger_report import (
     RULE_MATCHES_TITLE,
     TOOL_COLUMN,
     build_sections,
     rule_table_tools,
     section_key_of_kind,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     EvidenceIndexRow,
     EvidenceSection,
     FileHashes,
     MalwareReport,
     SampleIdentity,
 )
-from maljan.reporting.narrative_agent import rule_pointer
-from maljan.reporting.renderers.markdown import _capability_tool
-from maljan.reporting.renderers.stix_renderer import emulation_record
-from maljan.reporting.run_diff import RunRecord, diff_runs
-from maljan.schemas.evidence import build_entry
+from malspark.reporting.narrative_agent import rule_pointer
+from malspark.reporting.renderers.markdown import _capability_tool
+from malspark.reporting.renderers.stix_renderer import emulation_record
+from malspark.reporting.run_diff import RunRecord, diff_runs
+from malspark.schemas.evidence import build_entry
 
 SIGNATURES = section_key_of_kind("signature_rules")
 

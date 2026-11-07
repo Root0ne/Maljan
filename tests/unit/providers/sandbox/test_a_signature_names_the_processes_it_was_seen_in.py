@@ -11,19 +11,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.core.report_mapping import RestMappingConfig
-from maljan.pipeline.triage_pack import _SANDBOX_VIEWS
-from maljan.providers.sandbox.rest_mapping import apply_mapping, compile_mapping
-from maljan.providers.sandbox_tools import SIGNATURE_PIDS_SHOWN, sandbox_signatures
-from maljan.reporting.dedupe import distinct_signatures
-from maljan.reporting.ledger_projection import dynamic_from_ledger
-from maljan.reporting.ledger_report import SIGNATURE_PROCESSES_COLUMN, build_sections
-from maljan.reporting.models import SandboxSignature
-from maljan.reporting.narrative_agent import build_prompt_text
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.schemas.sandbox_document import pid_of, sandbox_document, signature_pids
-from maljan.schemas.sandbox_report import SandboxSignatureRow, triage_overview_to_sandbox_report
+from malspark.core.report_mapping import RestMappingConfig
+from malspark.pipeline.triage_pack import _SANDBOX_VIEWS
+from malspark.providers.sandbox.rest_mapping import apply_mapping, compile_mapping
+from malspark.providers.sandbox_tools import SIGNATURE_PIDS_SHOWN, sandbox_signatures
+from malspark.reporting.dedupe import distinct_signatures
+from malspark.reporting.ledger_projection import dynamic_from_ledger
+from malspark.reporting.ledger_report import SIGNATURE_PROCESSES_COLUMN, build_sections
+from malspark.reporting.models import SandboxSignature
+from malspark.reporting.narrative_agent import build_prompt_text
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.schemas.sandbox_document import pid_of, sandbox_document, signature_pids
+from malspark.schemas.sandbox_report import SandboxSignatureRow, triage_overview_to_sandbox_report
 from tests.unit._ledger_helpers import entry
 from tests.unit.reporting._report_shapes import rich_report
 

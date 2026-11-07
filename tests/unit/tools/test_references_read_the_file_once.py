@@ -17,8 +17,8 @@ import struct
 import numpy as np
 import pytest
 
-from maljan.tools import pe_image
-from maljan.tools.pe_image import Image, Section
+from malspark.tools import pe_image
+from malspark.tools.pe_image import Image, Section
 
 
 def _old_references(image: Image, targets: set[int]) -> dict[int, list[int]]:

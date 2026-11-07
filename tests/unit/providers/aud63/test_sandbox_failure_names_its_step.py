@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
-from maljan.core.exceptions import SandboxError
+from malspark.core.exceptions import SandboxError
 from tests.unit.pipeline.test_a_sandbox_failure_states_its_reason import _app, _sample
 from tests.unit.test_sandbox_container import _StubProvider
 
@@ -35,7 +35,7 @@ def test_the_same_error_reads_differently_by_step(tmp_path: Path) -> None:
 
 
 def test_a_secret_query_parameter_is_masked():
-    from maljan.core.settings_overrides import redact_url
+    from malspark.core.settings_overrides import redact_url
 
     out = redact_url("failed: https://h/x?a=1&api_key=SECRET&b=2 and https://h/y?token=T")
     assert "SECRET" not in out and "=T" not in out.replace("token=***", "")
@@ -45,7 +45,7 @@ def test_a_secret_query_parameter_is_masked():
 def test_a_failure_before_the_submission_is_not_called_reading_a_report(
     tmp_path: Path, monkeypatch
 ) -> None:
-    import maljan.analysis.disclosure as disclosure
+    import malspark.analysis.disclosure as disclosure
 
     def broken(provider: Any) -> Any:
         raise RuntimeError("no host")
@@ -56,7 +56,7 @@ def test_a_failure_before_the_submission_is_not_called_reading_a_report(
 
 
 def test_only_secret_named_parameters_in_a_url_are_masked():
-    from maljan.core.settings_overrides import redact_url
+    from malspark.core.settings_overrides import redact_url
 
     kept = "https://h/x?design=1&keyword=2&monkey=3&author=4"
     assert redact_url(kept) == kept

@@ -20,8 +20,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.pipeline import nodes
-from maljan.pipeline.nodes import _build_revision_context, _revision_input_is_absent
+from malspark.pipeline import nodes
+from malspark.pipeline.nodes import _build_revision_context, _revision_input_is_absent
 from tests.unit._chunking_doubles import _container
 
 PLACEHOLDER = "No {role} data available for sample abc."

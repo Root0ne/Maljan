@@ -13,9 +13,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from app.api.v1.reports import get_full_malware_report
-from maljan.reporting.models import EvidenceIndexRow, EvidenceSection
-from maljan.reporting.section_servers import index_of, source_server, with_source_servers
-from maljan.reporting.section_tabs import section_tabs
+from malspark.reporting.models import EvidenceIndexRow, EvidenceSection
+from malspark.reporting.section_servers import index_of, source_server, with_source_servers
+from malspark.reporting.section_tabs import section_tabs
 
 
 def _rows() -> list[dict]:

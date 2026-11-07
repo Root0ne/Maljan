@@ -12,8 +12,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from maljan.core.agent_category import CATEGORY_REQUIRED, fitting_category
-from maljan.core.config import (
+from malspark.core.agent_category import CATEGORY_REQUIRED, fitting_category
+from malspark.core.config import (
     AGENT_KEY_PATTERN,
     ALWAYS_ENABLED_AGENTS,
     PROMPT_ROLES,
@@ -27,10 +27,10 @@ from maljan.core.config import (
     convert_builtin_profile_document,
     with_the_role_seed_tools,
 )
-from maljan.core.settings_overrides import build_settings
-from maljan.core.team_layout import layout_team
-from maljan.core.team_lint import TeamFinding, lint_team, lint_teams, team_stages
-from maljan.providers.base import NO_STATIC_PROVIDER
+from malspark.core.settings_overrides import build_settings
+from malspark.core.team_layout import layout_team
+from malspark.core.team_lint import TeamFinding, lint_team, lint_teams, team_stages
+from malspark.providers.base import NO_STATIC_PROVIDER
 from pydantic import ValidationError
 
 AGENT_DEFINITIONS_KEY = "core.agents.definitions"
@@ -128,7 +128,7 @@ def validate_definitions(
 
     ``plugins_allowed`` is the plugin allow-list the save leaves in force: a
     static provider id is a shipped one or an installed plugin it names, read
-    from package metadata (``maljan.core.plugins.id_refusal``), never what
+    from package metadata (``malspark.core.plugins.id_refusal``), never what
     the API process has loaded.
 
     ``stored_keys`` are the definitions already stored. Any other definition
@@ -136,7 +136,7 @@ def validate_definitions(
     (``core.agent_category``); a stored one that names none reads the one its
     role and tools fit, as the settings model reads it.
     """
-    from maljan.core.plugins import id_refusal, shipped_ids
+    from malspark.core.plugins import id_refusal, shipped_ids
 
     if not isinstance(value, dict):
         raise AgentMapError(
@@ -348,7 +348,7 @@ def validate_profiles(
 ) -> dict[str, Any]:
     """Return the profile map to store, or raise with one message per offender.
 
-    Every refusal is a team-lint error (``maljan.core.team_lint``), keyed by
+    Every refusal is a team-lint error (``malspark.core.team_lint``), keyed by
     the path the editor routes it to. The lint reads its errors off the same
     functions the settings model raises from, so the preview the console shows
     while a team is edited and what this refuses are one set of sentences.
@@ -364,7 +364,7 @@ def validate_profiles(
     team's static provider is judged as a definition's is
     (:func:`validate_definitions`).
     """
-    from maljan.core.plugins import id_refusal, shipped_ids
+    from malspark.core.plugins import id_refusal, shipped_ids
 
     if not isinstance(value, dict):
         raise AgentMapError(
@@ -744,11 +744,11 @@ def _validate_agent_map(changes: dict[str, Any], stored: dict[str, Any]) -> dict
 def prompt_tool_warnings(settings: Any) -> dict[str, str]:
     """Agents whose own prompt names a tool they do not hold, keyed by definition path.
 
-    Advisory only (`maljan.agents.prompt_tools`): a prompt written against
+    Advisory only (`malspark.agents.prompt_tools`): a prompt written against
     last week's tool servers is still a legal thing to save. Read from the
     declarations, so no server is opened. Never raises.
     """
-    from maljan.agents.prompt_tools import warnings_for_settings
+    from malspark.agents.prompt_tools import warnings_for_settings
 
     try:
         return {

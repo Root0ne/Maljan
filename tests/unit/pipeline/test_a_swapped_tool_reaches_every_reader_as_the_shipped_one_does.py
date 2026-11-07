@@ -19,14 +19,14 @@ from typing import Any
 
 import pytest
 
-from maljan.core import config as config_module
-from maljan.core import declared_reading
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.core.pack_steps import effective_steps, runs_shipped
-from maljan.pipeline import function_claims, triage_pack
-from maljan.pipeline.triage_pack import PIPELINE, ServerAnswer
-from maljan.schemas.evidence import LedgerEntry
-from maljan.tools import artefact_index
+from malspark.core import config as config_module
+from malspark.core import declared_reading
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.core.pack_steps import effective_steps, runs_shipped
+from malspark.pipeline import function_claims, triage_pack
+from malspark.pipeline.triage_pack import PIPELINE, ServerAnswer
+from malspark.schemas.evidence import LedgerEntry
+from malspark.tools import artefact_index
 
 from .test_the_pack_runs_its_declared_steps import (
     RULEMATCH,

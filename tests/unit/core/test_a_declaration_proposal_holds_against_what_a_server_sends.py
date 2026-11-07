@@ -15,8 +15,8 @@ from typing import Any
 
 import pytest
 
-import maljan.core.declaration_proposals as proposals_module
-from maljan.core.declaration_proposals import (
+import malspark.core.declaration_proposals as proposals_module
+from malspark.core.declaration_proposals import (
     READ_DEPTH,
     ProbeCall,
     auto_name_prefixes_in,
@@ -403,7 +403,7 @@ def test_the_harmless_values_name_no_sample() -> None:
         {"readOnlyHint": True},
     )
     assert call is not None
-    assert call.arguments["path"].startswith("/nonexistent-maljan-probe/")
+    assert call.arguments["path"].startswith("/nonexistent-malspark-probe/")
     assert call.arguments["path"] == call.bogus_path
     assert call.arguments["md5"] == "d41d8cd98f00b204e9800998ecf8427e"
     assert call.arguments["ip"] == "192.0.2.1"
@@ -432,7 +432,7 @@ def test_the_server_proposals_list_the_planned_calls() -> None:
     assert [call["tool"] for call in result["planned"]] == ["read_it"]
 
 
-BOGUS = "/nonexistent-maljan-probe/x/missing.bin"
+BOGUS = "/nonexistent-malspark-probe/x/missing.bin"
 
 
 def test_a_prose_answer_full_of_pattern_characters_becomes_its_own_full_match() -> None:
@@ -440,7 +440,7 @@ def test_a_prose_answer_full_of_pattern_characters_becomes_its_own_full_match() 
     text = f"Error (code 2): can't read [{BOGUS}] -- *.bin? ^$|+{{3}}\\"
     found = error_pattern_from(call, text)
     assert found is not None and found.confidence == "medium"
-    from maljan.core.tool_declarations import ErrorPattern
+    from malspark.core.tool_declarations import ErrorPattern
 
     pattern = ErrorPattern.model_validate(found.value)
     assert pattern.matches("t", text)
@@ -457,7 +457,7 @@ def test_an_answer_that_does_not_name_the_path_is_a_low_confidence_pattern() -> 
 
 
 def test_a_line_longer_than_a_kept_output_proposes_no_pattern() -> None:
-    from maljan.schemas.tool_evidence import MAX_OUTPUT_CHARS
+    from malspark.schemas.tool_evidence import MAX_OUTPUT_CHARS
 
     call = ProbeCall(tool="t", arguments={"path": BOGUS}, bogus_path=BOGUS)
     assert error_pattern_from(call, f"cannot open {BOGUS} " + "x" * MAX_OUTPUT_CHARS) is None

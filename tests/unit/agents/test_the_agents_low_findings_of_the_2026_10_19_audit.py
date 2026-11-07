@@ -19,21 +19,21 @@ import httpx
 import openai
 from langchain_core.messages import AIMessage
 
-from maljan.agents import base_agent
-from maljan.agents.delegation import _hand_over_the_structured_channel
-from maljan.agents.dynamic_analyst import DynamicAnalyst
-from maljan.agents.evidence_recorder import seeded_repeat_guard
-from maljan.agents.findings_block import parse_findings_block
-from maljan.agents.function_map import Artefact, FunctionMap, MapEntry, function_map_block
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.agents.network_analyst import NetworkAnalyst
-from maljan.agents.output_shortening import shorten_json_document
-from maljan.agents.repeat_watch import _Claims, _Seen
-from maljan.agents.static_analyst import StaticAnalyst
-from maljan.agents.tool_fence import excerpt_view, fenced_text
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.schemas.evidence import build_entry
-from maljan.schemas.isr_models import AgentISR, Artifact, Finding
+from malspark.agents import base_agent
+from malspark.agents.delegation import _hand_over_the_structured_channel
+from malspark.agents.dynamic_analyst import DynamicAnalyst
+from malspark.agents.evidence_recorder import seeded_repeat_guard
+from malspark.agents.findings_block import parse_findings_block
+from malspark.agents.function_map import Artefact, FunctionMap, MapEntry, function_map_block
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.agents.network_analyst import NetworkAnalyst
+from malspark.agents.output_shortening import shorten_json_document
+from malspark.agents.repeat_watch import _Claims, _Seen
+from malspark.agents.static_analyst import StaticAnalyst
+from malspark.agents.tool_fence import excerpt_view, fenced_text
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.schemas.evidence import build_entry
+from malspark.schemas.isr_models import AgentISR, Artifact, Finding
 from tests.unit.agents.test_a_capped_lead_keeps_the_answers import (
     LEAD_REPORT,
     _lead,
@@ -233,7 +233,7 @@ class TestEr3AChunkSeedIsSettledAndNotWrittenOver:
 class TestRw1TheReaderIsLinearInTheClaims:
     @staticmethod
     def _seconds(claims: int) -> float:
-        from maljan.agents.repeat_watch import ClaimRepeatReader
+        from malspark.agents.repeat_watch import ClaimRepeatReader
 
         text = "".join(f"CLAIM: c{i}\n---\n```json\n{{}}\n```\n" for i in range(claims))
         started = time.thread_time()
@@ -332,30 +332,32 @@ class TestAgL3FindingsDoNotLandOnAnEndedCaller:
 
 class TestAgL4ABlockCutBeforeItsFenceIsCounted:
     def test_a_cut_block_is_dropped_counted_and_out_of_the_prose(self) -> None:
-        text = 'prose\n\n```maljan-findings\n{"findings": [{"title": "cut'
+        text = 'prose\n\n```malspark-findings\n{"findings": [{"title": "cut'
         block = parse_findings_block(text)
         assert block.dropped == 1
         assert block.prose == "prose"
 
     def test_a_whole_object_missing_only_its_fence_is_read(self) -> None:
-        text = 'prose\n\n```maljan-findings\n{"findings": [{"title": "kept"}]}\n'
+        text = 'prose\n\n```malspark-findings\n{"findings": [{"title": "kept"}]}\n'
         block = parse_findings_block(text)
         assert [f.title for f in block.findings] == ["kept"]
         assert block.prose == "prose"
 
     def test_a_claim_after_an_unclosed_fence_survives(self) -> None:
         text = (
-            "Summary.\n\n```maljan-findings\n"
+            "Summary.\n\n```malspark-findings\n"
             '{"findings": [{"title": "kept"}]}\n\n'
             "CLAIM: Encrypts files\nEVIDENCE: ev_0001\nCONFIDENCE: 0.8\n"
         )
         block = parse_findings_block(text)
         assert [f.title for f in block.findings] == ["kept"]
         assert "CLAIM: Encrypts files" in block.prose
-        assert "maljan-findings" not in block.prose
+        assert "malspark-findings" not in block.prose
 
     def test_a_claim_after_an_unreadable_unclosed_fence_survives(self) -> None:
-        text = "Summary.\n\n```maljan-findings\n{broken\nCLAIM: Encrypts files\nEVIDENCE: ev_0001\n"
+        text = (
+            "Summary.\n\n```malspark-findings\n{broken\nCLAIM: Encrypts files\nEVIDENCE: ev_0001\n"
+        )
         block = parse_findings_block(text)
         assert block.dropped == 1
         assert "CLAIM: Encrypts files" in block.prose
@@ -433,10 +435,10 @@ class TestF11L1bChatTemplateDelimitersAreWrittenOut:
     def test_text_without_such_a_token_is_unchanged(self) -> None:
         plain = "a < b | c > d <<x>> \\ path\\to"
         assert excerpt_view(plain) == excerpt_view(plain)
-        from maljan.utils.written_forms import pack_escaped
+        from malspark.utils.written_forms import pack_escaped
 
         assert excerpt_view(plain) == f'"{pack_escaped(plain)}"'
         body = fenced_text("sum", plain).split("\n", 1)[1].rsplit("\n", 1)[0]
-        from maljan.agents.tool_fence import escaped
+        from malspark.agents.tool_fence import escaped
 
         assert body == escaped(plain)

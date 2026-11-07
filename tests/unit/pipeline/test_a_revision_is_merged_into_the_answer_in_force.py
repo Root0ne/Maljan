@@ -17,11 +17,11 @@ import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.base_agent import read_claim_blocks
-from maljan.pipeline.nodes import make_revision_node
-from maljan.pipeline.revision_merge import merge_revision
-from maljan.pipeline.validation import claim_block_indexes
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, claim_summary_line
+from malspark.agents.base_agent import read_claim_blocks
+from malspark.pipeline.nodes import make_revision_node
+from malspark.pipeline.revision_merge import merge_revision
+from malspark.pipeline.validation import claim_block_indexes
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, claim_summary_line
 
 
 def _block(sentence: str, technique: str = "NONE", number: int | None = None) -> str:
@@ -433,7 +433,7 @@ class TestAContestedClaimLeftUnansweredIsNamed:
         assert merge.withdrawn_by_rule == ()
 
     def test_the_lines_name_claims_by_name_by_field_and_by_short_form(self) -> None:
-        from maljan.pipeline.debate_facts import claims_named_by_lines
+        from malspark.pipeline.debate_facts import claims_named_by_lines
 
         names = ["static", "all_tools_static_r2", "all_tools_reverser_ghidra", "dynamic"]
         lines = [
@@ -455,8 +455,8 @@ class TestAContestedClaimLeftUnansweredIsNamed:
         assert "dynamic" not in named
 
     def test_the_node_withdraws_by_rule_and_records_the_values(self) -> None:
-        from maljan.core.config import MEDIATOR_AGENT_NAME
-        from maljan.pipeline.state import AgentArgument
+        from malspark.core.config import MEDIATOR_AGENT_NAME
+        from malspark.pipeline.state import AgentArgument
 
         answer = _block(MUTEX)
         container = MagicMock()
@@ -532,7 +532,7 @@ class TestAShortFormNamesOneAnalystOnly:
     )
 
     def _named(self, line: str) -> dict[str, Any]:
-        from maljan.pipeline.debate_facts import claims_named_by_lines
+        from malspark.pipeline.debate_facts import claims_named_by_lines
 
         return {
             name: sorted(claims)
@@ -582,7 +582,7 @@ def _carried_claim() -> ClaimEvidence:
 
 class TestACarriedClaimSaysSoOnEverySurface:
     def test_the_event_payload_carries_it(self) -> None:
-        from maljan.pipeline.events import claims_to_payload
+        from malspark.pipeline.events import claims_to_payload
 
         [row] = claims_to_payload([_carried_claim()])
 
@@ -590,7 +590,7 @@ class TestACarriedClaimSaysSoOnEverySurface:
         assert row["carried_note"].endswith("contested by L3 (round 2) and not answered")
 
     def test_an_unmarked_claim_s_payload_is_unchanged(self) -> None:
-        from maljan.pipeline.events import claims_to_payload
+        from malspark.pipeline.events import claims_to_payload
 
         claim = ClaimEvidence(claim="A.", evidence_ref="[ev_0001]", confidence=0.5)
 
@@ -604,7 +604,7 @@ class TestACarriedClaimSaysSoOnEverySurface:
     def test_the_upstream_findings_carry_it(self) -> None:
         from types import SimpleNamespace
 
-        from maljan.pipeline.nodes import upstream_findings
+        from malspark.pipeline.nodes import upstream_findings
 
         container = MagicMock()
         container.active_profile.return_value = SimpleNamespace(
@@ -619,7 +619,7 @@ class TestACarriedClaimSaysSoOnEverySurface:
         assert "carried forward: the round-2 revision" in text
 
     def test_the_claims_in_force_carry_the_round_for_the_report(self) -> None:
-        from maljan.reporting.claim_coverage import claims_in_force
+        from malspark.reporting.claim_coverage import claims_in_force
 
         isr = AgentISR(agent_id="static", domain="static", claims=[_carried_claim()])
 
@@ -630,9 +630,9 @@ class TestACarriedClaimSaysSoOnEverySurface:
 
 class TestTheReportCountsCarriedClaims:
     def test_carried_claims_are_one_count_line_per_analyst_and_others_are_listed(self) -> None:
-        from maljan.reporting.claim_coverage import claims_not_discussed
-        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.claim_coverage import claims_not_discussed
+        from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         own = ClaimEvidence(
             claim="Routine 0x33ac copies the file.", evidence_ref="[ev_0004]", confidence=0.7
@@ -661,7 +661,7 @@ class TestTheReportCountsCarriedClaims:
         )
 
     def test_a_technique_only_carried_claims_name_says_so_in_the_matrix(self) -> None:
-        from maljan.extractors.capability_matrix import build_capability_matrix
+        from malspark.extractors.capability_matrix import build_capability_matrix
 
         claim = ClaimEvidence(
             claim="Persists through the Run key.",

@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from maljan.reporting.renderers import markdown as md
+from malspark.reporting.renderers import markdown as md
 
 
 @pytest.mark.parametrize(

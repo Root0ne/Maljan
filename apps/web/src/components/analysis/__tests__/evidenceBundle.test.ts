@@ -13,6 +13,7 @@ import {
   type EvidenceBundle,
 } from "../evidenceBundle";
 import { recordsForwardHref } from "../overview";
+import { PREVIOUS_NAME_FORMAT_PREFIX } from "@/lib/previousName";
 
 /**
  * The evidence bundle as the Evidence tab reads it: with the anchors the
@@ -57,6 +58,12 @@ describe("reading the served bundle", () => {
     expect(b.notes.map((n) => n.anchor)).toEqual(["cite-1", "cite-2"]);
     expect(b.evidence_index).toHaveLength(4);
     expect(b.sections.map((s) => s.anchor)).toContain(INDEX_ANCHOR);
+  });
+
+  it("reads a bundle stored before the rename as the same format", () => {
+    const stored = { ...BODY, format: `${PREVIOUS_NAME_FORMAT_PREFIX}evidence-bundle/1` };
+    expect(readBundle(JSON.stringify(stored))).toEqual(readBundle(JSON.stringify(BODY)));
+    expect(readBundle(JSON.stringify({ ...BODY, format: `${PREVIOUS_NAME_FORMAT_PREFIX}evidence-bundle/2` }))).toHaveProperty("problem");
   });
 
   it("refuses another format by name, and a body that is not JSON", () => {

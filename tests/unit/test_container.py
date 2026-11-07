@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.core.exceptions import ConfigurationError
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.core.exceptions import ConfigurationError
 
 
 class TestServiceContainer:
@@ -122,7 +122,7 @@ class TestJudgePerAgentOverride:
         return container
 
     def test_a_judge_override_is_built_through_the_per_agent_path(self) -> None:
-        from maljan.core.config import AgentLLMConfig
+        from malspark.core.config import AgentLLMConfig
 
         config = Settings()
         config.llm.judge_max_tokens = 2048
@@ -156,7 +156,7 @@ class TestJudgePerAgentOverride:
         )
 
     def test_the_judge_token_cap_is_derived_from_the_window_when_unset(self) -> None:
-        from maljan.llm.context_window import output_cap_for
+        from malspark.llm.context_window import output_cap_for
 
         config = Settings()
         config.llm.judge_max_tokens = 0
@@ -185,7 +185,7 @@ class TestTheCapAModelWasBuiltWithIsKeptOnIt:
         return container
 
     def test_an_analyst_s_model_carries_the_cap_it_was_built_with(self) -> None:
-        from maljan.llm.context_window import built_output_cap
+        from malspark.llm.context_window import built_output_cap
 
         config = Settings()
         config.llm.expert_max_tokens = 12_345
@@ -201,7 +201,7 @@ class TestTheCapAModelWasBuiltWithIsKeptOnIt:
         assert "llm.expert_max_tokens is set to 12345" in cap.sentence
 
     def test_the_mediator_and_judge_models_carry_theirs(self) -> None:
-        from maljan.llm.context_window import built_output_cap
+        from malspark.llm.context_window import built_output_cap
 
         config = Settings()
         config.llm.expert_max_tokens = 3_000

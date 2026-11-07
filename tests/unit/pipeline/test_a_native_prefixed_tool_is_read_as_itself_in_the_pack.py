@@ -13,14 +13,14 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.core.config import Settings
-from maljan.core.declared_reading import FACTS_VERSION
-from maljan.core.pack_steps import PackStep
-from maljan.core.tool_declarations import ToolDeclarations
-from maljan.pipeline import nodes, triage_pack
-from maljan.pipeline.triage_pack import PIPELINE, ServerAnswer
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.core.config import Settings
+from malspark.core.declared_reading import FACTS_VERSION
+from malspark.core.pack_steps import PackStep
+from malspark.core.tool_declarations import ToolDeclarations
+from malspark.pipeline import nodes, triage_pack
+from malspark.pipeline.triage_pack import PIPELINE, ServerAnswer
+from malspark.schemas.evidence import EvidenceCounter
 
 HASH = "b" * 64
 
@@ -53,7 +53,7 @@ def _settings() -> Settings:
 def held(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, bool]]:
     """The declarations in force, and every read of them as ``(tool name, exact)``."""
     declared = ToolDeclarations.from_settings(_settings())
-    monkeypatch.setattr("maljan.core.declared_reading.declarations", lambda *_a, **_k: declared)
+    monkeypatch.setattr("malspark.core.declared_reading.declarations", lambda *_a, **_k: declared)
     seen: list[tuple[str, bool]] = []
     real = ToolDeclarations.declaration_for
 

@@ -48,9 +48,9 @@ from app.deps import require_active_user, require_admin
 from app.models.user import UserRole
 from app.services import plugins as api_plugins
 from app.services import settings_service as svc
-from maljan.core import plugins
-from maljan.core.config import Settings
-from maljan.providers import registry
+from malspark.core import plugins
+from malspark.core.config import Settings
+from malspark.providers import registry
 
 ADMIN_ID = "00000000-0000-0000-0000-000000000001"
 
@@ -99,7 +99,7 @@ class TestTheListingRoute:
     def test_each_kind_is_listed_from_metadata_and_nothing_is_imported(
         self, installed: dict[str, list[FakePoint]]
     ) -> None:
-        point = FakePoint("acme", AcmeStatic, dist="maljan-acme", version="1.2.3")
+        point = FakePoint("acme", AcmeStatic, dist="malspark-acme", version="1.2.3")
         installed["static"].append(point)
         with _stored({}):
             r = TestClient(_app()).get("/api/v1/settings/plugins")
@@ -108,12 +108,12 @@ class TestTheListingRoute:
         assert body["allow_list_key"] == "core.plugins.allowed"
         assert [kind["kind"] for kind in body["kinds"]] == ["llm", "static", "sandbox", "memory"]
         static = body["kinds"][1]
-        assert static["group"] == "maljan.static_providers"
+        assert static["group"] == "malspark.static_providers"
         assert static["plugins"] == [
             {
                 "name": "acme",
                 "entry": "static:acme",
-                "distribution": "maljan-acme",
+                "distribution": "malspark-acme",
                 "version": "1.2.3",
                 "allowed": False,
                 "state": "not_allowed",
@@ -287,7 +287,7 @@ class TestSavingAProviderId:
         self, installed: dict[str, list[FakePoint]]
     ) -> None:
         installed["static"] += [
-            FakePoint("acme_static", AcmeStatic, dist="maljan-acme"),
+            FakePoint("acme_static", AcmeStatic, dist="malspark-acme"),
             FakePoint("acme_static", AcmeStatic, dist="acme-fork"),
         ]
         stored = {"core.plugins.allowed": ["static:acme_static"]}
@@ -407,10 +407,10 @@ def _what_the_worker_builds(kind: str, built: Any) -> Any:
     if kind == "sandbox":
         return registry.get_sandbox_provider(built)
     if kind == "llm":
-        from maljan.llm.registry import LLMProviderRegistry
+        from malspark.llm.registry import LLMProviderRegistry
 
         return LLMProviderRegistry(built).build_model("expert")
-    from maljan.memory.store_factory import build_memory_store
+    from malspark.memory.store_factory import build_memory_store
 
     return build_memory_store(built)
 
@@ -431,8 +431,8 @@ class TestTheApiAndTheWorkerJudgeAlike:
     ) -> None:
         from app.services.agent_map import AGENT_DEFINITIONS_KEY
         from app.worker.analysis_worker import build_job_settings, take_the_job_plugin_set
-        from maljan.core.exceptions import LLMError, MemoryStoreError
-        from maljan.providers.errors import ProviderConfigurationError
+        from malspark.core.exceptions import LLMError, MemoryStoreError
+        from malspark.providers.errors import ProviderConfigurationError
 
         # The refusals the worker turns into a failed job, and nothing else: a
         # crash on either side fails this test.
@@ -766,7 +766,7 @@ class TestAPluginWhoseImportEndsTheProcessCanBeRemoved:
             answer = TestClient(_app(db=held)).post(
                 "/api/v1/settings/import",
                 json={
-                    "format": "maljan-settings/2",
+                    "format": "malspark-settings/2",
                     "values": {"core.plugins.allowed": [], selector: shipped},
                 },
             )
@@ -893,7 +893,7 @@ class TestABlockSentBackAsStoredWritesNothing:
                     secret,
                     lambda c, k: c.post(
                         "/api/v1/settings/import",
-                        json={"format": "maljan-settings/2", "values": {k: None}},
+                        json={"format": "malspark-settings/2", "values": {k: None}},
                     ),
                 ),
             ):
@@ -956,11 +956,14 @@ class TestAStoredSecretAnswersNoGuess:
             (
                 "post",
                 "/api/v1/settings/import",
-                lambda guess: {"format": "maljan-settings/2", "values": {key: guess}},
+                lambda guess: {"format": "malspark-settings/2", "values": {key: guess}},
             ),
         )
         answers: dict[str, list[Any]] = {}
-        with _quiet_save(), patch("maljan.core.settings_secrets.decrypt", lambda _v: "right-guess"):
+        with (
+            _quiet_save(),
+            patch("malspark.core.settings_secrets.decrypt", lambda _v: "right-guess"),
+        ):
             for guess in ("right-guess", "wrong-guess"):
                 said = []
                 for method, path, body in requests:
@@ -1000,7 +1003,7 @@ class TestAChangeThatDropsAPluginNeverLoadsIt:
                     _db(rows),
                     lambda c: c.post(
                         "/api/v1/settings/import",
-                        json={"format": "maljan-settings/2", "values": change},
+                        json={"format": "malspark-settings/2", "values": change},
                     ),
                 ),
             ):
@@ -1062,8 +1065,8 @@ class TestARunningJobKeepsItsPlugins:
         self, installed: dict[str, list[FakePoint]]
     ) -> None:
         from app.worker.analysis_worker import build_job_settings, take_the_job_plugin_set
-        from maljan.llm.provider_base import facts_of
-        from maljan.llm.registry import _PROVIDER_REGISTRY, LLMProviderRegistry
+        from malspark.llm.provider_base import facts_of
+        from malspark.llm.registry import _PROVIDER_REGISTRY, LLMProviderRegistry
 
         installed["llm"].append(FakePoint("acme_llm", AcmeLLM))
         installed["static"].append(FakePoint("acme_static", AcmeStatic))
@@ -1093,7 +1096,7 @@ class TestTheCommandLine:
     ) -> None:
         from typer.testing import CliRunner
 
-        from maljan import cli
+        from malspark import cli
 
         built: list[str] = []
 
@@ -1103,7 +1106,7 @@ class TestTheCommandLine:
                 raise RuntimeError("stopped before running")
 
         monkeypatch.setattr(cli, "Settings", lambda: Settings(_env_file=None))
-        monkeypatch.setattr(cli, "MaljanApp", _Stop)
+        monkeypatch.setattr(cli, "MalsparkApp", _Stop)
         refused = CliRunner().invoke(cli.app, ["analyze", "abc", "--provider", "bogus"])
         assert refused.exit_code == 2
         assert "provider must be one of" in refused.output
@@ -1117,7 +1120,7 @@ class TestTheCommandLine:
     ) -> None:
         from typer.testing import CliRunner
 
-        from maljan import cli
+        from malspark import cli
 
         installed["llm"].append(FakePoint("acme_llm", llm_with_block("acme_llm")))
         seen: list[tuple[str, str, str]] = []
@@ -1137,7 +1140,7 @@ class TestTheCommandLine:
                 llm={"acme_llm": {"expert_model": "acme-xl", "judge_model": "acme-xs"}},
             ),
         )
-        monkeypatch.setattr(cli, "MaljanApp", _Stop)
+        monkeypatch.setattr(cli, "MalsparkApp", _Stop)
         ran = CliRunner().invoke(cli.app, ["analyze", "abc", "--provider", "acme_llm"])
         assert ran.exit_code == 1, ran.output
         assert seen == [("acme_llm", "acme-xl", "acme-xs")]

@@ -8,21 +8,21 @@
 # it was pinned, unpacks the one executable and checks that too. Nothing is
 # installed system-wide.
 #
-# Where it goes: $HOME/.local/share/maljan/tools/floss-<version>/floss,
-# which is the first place the tool looks. Set MALJAN_FLOSS_PATH in the analysis
+# Where it goes: $HOME/.local/share/malspark/tools/floss-<version>/floss,
+# which is the first place the tool looks. Set MALSPARK_FLOSS_PATH in the analysis
 # server's env to use a build somewhere else.
 #
 #   scripts/install_floss.sh
 
 set -euo pipefail
 
-# Keep in step with src/maljan/tools/emulated_strings.py and docker/Dockerfile.backend.
+# Keep in step with src/malspark/tools/emulated_strings.py and docker/Dockerfile.backend.
 VERSION="3.1.1"
 ZIP_SHA256="40c05a869f34f7e2417b17ca290cc54bd3671ee1f0a2d9bd5103284c01a54666"
 BINARY_SHA256="d71b9ea4fe3b2de974dc1ae3c5d0f67569921bc118dcb02ed72e905a662411cb"
 URL="https://github.com/mandiant/flare-floss/releases/download/v${VERSION}/floss-v${VERSION}-linux.zip"
 
-DEST_DIR="$HOME/.local/share/maljan/tools/floss-${VERSION}"
+DEST_DIR="$HOME/.local/share/malspark/tools/floss-${VERSION}"
 DEST="$DEST_DIR/floss"
 
 if [[ -x "$DEST" ]] && echo "$BINARY_SHA256  $DEST" | sha256sum -c --status; then

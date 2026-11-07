@@ -17,9 +17,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.reporting.ledger_report import CELL_CHARS, build_sections
-from maljan.schemas.evidence import LedgerEntry
-from maljan.utils.marked_cut import CUT_MARK
+from malspark.reporting.ledger_report import CELL_CHARS, build_sections
+from malspark.schemas.evidence import LedgerEntry
+from malspark.utils.marked_cut import CUT_MARK
 
 BODY = "".join(f"  local_{i:02x} = FUN_00405000(local_{i:02x}, 0x{i:x});\n" for i in range(40))
 LONG_CODE = f"\nint FUN_00401000(int cmd)\n\n{{\n{BODY}  return 0;\n}}\n"

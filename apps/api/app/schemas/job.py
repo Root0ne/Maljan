@@ -24,7 +24,7 @@ PLUGINS_ALLOWED_CONTEXT = "plugins_allowed"
 def _registered(value: str | None, field: str, kind: str, info: ValidationInfo) -> str | None:
     """``value`` when it is a shipped id or an installed plugin of ``kind`` the allow-list
     names, read from package metadata; refused with the shipped ids otherwise."""
-    from maljan.core.plugins import id_refusal, shipped_ids
+    from malspark.core.plugins import id_refusal, shipped_ids
 
     if value is None:
         return value
@@ -49,7 +49,7 @@ class _KnownJobConfig(BaseModel):
     # The providers for this job, each a name its registry holds (a provider
     # registered at runtime is accepted the day it is registered) or an
     # installed plugin the allow-list names, read from package metadata
-    # (``maljan.core.plugins.id_refusal``).
+    # (``malspark.core.plugins.id_refusal``).
     llm_provider: str | None = None
     mock_mode: bool | None = None
     # Start without an earlier run's memory of this sample: no earlier-run
@@ -74,7 +74,7 @@ class _KnownJobConfig(BaseModel):
     # submit time, which is where "known" can actually be answered.
     profile: str | None = None
     # The questions the analyst asks of this run, each answered by the report
-    # in a fixed vocabulary (``maljan.reporting.question_round``). Each must
+    # in a fixed vocabulary (``malspark.reporting.question_round``). Each must
     # hold some text; none asks nothing.
     questions: list[str] | None = None
 
@@ -88,7 +88,7 @@ class _KnownJobConfig(BaseModel):
     @field_validator("llm_provider")
     @classmethod
     def _a_registered_llm_provider(cls, value: str | None, info: ValidationInfo) -> str | None:
-        from maljan.llm.provider_base import missing_block
+        from malspark.llm.provider_base import missing_block
 
         value = _registered(value, "llm_provider", "llm", info)
         # A provider with no settings block of its own names no role model;
@@ -330,7 +330,7 @@ class SandboxReportResponse(BaseModel):
     warning: str | None = None
     uploaded_at: datetime = Field(validation_alias="created_at")
     # For a report accepted unread: a proposed format declaration read from its
-    # shape (``maljan.core.report_proposals``), each field with its evidence and
+    # shape (``malspark.core.report_proposals``), each field with its evidence and
     # confidence, for an operator to accept or edit. Nothing reads it but the
     # console.
     proposal: dict[str, Any] | None = None
@@ -480,7 +480,7 @@ class ReportDetailResponse(BaseModel):
     # to the legacy fields above when this is missing.
     malware_report: dict | None = None
     # The console tab each section an operator's tool produced is drawn on,
-    # by section key (``maljan.reporting.section_tabs``): read from the kind
+    # by section key (``malspark.reporting.section_tabs``): read from the kind
     # its tool declared, else the analyst whose call it cites. Computed when
     # the report is served, never stored; a section it does not name is
     # placed by its key, as before. ``None`` when no section is placed.

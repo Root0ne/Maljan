@@ -23,10 +23,10 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import BaseAnalyst, nudge_turns
-from maljan.core.config import Settings
-from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
-from maljan.pipeline.run_state import RUN_STATE_END, without_run_state_tail
+from malspark.agents.base_agent import BaseAnalyst, nudge_turns
+from malspark.core.config import Settings
+from malspark.llm.openai_provider import OpenAIProvider, forget_standard_only
+from malspark.pipeline.run_state import RUN_STATE_END, without_run_state_tail
 
 from .streamed_wire import reply
 
@@ -159,7 +159,7 @@ class TestTheReasoningGoesBack:
         assert "reasoning_content" not in assistant[0]
 
     def test_the_reasoning_is_counted_where_the_provider_reports_it(self) -> None:
-        from maljan.core.token_ledger import turn_usage
+        from malspark.core.token_ledger import turn_usage
 
         first, _ = _two_turns(_model(_DeepSeek()))
         usage = turn_usage(first)
@@ -226,7 +226,7 @@ class TestOnlyWhereItIsAskedFor:
         assert all("reasoning_content" not in m for m in body["messages"])
 
     def test_a_turn_that_does_not_line_up_is_said_rather_than_sent_silently(self) -> None:
-        from maljan.llm import openai_provider
+        from malspark.llm import openai_provider
 
         model = _model(_DeepSeek())
         # The class the passback subclasses, under the one that answers every call.
@@ -263,7 +263,7 @@ class TestTheCapBoundForOneCall:
 
 class TestTheWindowCountsWhatIsSentBack:
     def test_a_turn_s_reasoning_is_part_of_its_size(self) -> None:
-        from maljan.agents.base_agent import _message_chars
+        from malspark.agents.base_agent import _message_chars
 
         bare = AIMessage(content="answer")
         thinking = AIMessage(content="answer", additional_kwargs={"reasoning_content": THOUGHT})

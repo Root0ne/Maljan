@@ -3,7 +3,7 @@
 Confinement is only half a working tool call. A sidecar reads a path argument
 only inside the roots it was given, and it learns them from one environment
 variable that is copied into the child at spawn — so a deployment where
-``MALJAN_SAMPLE_ROOTS`` does not survive that copy refuses every analyst tool
+``MALSPARK_SAMPLE_ROOTS`` does not survive that copy refuses every analyst tool
 call on the very sample the run is about, with the same error a real escape
 attempt gets.
 
@@ -42,7 +42,7 @@ def _path_taking_sidecars() -> list[str]:
     that starts confining paths has to start receiving the roots in the same
     change, and a list kept by hand is what lets the two drift.
     """
-    from maljan.core.config import shipped_server_keys
+    from malspark.core.config import shipped_server_keys
 
     found = []
     for key in shipped_server_keys():
@@ -56,7 +56,7 @@ PATH_TAKING = _path_taking_sidecars()
 
 
 def _builtin_keys() -> list[str]:
-    from maljan.core.config import shipped_server_keys
+    from malspark.core.config import shipped_server_keys
 
     return list(shipped_server_keys())
 
@@ -76,7 +76,7 @@ def _stale_server_map(settings_servers: dict[str, Any]) -> dict[str, Any]:
         entry = server.model_dump(mode="json")
         entry.pop("auth_token", None)
         entry["env_allow"] = [
-            name for name in entry.get("env_allow", []) if name != "MALJAN_SAMPLE_ROOTS"
+            name for name in entry.get("env_allow", []) if name != "MALSPARK_SAMPLE_ROOTS"
         ]
         out[key] = entry
     return out
@@ -89,7 +89,7 @@ def _cleared_server_map() -> dict[str, Any]:
     the policy is easiest to read off: whatever comes back is what a stored row
     is not allowed to take away.
     """
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     out: dict[str, Any] = {}
     for key, server in Settings(_env_file=None).mcp.servers.items():
@@ -107,7 +107,7 @@ def _no_roots_yet(monkeypatch: pytest.MonkeyPatch) -> None:
     then belongs to the value ``monkeypatch`` puts back, instead of outliving
     the test in the environment every later one reads.
     """
-    from maljan.tools.roots import SAMPLE_ROOTS_ENV
+    from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
     monkeypatch.setenv(SAMPLE_ROOTS_ENV, "")
 
@@ -119,7 +119,7 @@ def _sample(target: Path) -> str:
 
 async def _answers(config: Any, calls: list[dict[str, Any]], job_id: str) -> list[Any]:
     """Spawn the sidecar the registry's way and make each call against it."""
-    from maljan.providers.servers import ServerHandle
+    from malspark.providers.servers import ServerHandle
 
     handle = ServerHandle("analysis", config)
     await handle.aopen(job_id)
@@ -148,9 +148,9 @@ class TestEveryPathTakingSidecarMayReadTheRoots:
     def test_the_child_environment_carries_the_roots(
         self, name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents.subprocess_env import child_env
-        from maljan.core.config import Settings
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.agents.subprocess_env import child_env
+        from malspark.core.config import Settings
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         monkeypatch.setenv(SAMPLE_ROOTS_ENV, str(tmp_path))
         config = Settings(_env_file=None).mcp.servers[name]
@@ -162,9 +162,9 @@ class TestEveryPathTakingSidecarMayReadTheRoots:
     def test_a_sidecar_that_takes_no_path_is_told_nothing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents.subprocess_env import child_env
-        from maljan.core.config import Settings, shipped_server_keys
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.agents.subprocess_env import child_env
+        from malspark.core.config import Settings, shipped_server_keys
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         monkeypatch.setenv(SAMPLE_ROOTS_ENV, str(tmp_path))
         servers = Settings(_env_file=None).mcp.servers
@@ -178,8 +178,8 @@ class TestEveryPathTakingSidecarMayReadTheRoots:
 
     def test_the_variable_is_named_per_server_and_not_given_to_every_child(self) -> None:
         """A name in ``BASE_KEYS`` would reach every subprocess the app starts."""
-        from maljan.agents.subprocess_env import BASE_KEYS
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.agents.subprocess_env import BASE_KEYS
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         assert SAMPLE_ROOTS_ENV not in BASE_KEYS
 
@@ -188,9 +188,9 @@ class TestAServerAnOperatorAddedSeesTheRootsOnlyWhenAsked:
     def test_a_custom_server_is_told_nothing_by_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents.subprocess_env import child_env
-        from maljan.core.config import Settings
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.agents.subprocess_env import child_env
+        from malspark.core.config import Settings
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         monkeypatch.setenv(SAMPLE_ROOTS_ENV, str(tmp_path))
         settings = Settings(
@@ -205,9 +205,9 @@ class TestAServerAnOperatorAddedSeesTheRootsOnlyWhenAsked:
     def test_a_custom_server_that_lists_it_receives_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents.subprocess_env import child_env
-        from maljan.core.config import Settings
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.agents.subprocess_env import child_env
+        from malspark.core.config import Settings
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         monkeypatch.setenv(SAMPLE_ROOTS_ENV, str(tmp_path))
         settings = Settings(
@@ -241,24 +241,24 @@ class TestAStoredServerMapCannotWithholdWhatTheSidecarNeeds:
     """
 
     def _from_stale_store(self) -> Any:
-        from maljan.core.config import Settings
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.config import Settings
+        from malspark.core.settings_overrides import build_settings
 
         stale = _stale_server_map(Settings(_env_file=None).mcp.servers)
         return build_settings({"mcp.servers": stale})
 
     @pytest.mark.parametrize("name", PATH_TAKING)
     def test_a_map_saved_before_the_variable_existed_still_carries_it(self, name: str) -> None:
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         settings = self._from_stale_store()
 
         assert SAMPLE_ROOTS_ENV in settings.mcp.servers[name].env_allow
 
     def test_the_operator_s_own_names_are_kept(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.settings_overrides import build_settings
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.core.config import Settings
+        from malspark.core.settings_overrides import build_settings
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         stale = _stale_server_map(Settings(_env_file=None).mcp.servers)
         stale["analysis"]["env_allow"] = [*stale["analysis"]["env_allow"], "MY_OWN_VARIABLE"]
@@ -270,9 +270,9 @@ class TestAStoredServerMapCannotWithholdWhatTheSidecarNeeds:
         assert len(env_allow) == len(set(env_allow))
 
     def test_a_server_the_operator_added_is_left_exactly_as_stored(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.settings_overrides import build_settings
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.core.config import Settings
+        from malspark.core.settings_overrides import build_settings
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         stale = _stale_server_map(Settings(_env_file=None).mcp.servers)
         stale["mine"] = {"transport": "stdio", "command": sys.executable, "env_allow": ["MY_TOKEN"]}
@@ -283,8 +283,8 @@ class TestAStoredServerMapCannotWithholdWhatTheSidecarNeeds:
         assert SAMPLE_ROOTS_ENV not in settings.mcp.servers["mine"].env_allow
 
     def test_everything_else_the_operator_stored_is_untouched(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.config import Settings
+        from malspark.core.settings_overrides import build_settings
 
         stale = _stale_server_map(Settings(_env_file=None).mcp.servers)
         stale["threatintel"]["enabled"] = False
@@ -296,8 +296,8 @@ class TestAStoredServerMapCannotWithholdWhatTheSidecarNeeds:
     def test_a_map_the_editor_validates_is_stored_with_the_required_names(self) -> None:
         """The row an operator saves is normalised on the way in as well."""
         from app.services.server_map import validate_server_map
-        from maljan.core.config import Settings
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.core.config import Settings
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         stale = _stale_server_map(Settings(_env_file=None).mcp.servers)
 
@@ -309,7 +309,7 @@ class TestAStoredServerMapCannotWithholdWhatTheSidecarNeeds:
     def test_a_name_an_admin_added_survives_the_save(self) -> None:
         """The save repairs the row without spending the admin's own names."""
         from app.services.server_map import validate_server_map
-        from maljan.core.config import REQUIRED_ENV_ALLOW, Settings
+        from malspark.core.config import REQUIRED_ENV_ALLOW, Settings
 
         stale = _stale_server_map(Settings(_env_file=None).mcp.servers)
         stale["analysis"]["env_allow"] = ["MY_OWN_VARIABLE"]
@@ -325,8 +325,8 @@ class TestAStoredServerMapCannotWithholdWhatTheSidecarNeeds:
 class TestWhatAStoredRowMayTakeAwayAndWhatItMayNot:
     """A built-in keeps what it cannot run without, and loses what it can.
 
-    The floor is not the shipped list. ``MALJAN_SAMPLE_ROOTS``,
-    ``MALJAN_STAGING_DIR`` and ``MALJAN_STAGING_TTL_HOURS`` are facts a sidecar
+    The floor is not the shipped list. ``MALSPARK_SAMPLE_ROOTS``,
+    ``MALSPARK_STAGING_DIR`` and ``MALSPARK_STAGING_TTL_HOURS`` are facts a sidecar
     cannot work out for itself — which directories it may read, where a
     delivered sample lands and how long it is kept — so a stored row that has
     lost one gets it back. Every other shipped name is a default: the
@@ -337,7 +337,7 @@ class TestWhatAStoredRowMayTakeAwayAndWhatItMayNot:
     """
 
     def test_every_required_name_is_one_the_server_ships_with(self) -> None:
-        from maljan.core.config import REQUIRED_ENV_ALLOW, Settings
+        from malspark.core.config import REQUIRED_ENV_ALLOW, Settings
 
         servers = Settings(_env_file=None).mcp.servers
 
@@ -348,17 +348,17 @@ class TestWhatAStoredRowMayTakeAwayAndWhatItMayNot:
         self,
     ) -> None:
         """A credential is never a name a stored row is made to carry."""
-        from maljan.core.config import REQUIRED_ENV_ALLOW
-        from maljan.memory.attck_loader import ATTCK_REFRESH_DAYS_ENV
-        from maljan.tools.knowledge import INDEX_RETRY_ENV, SAMPLE_SHA256_ENV
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.core.config import REQUIRED_ENV_ALLOW
+        from malspark.memory.attck_loader import ATTCK_REFRESH_DAYS_ENV
+        from malspark.tools.knowledge import INDEX_RETRY_ENV, SAMPLE_SHA256_ENV
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         named = {name for required in REQUIRED_ENV_ALLOW.values() for name in required}
 
         assert named == {
             SAMPLE_ROOTS_ENV,
-            "MALJAN_STAGING_DIR",
-            "MALJAN_STAGING_TTL_HOURS",
+            "MALSPARK_STAGING_DIR",
+            "MALSPARK_STAGING_TTL_HOURS",
             INDEX_RETRY_ENV,
             ATTCK_REFRESH_DAYS_ENV,
             SAMPLE_SHA256_ENV,
@@ -366,15 +366,15 @@ class TestWhatAStoredRowMayTakeAwayAndWhatItMayNot:
 
     @pytest.mark.parametrize("name", PATH_TAKING)
     def test_a_sidecar_that_confines_paths_may_not_lose_the_roots(self, name: str) -> None:
-        from maljan.core.config import REQUIRED_ENV_ALLOW
-        from maljan.tools.roots import SAMPLE_ROOTS_ENV
+        from malspark.core.config import REQUIRED_ENV_ALLOW
+        from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
         assert SAMPLE_ROOTS_ENV in REQUIRED_ENV_ALLOW.get(name, ())
 
     @pytest.mark.parametrize("name", BUILTIN_KEYS)
     def test_a_cleared_list_comes_back_as_the_required_names_alone(self, name: str) -> None:
-        from maljan.core.config import REQUIRED_ENV_ALLOW
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.config import REQUIRED_ENV_ALLOW
+        from malspark.core.settings_overrides import build_settings
 
         settings = build_settings({"mcp.servers": _cleared_server_map()})
 
@@ -383,7 +383,7 @@ class TestWhatAStoredRowMayTakeAwayAndWhatItMayNot:
     @pytest.mark.parametrize("name", BUILTIN_KEYS)
     def test_a_save_stores_the_required_names_alone(self, name: str) -> None:
         from app.services.server_map import validate_server_map
-        from maljan.core.config import REQUIRED_ENV_ALLOW
+        from malspark.core.config import REQUIRED_ENV_ALLOW
 
         cleaned = validate_server_map(_cleared_server_map())
 
@@ -391,21 +391,21 @@ class TestWhatAStoredRowMayTakeAwayAndWhatItMayNot:
 
     def test_a_fresh_deployment_is_given_the_whole_shipped_list(self) -> None:
         """Nothing here narrows what a deployment nobody has configured gets."""
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.settings_overrides import build_settings
 
         servers = build_settings({}).mcp.servers
 
         assert servers["threatintel"].env_allow == ["VIRUSTOTAL_API_KEY", "ABUSEIPDB_API_KEY"]
         assert servers["analysis"].env_allow == [
-            "MALJAN_STAGING_DIR",
-            "MALJAN_STAGING_TTL_HOURS",
-            "MALJAN_SAMPLE_ROOTS",
+            "MALSPARK_STAGING_DIR",
+            "MALSPARK_STAGING_TTL_HOURS",
+            "MALSPARK_SAMPLE_ROOTS",
         ]
 
     def test_a_cleared_intel_list_keeps_the_keys_out_of_the_child(self) -> None:
         """The removal is worth nothing unless the child really loses them."""
-        from maljan.agents.subprocess_env import child_env
-        from maljan.core.settings_overrides import build_settings
+        from malspark.agents.subprocess_env import child_env
+        from malspark.core.settings_overrides import build_settings
 
         config = build_settings({"mcp.servers": _cleared_server_map()}).mcp.servers["threatintel"]
 
@@ -426,8 +426,8 @@ class TestTheLiveSidecarReadsTheSampleAndNothingElse:
     def test_a_file_under_an_exported_root_is_read(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.settings_overrides import build_settings
-        from maljan.tools.roots import add_sample_root
+        from malspark.core.settings_overrides import build_settings
+        from malspark.tools.roots import add_sample_root
 
         _no_roots_yet(monkeypatch)
         add_sample_root(tmp_path)
@@ -447,9 +447,9 @@ class TestTheLiveSidecarReadsTheSampleAndNothingElse:
     def test_a_sidecar_started_from_a_stored_map_reads_it_too(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.settings_overrides import build_settings
-        from maljan.tools.roots import add_sample_root
+        from malspark.core.config import Settings
+        from malspark.core.settings_overrides import build_settings
+        from malspark.tools.roots import add_sample_root
 
         _no_roots_yet(monkeypatch)
         add_sample_root(tmp_path)
@@ -471,9 +471,9 @@ class TestTheLiveSidecarReadsTheSampleAndNothingElse:
         registry attaches anything, and a handle held over from an earlier job
         is closed and started again for the new job id.
         """
-        from maljan.core.settings_overrides import build_settings
-        from maljan.providers.servers import ServerHandle
-        from maljan.tools.roots import add_sample_root
+        from malspark.core.settings_overrides import build_settings
+        from malspark.providers.servers import ServerHandle
+        from malspark.tools.roots import add_sample_root
 
         first = tmp_path / "first"
         second = tmp_path / "second"
@@ -504,10 +504,10 @@ class TestTheWorkerNamesItsOwnDirectoriesBeforeAnySidecarStarts:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from app.worker import sample_files
-        from maljan.agents.subprocess_env import child_env
-        from maljan.core.settings_overrides import build_settings
-        from maljan.providers.base import DEFAULT_WORK_DIR
-        from maljan.tools.roots import ROOT_SEPARATOR, SAMPLE_ROOTS_ENV
+        from malspark.agents.subprocess_env import child_env
+        from malspark.core.settings_overrides import build_settings
+        from malspark.providers.base import DEFAULT_WORK_DIR
+        from malspark.tools.roots import ROOT_SEPARATOR, SAMPLE_ROOTS_ENV
 
         _no_roots_yet(monkeypatch)
         monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path / "samples"))
@@ -522,6 +522,6 @@ class TestTheWorkerNamesItsOwnDirectoriesBeforeAnySidecarStarts:
         assert str(tmp_path / "samples" / DEFAULT_WORK_DIR) in roots
 
     def test_the_separator_is_the_platform_s_own(self) -> None:
-        from maljan.tools.roots import ROOT_SEPARATOR
+        from malspark.tools.roots import ROOT_SEPARATOR
 
         assert ROOT_SEPARATOR == os.pathsep

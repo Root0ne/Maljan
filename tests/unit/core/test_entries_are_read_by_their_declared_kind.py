@@ -16,17 +16,17 @@ from pathlib import Path
 
 import pytest
 
-from maljan.core import legacy_tool_tables as legacy
-from maljan.core.config import Settings
-from maljan.core.declared_reading import (
+from malspark.core import legacy_tool_tables as legacy
+from malspark.core.config import Settings
+from malspark.core.declared_reading import (
     bare_name,
     facts_of,
     facts_record,
     reads_as,
     shipped_by_name,
 )
-from maljan.core.tool_declarations import ToolDeclarations
-from maljan.schemas.evidence import build_entry
+from malspark.core.tool_declarations import ToolDeclarations
+from malspark.schemas.evidence import build_entry
 
 ROOT = Path(__file__).resolve().parents[3]
 LEDGER = ROOT / "tests" / "fixtures" / "ledger"
@@ -116,7 +116,7 @@ def test_a_stored_entry_of_a_legacy_name_is_read_as_before(consumer: str) -> Non
 
 
 def test_the_asserting_tools_are_the_old_table(held: ToolDeclarations) -> None:
-    from maljan.pipeline.evidence_summary import asserting_source
+    from malspark.pipeline.evidence_summary import asserting_source
 
     for source, tool in _built_in(held):
         for entry in (_entry(tool, source), _entry(tool, None)):
@@ -166,8 +166,8 @@ def test_a_record_of_a_newer_version_is_read_for_the_fields_it_knows() -> None:
     ],
 )
 def test_a_record_the_validators_refuse_is_absent_and_stops_no_reader(record: dict) -> None:
-    from maljan.analysis.evidence_roots import RunRoots
-    from maljan.pipeline.validation import corroboration
+    from malspark.analysis.evidence_roots import RunRoots
+    from malspark.pipeline.validation import corroboration
 
     entry = build_entry(
         entry_id="ev_0001", seq=1, agent="a", tool="capa", args={}, server=None,
@@ -228,7 +228,7 @@ NAMED_BRANCH: dict[str, str] = {
 def test_the_roots_dispatch_matches_the_name_keyed_chain_for_every_built_in_tool(
     held: ToolDeclarations,
 ) -> None:
-    from maljan.analysis.evidence_roots import reading_branch
+    from malspark.analysis.evidence_roots import reading_branch
 
     differ = []
     names = set(shipped_by_name()) | set(NAMED_BRANCH)
@@ -247,8 +247,8 @@ def test_the_roots_dispatch_matches_the_name_keyed_chain_for_every_built_in_tool
 
 
 def test_the_function_map_and_the_pack_join_as_the_name_tables_did(held: ToolDeclarations) -> None:
-    from maljan.agents.function_map import _map_kind
-    from maljan.pipeline.triage_pack import _index_slot
+    from malspark.agents.function_map import _map_kind
+    from malspark.pipeline.triage_pack import _index_slot
 
     named_map = set(legacy.FUNCTION_MAP_TOOLS)
     named_slot = {"pe_info": "pe_header", "capa": "rules", "floss": "call_sites",
@@ -290,8 +290,8 @@ def _fixture_ledger(stamp: bool) -> list[object]:
 
 
 def test_the_stored_answers_read_the_same_with_or_without_a_recorded_source() -> None:
-    from maljan.analysis.evidence_roots import RunRoots
-    from maljan.pipeline import evidence_summary, validation
+    from malspark.analysis.evidence_roots import RunRoots
+    from malspark.pipeline import evidence_summary, validation
 
     readings = []
     for stamp in (False, True):

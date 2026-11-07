@@ -90,8 +90,8 @@ def test_an_old_report_s_stored_table_does_not_decide_the_feed() -> None:
     report prints the row. So does the feed.
     """
     from app.services.report_service import ioc_feed_rows
-    from maljan.reporting.models import ConsolidatedIOC, MalwareReport
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.models import ConsolidatedIOC, MalwareReport
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     stored = MalwareReport.model_validate(
         {
@@ -112,8 +112,8 @@ def test_an_old_report_s_stored_table_does_not_decide_the_feed() -> None:
 
 def test_a_stored_row_the_report_no_longer_prints_is_not_served() -> None:
     from app.services.report_service import ioc_feed_rows
-    from maljan.reporting.models import ConsolidatedIOC, FileHashes, MalwareReport, SampleIdentity
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.models import ConsolidatedIOC, FileHashes, MalwareReport, SampleIdentity
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     stored = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="f" * 64)),
@@ -137,8 +137,8 @@ def test_a_stored_row_the_report_no_longer_prints_is_not_served() -> None:
 
 def test_the_stored_table_is_read_when_the_rebuild_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services.report_service import ioc_feed_rows
-    from maljan.reporting import builder
-    from maljan.reporting.models import ConsolidatedIOC, FileHashes, MalwareReport, SampleIdentity
+    from malspark.reporting import builder
+    from malspark.reporting.models import ConsolidatedIOC, FileHashes, MalwareReport, SampleIdentity
 
     def _broken(_report: Any) -> list[Any]:
         raise RuntimeError("unbuildable")

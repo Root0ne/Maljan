@@ -15,10 +15,10 @@ import logging
 
 import pytest
 
-from maljan.analysis.run_summary import RunSummaryBuilder, spend_lines
-from maljan.core.config import Settings
-from maljan.core.spend import SpendMeter, table_prices
-from maljan.core.token_ledger import TokenLedger
+from malspark.analysis.run_summary import RunSummaryBuilder, spend_lines
+from malspark.core.config import Settings
+from malspark.core.spend import SpendMeter, table_prices
+from malspark.core.token_ledger import TokenLedger
 
 PRICES = {
     "deepseek-v4-pro": {
@@ -83,7 +83,7 @@ class TestTheArithmetic:
 class TestAModelWithNoPrice:
     def test_is_not_counted_and_is_named_once(self, caplog: pytest.LogCaptureFixture) -> None:
         meter = SpendMeter(0.01, PRICES, table={})
-        with caplog.at_level(logging.WARNING, logger="maljan"):
+        with caplog.at_level(logging.WARNING, logger="malspark"):
             for _ in range(3):
                 meter.settle({"input_tokens": 10_000_000, "output_tokens": 0}, "mystery-model")
         assert meter.spent() == 0.0 and meter.reached() is False
@@ -163,7 +163,7 @@ class TestBeforeEachCall:
         )
 
     def test_an_ordinary_call_past_the_worst_case_is_not_made(self) -> None:
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         meter = self._meter()
         with pytest.raises(SpendCeilingStop, match="loop turn call"):
@@ -185,7 +185,7 @@ class TestBeforeEachCall:
         assert "held to 100,000 output tokens" in said
 
     def test_after_the_ceiling_nothing_is_made_not_even_the_report(self) -> None:
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         meter = self._meter()
         meter.settle({"input_tokens": 0, "output_tokens": 300_000}, "deepseek-v4-pro")
@@ -221,7 +221,7 @@ class TestTheTagIsKept:
 class TestUnreportedUsage:
     def test_is_counted_and_the_spend_is_at_least(self, caplog: pytest.LogCaptureFixture) -> None:
         meter = SpendMeter(1.0, PRICES, table={})
-        with caplog.at_level(logging.WARNING, logger="maljan"):
+        with caplog.at_level(logging.WARNING, logger="malspark"):
             meter.settle(None, "deepseek-v4-pro")
             meter.settle(None, "deepseek-v4-pro")
         snapshot = meter.snapshot()
@@ -237,7 +237,7 @@ class TestACallSentWithNoCapOfItsOwn:
 
     @pytest.fixture(autouse=True)
     def _nothing_learned(self):
-        from maljan.llm import model_output_limits
+        from malspark.llm import model_output_limits
 
         model_output_limits.forget_learned()
         yield
@@ -248,7 +248,7 @@ class TestACallSentWithNoCapOfItsOwn:
         return SpendMeter(ceiling, {self.MODEL: price}, table={})
 
     def _declare(self, tokens: int) -> None:
-        from maljan.llm import model_output_limits
+        from malspark.llm import model_output_limits
 
         model_output_limits.note_declared(self.MODEL, tokens, "a test's model list")
 
@@ -276,7 +276,7 @@ class TestACallSentWithNoCapOfItsOwn:
 
     def test_one_that_cannot_be_held_with_no_declared_maximum_is_refused(self) -> None:
         """Nothing bounds it: the fallback figure would only be a guess, so it is not made."""
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         meter = self._meter()
         with pytest.raises(SpendCeilingStop, match="cannot be bounded under the spend ceiling"):
@@ -299,7 +299,7 @@ class TestACallSentWithNoCapOfItsOwn:
     def test_one_that_cannot_be_held_is_refused_when_its_declared_maximum_does_not_fit(
         self,
     ) -> None:
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         self._declare(4_000)
         meter = self._meter()
@@ -321,7 +321,7 @@ class TestACallSentWithNoCapOfItsOwn:
         assert "its cap was 0" not in said
 
     def test_with_nothing_measured_it_needs_the_most_it_may_answer(self) -> None:
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         meter = self._meter()
         meter.settle({"input_tokens": 990_000, "output_tokens": 0}, self.MODEL)

@@ -15,8 +15,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.config import Settings, TriageConfig
-from maljan.core.pack_steps import (
+from malspark.core.config import Settings, TriageConfig
+from malspark.core.pack_steps import (
     ARGUMENT_PLACEHOLDERS,
     FILE_PLACEHOLDERS,
     PackStep,

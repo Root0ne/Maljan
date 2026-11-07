@@ -21,12 +21,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from maljan.agents.dynamic_analyst import assemble_dynamic_prompt
-from maljan.agents.prompt_fragments import format_fragment
-from maljan.agents.static_analyst import assemble_static_prompt
-from maljan.core.settings_overrides import build_settings
-from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
-from maljan.providers.sandbox_tools import (
+from malspark.agents.dynamic_analyst import assemble_dynamic_prompt
+from malspark.agents.prompt_fragments import format_fragment
+from malspark.agents.static_analyst import assemble_static_prompt
+from malspark.core.settings_overrides import build_settings
+from malspark.providers.sandbox.cape2 import CAPE2SandboxProvider
+from malspark.providers.sandbox_tools import (
     sandbox_api_calls,
     sandbox_dropped_files,
     sandbox_mutexes,
@@ -36,7 +36,7 @@ from maljan.providers.sandbox_tools import (
     sandbox_services_and_tasks,
     sandbox_signatures,
 )
-from maljan.providers.static.ghidra import GhidraStaticProvider
+from malspark.providers.static.ghidra import GhidraStaticProvider
 
 ROOT = Path(__file__).resolve().parents[2]
 PROMPTS = ROOT / "tests" / "fixtures" / "prompts"

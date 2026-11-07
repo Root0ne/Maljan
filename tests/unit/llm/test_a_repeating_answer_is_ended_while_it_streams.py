@@ -24,11 +24,11 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage
 
-from maljan.core.config import Settings
-from maljan.llm.context_window import CHARS_PER_TOKEN
-from maljan.llm.generation_rate import IN_CALL_SOURCE, GenerationRates, attach_rate_meter
-from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
-from maljan.llm.stream_watch import (
+from malspark.core.config import Settings
+from malspark.llm.context_window import CHARS_PER_TOKEN
+from malspark.llm.generation_rate import IN_CALL_SOURCE, GenerationRates, attach_rate_meter
+from malspark.llm.openai_provider import OpenAIProvider, forget_standard_only
+from malspark.llm.stream_watch import (
     ESTIMATED_USAGE_KEY,
     ESTIMATED_USAGE_SOURCE,
     current_rule,
@@ -37,7 +37,7 @@ from maljan.llm.stream_watch import (
     watched,
     watching,
 )
-from maljan.pipeline.validation import claims_repeated
+from malspark.pipeline.validation import claims_repeated
 
 FIRST = (
     "CLAIM: it reads its configuration from the resource section\n"
@@ -356,7 +356,7 @@ class _OllamaParts:
 
 
 def _ollama(parts: _OllamaParts) -> Any:
-    from maljan.llm.ollama_provider import OllamaProvider
+    from malspark.llm.ollama_provider import OllamaProvider
 
     model = OllamaProvider(Settings(_env_file=None)).build_model("m", 0.0, max_tokens=512)
 
@@ -504,8 +504,8 @@ class TestAWatchThatFailsFailsSafe:
     ) -> None:
         from unittest.mock import patch
 
-        from maljan.agents.base_agent import claims_repeat_rule
-        from maljan.agents.repeat_watch import ClaimRepeatReader
+        from malspark.agents.base_agent import claims_repeat_rule
+        from malspark.agents.repeat_watch import ClaimRepeatReader
 
         def _raise(*_args: Any, **_kwargs: Any) -> Any:
             raise RuntimeError("the reader failed")
@@ -524,8 +524,8 @@ class TestAWatchThatFailsFailsSafe:
     def test_an_ollama_answer_too(self) -> None:
         from unittest.mock import patch
 
-        from maljan.agents.base_agent import claims_repeat_rule
-        from maljan.agents.repeat_watch import ClaimRepeatReader
+        from malspark.agents.base_agent import claims_repeat_rule
+        from malspark.agents.repeat_watch import ClaimRepeatReader
 
         def _raise(*_args: Any, **_kwargs: Any) -> Any:
             raise RuntimeError("the reader failed")

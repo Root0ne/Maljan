@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.config import (
+from malspark.core.config import (
     TEAM_RULE_CODES,
     AgentDefinition,
     AgentsConfig,
@@ -23,8 +23,8 @@ from maljan.core.config import (
     StageDefinition,
     _builtin_definitions,
 )
-from maljan.core.team_layout import layout_team
-from maljan.core.team_lint import lint_team, lint_teams, team_stages
+from malspark.core.team_layout import layout_team
+from malspark.core.team_lint import lint_team, lint_teams, team_stages
 
 TEAM = "mine"
 

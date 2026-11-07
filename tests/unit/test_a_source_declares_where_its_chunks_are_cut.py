@@ -13,8 +13,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.config import AgentDefinition, ChunkingConfig
-from maljan.loaders.binary_chunker import (
+from malspark.core.config import AgentDefinition, ChunkingConfig
+from malspark.loaders.binary_chunker import (
     BOUNDARY,
     CHUNK_CHARS,
     SIZED_BY,
@@ -115,8 +115,8 @@ class TestTheDeclarationIsChecked:
 
 class TestTheContainerHandsTheDeclarationToTheChunker:
     def _chunks(self, **definition: object) -> list:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         base = {"role": "generic", "prompt": "Read the log.", "data_sources": ["sandbox.target"]}
         settings = Settings(

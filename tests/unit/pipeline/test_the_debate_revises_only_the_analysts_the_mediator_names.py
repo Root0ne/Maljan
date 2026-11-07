@@ -29,8 +29,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.pipeline.debate_facts import (
+from malspark.core.config import Settings
+from malspark.pipeline.debate_facts import (
     ANALYSTS_FIELD_MISSING_NOTE,
     BLOCK_NOT_READ_NOTE,
     analysts_field_unknown_note,
@@ -38,14 +38,14 @@ from maljan.pipeline.debate_facts import (
     contested_input,
     read_analysts_field,
 )
-from maljan.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
-from maljan.pipeline.nodes import (
+from malspark.pipeline.mediation_models import CONTRADICTIONS_BLOCK_MISSING_NOTE
+from malspark.pipeline.nodes import (
     NOT_NAMED_BY_MEDIATOR,
     RevisionInput,
     make_negotiation_node,
     make_revision_node,
 )
-from maljan.pipeline.routing import (
+from malspark.pipeline.routing import (
     CONSENSUS,
     CONVERGENCE,
     NO_CONSENSUS,
@@ -53,8 +53,8 @@ from maljan.pipeline.routing import (
     ConsensusRouter,
     debate_route,
 )
-from maljan.pipeline.state import AgentArgument
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.state import AgentArgument
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 NAMES = ["static", "all_tools_static_r2", "dynamic", "network"]
 
@@ -179,9 +179,9 @@ def _negotiate(argument: AgentArgument, consensus: bool | None = False) -> dict[
         "isr_reports": dict(IN_FORCE),
     }
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("maljan.pipeline.nodes.pack_text", lambda *a: "")
-        mp.setattr("maljan.pipeline.nodes.render_run_state", lambda *a: "")
-        mp.setattr("maljan.pipeline.nodes.detect_sycophancy", lambda *a, **k: False)
+        mp.setattr("malspark.pipeline.nodes.pack_text", lambda *a: "")
+        mp.setattr("malspark.pipeline.nodes.render_run_state", lambda *a: "")
+        mp.setattr("malspark.pipeline.nodes.detect_sycophancy", lambda *a, **k: False)
         update = asyncio.run(
             make_negotiation_node(_negotiation_container(argument, consensus))(state)
         )
@@ -344,7 +344,7 @@ def _revise(
         "discussion_history": [argument],
     }
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
+        mp.setattr("malspark.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
         update = asyncio.run(make_revision_node(container)(state))
     return update, agents
 
@@ -476,7 +476,7 @@ class TestTheNarrowedPrompt:
 
 class TestTheMediatorIsAskedForTheField:
     def test_the_block_rule_and_its_question_ask_for_the_field(self) -> None:
-        from maljan.agents.judge_agent import (
+        from malspark.agents.judge_agent import (
             ANALYSTS_FIELD_RULE,
             CONTRADICTIONS_BLOCK_QUESTION,
             CONTRADICTIONS_BLOCK_RULE,
@@ -488,8 +488,8 @@ class TestTheMediatorIsAskedForTheField:
         assert "[analysts: …]" in MEDIATION_EXTRACTION_SYSTEM
 
     def test_a_field_opened_line_is_read_whole_and_its_mark_still_blocks(self) -> None:
-        from maljan.agents.judge_agent import read_contradictions_block
-        from maljan.pipeline.debate_facts import read_marks
+        from malspark.agents.judge_agent import read_contradictions_block
+        from malspark.pipeline.debate_facts import read_marks
 
         answer = f"Reasoning.\n\nCONTRADICTIONS:\n- {LINE_STATIC}\nagreement_confidence: 0.6"
 
@@ -537,7 +537,7 @@ class TestTheFieldMayStandAnywhere:
         ],
     )
     def test_a_not_blocking_mark_is_read_wherever_the_field_stands(self, line: str) -> None:
-        from maljan.pipeline.debate_facts import read_marks
+        from malspark.pipeline.debate_facts import read_marks
 
         (mark,) = read_marks([line])
 
@@ -553,7 +553,7 @@ class TestTheFieldMayStandAnywhere:
         ],
     )
     def test_a_blocking_mark_is_read_wherever_the_field_stands(self, line: str) -> None:
-        from maljan.pipeline.debate_facts import read_marks
+        from malspark.pipeline.debate_facts import read_marks
 
         (mark,) = read_marks([line])
 
@@ -631,7 +631,7 @@ class TestAClaimNumberOfAnyLengthIsReadAsText:
     def test_a_five_thousand_digit_claim_number_leaves_the_line_s_other_counts_stated(
         self,
     ) -> None:
-        from maljan.pipeline.debate_facts import ledger_count_facts
+        from malspark.pipeline.debate_facts import ledger_count_facts
 
         line = f"DYNAMIC Claim 1 counts 41 texts; STATIC Claim {'9' * 5000} counts 40."
         isrs = {
@@ -654,7 +654,7 @@ class TestAClaimNumberOfAnyLengthIsReadAsText:
     def test_a_claim_place_is_compared_as_text_first(
         self, written: str, count: int, place: int | None
     ) -> None:
-        from maljan.pipeline.debate_facts import _claim_place
+        from malspark.pipeline.debate_facts import _claim_place
 
         assert _claim_place(written, count) == place
 
@@ -709,7 +709,7 @@ class TestTheMentionsOfALineAreReadInLinearTime:
     def test_eight_thousand_mentions_take_about_ten_times_eight_hundred(self) -> None:
         import time
 
-        from maljan.pipeline.debate_facts import _claims_named
+        from malspark.pipeline.debate_facts import _claims_named
 
         def cost(count: int) -> float:
             line = "STATIC Claim 1 ALL_TOOLS_STATIC_R2 Claim 2 " * (count // 2)
@@ -727,7 +727,7 @@ class TestTheMentionsOfALineAreReadInLinearTime:
         assert large < 30 * small
 
     def test_a_name_inside_a_longer_one_is_read_once(self) -> None:
-        from maljan.pipeline.debate_facts import _claims_named
+        from malspark.pipeline.debate_facts import _claims_named
 
         found = _claims_named("ALL_TOOLS_STATIC_R2 Claim 2 and STATIC Claim 1", NAMES)
 
@@ -822,7 +822,7 @@ class TestAReportFromOutsideTheDebateIsShownAsOnDev:
         }
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(
-                "maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data")
+                "malspark.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data")
             )
             asyncio.run(make_revision_node(container)(state))
 
@@ -831,7 +831,7 @@ class TestAReportFromOutsideTheDebateIsShownAsOnDev:
 
 
 def test_only_the_analyst_a_blocking_line_names_is_asked_beside_a_not_blocking_line() -> None:
-    from maljan.pipeline.debate_facts import analysts_to_revise, read_marks
+    from malspark.pipeline.debate_facts import analysts_to_revise, read_marks
 
     lines = [
         "[analysts: ALPHA ANALYST] [blocking: the technique is published] Claim 2 vs BETA.",

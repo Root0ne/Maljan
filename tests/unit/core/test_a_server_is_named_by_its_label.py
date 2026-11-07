@@ -16,10 +16,10 @@ from typing import Any
 
 import pytest
 
-from maljan.core import config as config_module
-from maljan.core import declared_reading
-from maljan.core.settings_overrides import build_settings
-from maljan.schemas.evidence import build_entry
+from malspark.core import config as config_module
+from malspark.core import declared_reading
+from malspark.core.settings_overrides import build_settings
+from malspark.schemas.evidence import build_entry
 
 LOOKUP: dict[str, Any] = {
     "lookup_hash": {
@@ -96,7 +96,7 @@ def test_a_declared_service_or_display_name_comes_first(servers: Any) -> None:
 
 
 def test_only_a_tool_servers_source_reads_a_label() -> None:
-    from maljan.core.reputation import server_label
+    from malspark.core.reputation import server_label
 
     assert server_label("provider:ghidra", "ghidra") == "ghidra"
     assert server_label(None, "x") == "x"
@@ -104,7 +104,7 @@ def test_only_a_tool_servers_source_reads_a_label() -> None:
 
 
 def _rest(label: str) -> dict[str, Any]:
-    from maljan.providers.server_guard import ServerGuard
+    from malspark.providers.server_guard import ServerGuard
 
     said: list[dict[str, Any]] = []
     guard = ServerGuard("repstub", failures_to_open=1, on_open=said.append, label=label)
@@ -113,7 +113,7 @@ def _rest(label: str) -> dict[str, Any]:
 
 
 def test_a_rest_names_the_label_beside_the_key() -> None:
-    from maljan.analysis.run_summary import server_rest_sentence
+    from malspark.analysis.run_summary import server_rest_sentence
 
     record = _rest("Stub reputation")
     assert record["server"] == "repstub" and record["label"] == "Stub reputation"
@@ -124,7 +124,7 @@ def test_a_rest_names_the_label_beside_the_key() -> None:
 
 @pytest.mark.parametrize("label", ["", "repstub"])
 def test_a_rest_of_a_server_with_no_label_of_its_own_is_as_before(label: str) -> None:
-    from maljan.analysis.run_summary import server_rest_sentence
+    from malspark.analysis.run_summary import server_rest_sentence
 
     record = _rest(label)
     assert set(record) == {"server", "failures", "cooldown_s", "reason"}
@@ -132,7 +132,7 @@ def test_a_rest_of_a_server_with_no_label_of_its_own_is_as_before(label: str) ->
 
 
 def test_the_rest_event_carries_the_label_only_where_there_is_one() -> None:
-    from maljan.pipeline.events import TOOL_SERVER_RESTED, emit_tool_server_rested
+    from malspark.pipeline.events import TOOL_SERVER_RESTED, emit_tool_server_rested
 
     got: list[tuple[str, dict[str, Any]]] = []
 
@@ -148,7 +148,7 @@ def test_the_rest_event_carries_the_label_only_where_there_is_one() -> None:
 
 
 def test_the_roster_names_labelled_servers_by_their_key() -> None:
-    from maljan.pipeline.events import roster_payload
+    from malspark.pipeline.events import roster_payload
 
     settings = build_settings(
         {"mcp.servers": {"repstub": _block(label="Stub reputation"), "plain": _block()}}
@@ -162,7 +162,7 @@ def test_the_roster_names_labelled_servers_by_their_key() -> None:
 
 
 def test_the_roster_has_no_servers_key_when_no_server_has_a_label() -> None:
-    from maljan.pipeline.events import roster_payload
+    from malspark.pipeline.events import roster_payload
 
     assert roster_payload({}, {}) == {"agents": [], "stages": []}
     assert roster_payload({}, {}, servers={"plain": {"label": ""}, "same": {"label": "same"}}) == {

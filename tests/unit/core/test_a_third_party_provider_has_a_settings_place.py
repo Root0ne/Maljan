@@ -20,10 +20,10 @@ from typing import Any
 
 import pytest
 
-from maljan.core import declared_reading
-from maljan.core.config import Settings
-from maljan.core.settings_overrides import build_settings, declaration_blocks, trim_declarations
-from maljan.core.tool_declarations import (
+from malspark.core import declared_reading
+from malspark.core.config import Settings
+from malspark.core.settings_overrides import build_settings, declaration_blocks, trim_declarations
+from malspark.core.tool_declarations import (
     ToolDeclarations,
     forget_provider_block,
     forget_provider_declaration,
@@ -103,7 +103,7 @@ def test_the_run_snapshot_walks_the_block() -> None:
 
 
 def test_a_class_may_name_its_own_entry_as_its_block() -> None:
-    from maljan.providers.registry import forget_static_provider, register_static_provider
+    from malspark.providers.registry import forget_static_provider, register_static_provider
 
     @register_static_provider(PROVIDER)
     class _Invented:
@@ -145,8 +145,8 @@ def test_a_registered_entry_the_settings_do_not_hold_declares_nothing() -> None:
 def test_an_entry_of_a_provider_whose_class_names_another_block_is_not_read(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.core import tool_declarations
-    from maljan.core.logger import logger
+    from malspark.core import tool_declarations
+    from malspark.core.logger import logger
 
     # ``static.r2`` with its shipped owner left out: a block no shipped source owns.
     shipped = {k: v for k, v in tool_declarations.shipped_provider_blocks().items()}

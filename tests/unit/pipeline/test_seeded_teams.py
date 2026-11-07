@@ -12,9 +12,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from maljan.core.config import BUILTIN_PROFILES, Settings
-from maljan.core.container import ServiceContainer
-from maljan.pipeline.builder import build_graph
+from malspark.core.config import BUILTIN_PROFILES, Settings
+from malspark.core.container import ServiceContainer
+from malspark.pipeline.builder import build_graph
 
 
 def _settings(profile: str) -> Settings:

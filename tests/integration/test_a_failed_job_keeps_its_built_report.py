@@ -112,8 +112,8 @@ async def test_a_node_after_the_report_fails_and_the_report_is_kept(
 
     api_config._settings = None
     with (
-        patch.dict("os.environ", {"MALJAN_MOCK_MODE": "true"}, clear=False),
-        patch("maljan.app.MaljanApp.arun", new=_fails_after_the_report),
+        patch.dict("os.environ", {"MALSPARK_MOCK_MODE": "true"}, clear=False),
+        patch("malspark.app.MalsparkApp.arun", new=_fails_after_the_report),
     ):
         result = await run_analysis(mock_ctx, str(job.id))
     api_config._settings = None
@@ -160,8 +160,8 @@ async def test_a_failure_before_the_report_stores_nothing(
 
     api_config._settings = None
     with (
-        patch.dict("os.environ", {"MALJAN_MOCK_MODE": "true"}, clear=False),
-        patch("maljan.app.MaljanApp.arun", new=_fails_before_the_report),
+        patch.dict("os.environ", {"MALSPARK_MOCK_MODE": "true"}, clear=False),
+        patch("malspark.app.MalsparkApp.arun", new=_fails_before_the_report),
     ):
         result = await run_analysis(mock_ctx, str(job.id))
     api_config._settings = None
@@ -182,7 +182,7 @@ async def test_a_completed_run_stores_its_report_unmarked(
     from app import config as api_config
 
     api_config._settings = None
-    with patch.dict("os.environ", {"MALJAN_MOCK_MODE": "true"}, clear=False):
+    with patch.dict("os.environ", {"MALSPARK_MOCK_MODE": "true"}, clear=False):
         result = await run_analysis(mock_ctx, str(job.id))
     api_config._settings = None
 
@@ -221,8 +221,8 @@ async def test_a_graph_that_returned_and_a_worker_that_refused_it_stores_nothing
 
     api_config._settings = None
     with (
-        patch.dict("os.environ", {"MALJAN_MOCK_MODE": "true"}, clear=False),
-        patch("maljan.app.MaljanApp.arun", new=_returns_a_refused_result),
+        patch.dict("os.environ", {"MALSPARK_MOCK_MODE": "true"}, clear=False),
+        patch("malspark.app.MalsparkApp.arun", new=_returns_a_refused_result),
     ):
         result = await run_analysis(mock_ctx, str(job.id))
     api_config._settings = None

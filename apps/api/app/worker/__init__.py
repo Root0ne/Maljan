@@ -1,1 +1,1 @@
-"""ARQ background worker for Maljan analysis pipeline."""
+"""ARQ background worker for Malspark analysis pipeline."""

@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import pytest
 
-from maljan.core.config import Settings
+from malspark.core.config import Settings
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -30,10 +30,10 @@ from maljan.core.config import Settings
 def _make_container_with(
     tracing: bool = False,
     api_key: str | None = None,
-    project: str = "maljan",
+    project: str = "malspark",
 ) -> object:
     """Create a ServiceContainer in mock mode with custom LangSmith settings."""
-    from maljan.core.container import ServiceContainer
+    from malspark.core.container import ServiceContainer
 
     cfg = Settings(
         langchain_tracing_v2=tracing,
@@ -49,13 +49,13 @@ def _make_container_with(
 
 
 class TestLangChainProjectConfig:
-    def test_default_project_is_maljan(self) -> None:
+    def test_default_project_is_malspark(self) -> None:
         cfg = Settings()
-        assert cfg.langchain_project == "maljan"
+        assert cfg.langchain_project == "malspark"
 
     def test_project_can_be_overridden(self) -> None:
-        cfg = Settings(langchain_project="maljan-dev")
-        assert cfg.langchain_project == "maljan-dev"
+        cfg = Settings(langchain_project="malspark-dev")
+        assert cfg.langchain_project == "malspark-dev"
 
     def test_tracing_disabled_by_default(self) -> None:
         cfg = Settings()
@@ -110,8 +110,8 @@ class TestConfigureLangSmithEnabled:
 
     def test_sets_project_env_var(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
-            _make_container_with(tracing=True, api_key="ls_abc123", project="maljan-prod")
-            assert os.environ.get("LANGCHAIN_PROJECT") == "maljan-prod"
+            _make_container_with(tracing=True, api_key="ls_abc123", project="malspark-prod")
+            assert os.environ.get("LANGCHAIN_PROJECT") == "malspark-prod"
 
     def test_sets_api_key_env_var(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
@@ -121,7 +121,7 @@ class TestConfigureLangSmithEnabled:
     def test_default_project_used_when_not_overridden(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
             _make_container_with(tracing=True, api_key="ls_abc123")
-            assert os.environ.get("LANGCHAIN_PROJECT") == "maljan"
+            assert os.environ.get("LANGCHAIN_PROJECT") == "malspark"
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +137,8 @@ class TestConfigureLangSmithNoKey:
 
     def test_sets_project_without_key(self) -> None:
         with patch.dict(os.environ, {}, clear=False):
-            _make_container_with(tracing=True, api_key=None, project="maljan-nokey")
-            assert os.environ.get("LANGCHAIN_PROJECT") == "maljan-nokey"
+            _make_container_with(tracing=True, api_key=None, project="malspark-nokey")
+            assert os.environ.get("LANGCHAIN_PROJECT") == "malspark-nokey"
 
     def test_does_not_set_api_key_when_none(self) -> None:
         env_without_key = {k: v for k, v in os.environ.items() if k != "LANGCHAIN_API_KEY"}
@@ -149,7 +149,7 @@ class TestConfigureLangSmithNoKey:
     def test_emits_warning_when_no_key(self, caplog: pytest.LogCaptureFixture) -> None:
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="maljan"):
+        with caplog.at_level(logging.WARNING, logger="malspark"):
             with patch.dict(os.environ, {}, clear=False):
                 _make_container_with(tracing=True, api_key=None)
         assert any("API key" in r.message for r in caplog.records)
@@ -162,12 +162,12 @@ class TestConfigureLangSmithNoKey:
 
 class TestConfigureLangSmithMethod:
     def _make_container_raw(self) -> object:
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         return ServiceContainer.__new__(ServiceContainer)
 
     def test_method_is_no_op_when_disabled(self) -> None:
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer.__new__(ServiceContainer)
         container.config = Settings(langchain_tracing_v2=False)
@@ -178,33 +178,33 @@ class TestConfigureLangSmithMethod:
 
     def test_idempotent_when_called_twice(self) -> None:
         """Calling _configure_langsmith twice must not raise or corrupt state."""
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer.__new__(ServiceContainer)
         container.config = Settings(
             langchain_tracing_v2=True,
             langchain_api_key="ls_test",
-            langchain_project="maljan-idem",
+            langchain_project="malspark-idem",
         )
         with patch.dict(os.environ, {}, clear=False):
             container._configure_langsmith()  # type: ignore[union-attr]
             container._configure_langsmith()  # type: ignore[union-attr]
             assert os.environ.get("LANGCHAIN_TRACING_V2") == "true"
-            assert os.environ.get("LANGCHAIN_PROJECT") == "maljan-idem"
+            assert os.environ.get("LANGCHAIN_PROJECT") == "malspark-idem"
 
     def test_logs_no_part_of_the_api_key(self, caplog: pytest.LogCaptureFixture) -> None:
         """The log message names the project and nothing from the key."""
         import logging
 
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer.__new__(ServiceContainer)
         container.config = Settings(
             langchain_tracing_v2=True,
             langchain_api_key="ls_secretkey9999",
-            langchain_project="maljan",
+            langchain_project="malspark",
         )
-        with caplog.at_level(logging.INFO, logger="maljan"):
+        with caplog.at_level(logging.INFO, logger="malspark"):
             with patch.dict(os.environ, {}, clear=False):
                 container._configure_langsmith()  # type: ignore[union-attr]
 
@@ -215,7 +215,7 @@ class TestConfigureLangSmithMethod:
         assert not any("9999" in m for m in messages), (
             "a fragment of the key narrows a brute force and confirms a key found elsewhere"
         )
-        assert any("maljan" in m for m in messages), "the project name is what the line is for"
+        assert any("malspark" in m for m in messages), "the project name is what the line is for"
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +226,7 @@ class TestConfigureLangSmithMethod:
 class TestContainerAutoWiring:
     def test_init_calls_configure_langsmith(self) -> None:
         """__init__ must call _configure_langsmith automatically."""
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         with patch.object(ServiceContainer, "_configure_langsmith") as mock_configure:
             ServiceContainer(config=Settings(), mock=True)

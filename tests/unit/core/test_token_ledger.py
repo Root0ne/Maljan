@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from maljan.analysis.run_summary import RunSummaryBuilder, TokenUsageMetrics, tokens_sentence
-from maljan.core.token_ledger import (
+from malspark.analysis.run_summary import RunSummaryBuilder, TokenUsageMetrics, tokens_sentence
+from malspark.core.token_ledger import (
     TokenLedger,
     estimate_tokens,
     record_response_usage,
@@ -100,7 +100,7 @@ class TestOneAnswer:
         answer = _Resp(
             "hi",
             _usage(1, 1),
-            {"maljan_model": "ollama/gemma", "maljan_fallback": "openai/qwen: timed out"},
+            {"malspark_model": "ollama/gemma", "malspark_fallback": "openai/qwen: timed out"},
         )
         record_response_usage(led, answer, agent="static", model="openai/qwen")
         snap = led.snapshot()
@@ -228,8 +228,8 @@ class TestRunSummaryIntegration:
 
 def _run_summary_text(run_summary: dict) -> str:
     """The report's run-summary appendix for a report carrying ``run_summary``."""
-    from maljan.reporting.models import MalwareReport
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.models import MalwareReport
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     report = MalwareReport.model_validate(
         {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}

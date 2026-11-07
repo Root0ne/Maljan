@@ -16,11 +16,15 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.core.config import MCPServerConfig
-from maljan.core.tool_declarations import ErrorPattern
-from maljan.providers.declared_errors import declared_error, declared_failure, with_declared_errors
-from maljan.providers.servers import ServerHandle
-from maljan.tools.errors import BAD_ARGUMENT, error_parts
+from malspark.core.config import MCPServerConfig
+from malspark.core.tool_declarations import ErrorPattern
+from malspark.providers.declared_errors import (
+    declared_error,
+    declared_failure,
+    with_declared_errors,
+)
+from malspark.providers.servers import ServerHandle
+from malspark.tools.errors import BAD_ARGUMENT, error_parts
 
 REFUSAL = "Unsupported query syntax near ']'"
 LISTING = "0x401000 Unsupported query syntax near ']' is a string the sample holds\nand more"
@@ -123,7 +127,7 @@ def test_a_protocol_error_is_held_by_its_message() -> None:
 
 
 def test_radare2_reads_its_errors_by_the_same_function() -> None:
-    from maljan.providers.static import r2
+    from malspark.providers.static import r2
 
     for reply in (
         "Invalid regex used in filter parameter, try a simpler expression",
@@ -155,8 +159,8 @@ def test_the_reading_is_linear_on_a_hostile_answer() -> None:
 
 
 def test_a_declared_open_tool_reads_its_errors_too() -> None:
-    from maljan.core.config import SampleOpenConfig
-    from maljan.providers.sample_open import SampleNotes
+    from malspark.core.config import SampleOpenConfig
+    from malspark.providers.sample_open import SampleNotes
 
     spec = SampleOpenConfig(open_tool="search", path_argument="query")
     config = _invented([{"match": r"Failed to open .*", "code": "tool_failed"}])

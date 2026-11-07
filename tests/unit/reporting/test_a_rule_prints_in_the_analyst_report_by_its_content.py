@@ -30,10 +30,10 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting import detection_signatures as drafts
-from maljan.reporting.builder import build_consolidated_iocs
-from maljan.reporting.code_constants import code_constants_from_ledger, little_endian
-from maljan.reporting.detection_signatures import (
+from malspark.reporting import detection_signatures as drafts
+from malspark.reporting.builder import build_consolidated_iocs
+from malspark.reporting.code_constants import code_constants_from_ledger, little_endian
+from malspark.reporting.detection_signatures import (
     NO_STORED_GROUP_FEW_HASHES,
     NO_STORED_GROUP_NO_SEED,
     NOT_PRINTED_HASH_ONLY,
@@ -45,7 +45,7 @@ from maljan.reporting.detection_signatures import (
     hunting_query,
     precision_line,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     BoundValue,
     CodeConstant,
     DetectionRule,
@@ -57,9 +57,9 @@ from maljan.reporting.models import (
     SampleIdentity,
     SampleString,
 )
-from maljan.reporting.renderers import MarkdownRenderer
-from maljan.reporting.renderers.layout import ANALYST, BUNDLE, FULL
-from maljan.schemas.evidence import LedgerEntry
+from malspark.reporting.renderers import MarkdownRenderer
+from malspark.reporting.renderers.layout import ANALYST, BUNDLE, FULL
+from malspark.schemas.evidence import LedgerEntry
 from tests.unit.reporting._no_rule_reports import no_rule_reports
 from tests.unit.reporting._report_inventory import stored_runs
 
@@ -70,7 +70,7 @@ GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "reporting" / "no_rules.json"
 HOST = "gate9.example.org"
 URL = f"https://{HOST}/live/"
 AGENT = "Mozilla/4.0 (compatible; Tob 1.1)"
-BODY = 'rule Maljan_AutoGen_loader { strings: $s0 = "gate9" condition: $s0 }'
+BODY = 'rule Malspark_AutoGen_loader { strings: $s0 = "gate9" condition: $s0 }'
 BUDGET = 60
 SEED = "0x33629d40"
 HASHES = ("0x2ec21d6c", "0xc24fa5f4", "0x447d086b")
@@ -93,7 +93,7 @@ def _report(*rules: DetectionRule) -> MalwareReport:
 
 
 def _yara(**check: Any) -> DetectionRule:
-    return DetectionRule(kind="yara", name="Maljan_AutoGen_loader", body=BODY, **check)
+    return DetectionRule(kind="yara", name="Malspark_AutoGen_loader", body=BODY, **check)
 
 
 def _analyst(report: MalwareReport) -> str:
@@ -178,8 +178,8 @@ class TestOnlyAContentMatchPrintsItsBody:
         )
 
     def test_a_behaviour_and_a_traffic_rule_print_with_their_precision(self) -> None:
-        sigma = DetectionRule(kind="sigma", name="Maljan_AutoGen_Sigma_loader", body="title: s")
-        suricata = DetectionRule(kind="suricata", name="Maljan_AutoGen_Suricata_loader", body="#")
+        sigma = DetectionRule(kind="sigma", name="Malspark_AutoGen_Sigma_loader", body="title: s")
+        suricata = DetectionRule(kind="suricata", name="Malspark_AutoGen_Suricata_loader", body="#")
         analyst = _analyst(_report(sigma, suricata))
 
         assert analyst_print_gate(sigma) is None and analyst_print_gate(suricata) is None
@@ -498,7 +498,7 @@ class TestTheDraftMatchesTheStoredValues:
             blob = b"".join(chunks)
             path.write_bytes(blob)
             rendered = drafts._render_yara(
-                rule_name="Maljan_AutoGen_loader",
+                rule_name="Malspark_AutoGen_loader",
                 sha256="c" * 64,
                 imphash=None,
                 strings=strings,

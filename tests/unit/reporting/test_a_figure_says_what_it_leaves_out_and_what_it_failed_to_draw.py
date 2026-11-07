@@ -7,9 +7,13 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting import figures
-from maljan.reporting.figures import build_attack_matrix, build_entropy_chart, build_infection_chain
-from maljan.reporting.models import (
+from malspark.reporting import figures
+from malspark.reporting.figures import (
+    build_attack_matrix,
+    build_entropy_chart,
+    build_infection_chain,
+)
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     PESection,

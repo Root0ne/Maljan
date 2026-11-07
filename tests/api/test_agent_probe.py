@@ -35,7 +35,7 @@ class _Exploding:
 @pytest.fixture(autouse=True)
 def _no_llm(monkeypatch):
     monkeypatch.setattr(
-        "maljan.llm.registry.LLMProviderRegistry",
+        "malspark.llm.registry.LLMProviderRegistry",
         lambda *a, **k: _Exploding(),
         raising=False,
     )
@@ -76,8 +76,8 @@ def _no_servers(monkeypatch):
     async def _atools_for_ref(self, ref, job_id, **ctx):  # type: ignore[no-untyped-def]
         return [], []
 
-    monkeypatch.setattr("maljan.providers.servers.ServerRegistry.atools_for", _atools_for)
-    monkeypatch.setattr("maljan.providers.servers.ServerRegistry.atools_for_ref", _atools_for_ref)
+    monkeypatch.setattr("malspark.providers.servers.ServerRegistry.atools_for", _atools_for)
+    monkeypatch.setattr("malspark.providers.servers.ServerRegistry.atools_for_ref", _atools_for_ref)
 
 
 @pytest.mark.asyncio
@@ -117,7 +117,7 @@ async def test_a_generic_agent_resolves_to_the_prompt_the_operator_typed():
         "agents.profiles": {"one": {"analysts": ["strings"]}},
         "agents.profile": "one",
     }
-    from maljan.agents.prompt_fragments import NO_TOOLS_STATEMENT
+    from malspark.agents.prompt_fragments import NO_TOOLS_STATEMENT
 
     result = await probe_agent({"name": "strings", "settings": staged})
     assert result.ok is True
@@ -278,7 +278,7 @@ async def test_a_degraded_server_is_reported_per_server_rather_than_failing_the_
     async def _atools_for(self, role, job_id, *, exclude="", **ctx):  # type: ignore[no-untyped-def]
         return [], ["mcp server 'network' unavailable"]
 
-    monkeypatch.setattr("maljan.providers.servers.ServerRegistry.atools_for", _atools_for)
+    monkeypatch.setattr("malspark.providers.servers.ServerRegistry.atools_for", _atools_for)
     result = await probe_agent({"name": "network", "settings": {}})
     assert result.ok is True
     statuses = {s["key"]: s["status"] for s in result.details["servers"]}
@@ -313,8 +313,8 @@ async def test_a_wedged_server_open_is_bounded_by_the_probe_budget_not_by_its_ow
     async def _closed(self) -> None:  # type: ignore[no-untyped-def]
         cleaned_up.set()
 
-    monkeypatch.setattr("maljan.providers.servers.ServerRegistry.atools_for", _wedged)
-    monkeypatch.setattr("maljan.core.container.ServiceContainer.aclose", _closed)
+    monkeypatch.setattr("malspark.providers.servers.ServerRegistry.atools_for", _wedged)
+    monkeypatch.setattr("malspark.core.container.ServiceContainer.aclose", _closed)
 
     t0 = time.perf_counter()
     result = await probe_agent({"name": "network", "settings": {}})
@@ -358,7 +358,7 @@ async def test_each_bound_server_reports_only_its_own_tools(monkeypatch):
         name = f"{ref.server}_tool"
         return [StructuredTool.from_function(func=lambda: "x", name=name, description=name)], []
 
-    monkeypatch.setattr("maljan.providers.servers.ServerRegistry.atools_for_ref", _atools_for_ref)
+    monkeypatch.setattr("malspark.providers.servers.ServerRegistry.atools_for_ref", _atools_for_ref)
     result = await probe_agent({"name": "multi", "settings": staged})
 
     assert result.ok is True
@@ -406,7 +406,7 @@ async def test_a_server_that_blows_up_while_listed_degrades_only_its_own_entry(m
     a 500, must not blank out the other server's already-fetched tools, and
     must not skip closing the container the successful resolve opened.
     """
-    from maljan.core.container import ServiceContainer
+    from malspark.core.container import ServiceContainer
 
     # Bound via ``agents`` (role-bound), not an explicit ``ToolRef`` — the
     # initial resolve then reads them through ``atools_for`` (already stubbed
@@ -438,7 +438,7 @@ async def test_a_server_that_blows_up_while_listed_degrades_only_its_own_entry(m
         close_calls.append(None)
         await original_aclose(self)
 
-    monkeypatch.setattr("maljan.providers.servers.ServerRegistry.atools_for_ref", _atools_for_ref)
+    monkeypatch.setattr("malspark.providers.servers.ServerRegistry.atools_for_ref", _atools_for_ref)
     monkeypatch.setattr(ServiceContainer, "aclose", _counted_aclose)
 
     result = await probe_agent({"name": "multi", "settings": staged})
@@ -658,8 +658,8 @@ class TestTheProbeMakesTheCallTheJobWillMake:
         self, provider: str, endpoint: str, fragment: str
     ) -> None:
         from app.services.settings_probes import COMPLETION_MAX_TOKENS
-        from maljan.core.settings_overrides import build_settings
-        from maljan.llm.provider_base import facts_of
+        from malspark.core.settings_overrides import build_settings
+        from malspark.llm.provider_base import facts_of
 
         request = facts_of(provider).one_turn_request(build_settings({}), endpoint, "a-model")
         assert request is not None

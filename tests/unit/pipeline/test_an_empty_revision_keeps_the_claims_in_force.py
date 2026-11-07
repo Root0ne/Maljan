@@ -24,12 +24,12 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     NO_STRUCTURED_REPORT_STATUS,
     WRITTEN_BESIDES_CLAIMS,
     BaseAnalyst,
 )
-from maljan.pipeline.nodes import (
+from malspark.pipeline.nodes import (
     RevisionInput,
     answer_with_retry_additions,
     make_revision_node,
@@ -37,8 +37,8 @@ from maljan.pipeline.nodes import (
     retry_additions_text,
     revision_decided_nothing,
 )
-from maljan.pipeline.state import AgentArgument
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
+from malspark.pipeline.state import AgentArgument
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, Finding
 from tests.stages import paper_profile
 
 NAMES = ["reverser", "dynamic"]
@@ -114,7 +114,7 @@ def _revise(outcomes: dict[str, Any], in_force: dict[str, AgentISR]) -> dict[str
     }
     container = _container(outcomes)
     with patch(
-        "maljan.pipeline.nodes._revision_input",
+        "malspark.pipeline.nodes._revision_input",
         lambda _state, _container, _name: RevisionInput(text="data"),
     ):
         return asyncio.run(make_revision_node(container)(state))
@@ -249,7 +249,7 @@ class TestTheAdditions:
         )
         # The same sentence citing another entry is another claim.
         other_entry = _claim(TIMING.claim, "[ev_0120]")
-        with caplog.at_level(logging.INFO, logger="maljan"):
+        with caplog.at_level(logging.INFO, logger="malspark"):
             combined = answer_with_retry_additions(
                 _in_force("reverser"), _empty_revision_retried("reverser", reworded, other_entry), 2
             )
@@ -293,7 +293,7 @@ class TestTheRevisionPathRecordsIt:
     def _revise(self, revision: str, answers: list[str]) -> AgentISR:
         analyst = _Reviser(llm=_Answers(answers), name="reverser")  # type: ignore[arg-type]
         analyst.revision_text = revision
-        with patch("maljan.agents.base_agent.validity_check_available", return_value=True):
+        with patch("malspark.agents.base_agent.validity_check_available", return_value=True):
             _text, isr = analyst.safe_revise_isr("the evidence", "own report", {}, "feedback", 2)
         return isr
 

@@ -16,9 +16,9 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.pipeline import nodes
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.pipeline import nodes
 
 _NODES = Path(nodes.__file__)
 

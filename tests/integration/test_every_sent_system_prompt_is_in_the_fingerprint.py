@@ -30,14 +30,14 @@ pytest.importorskip("mcp", reason="the tool sidecars speak the mcp package's pro
 
 from scripts.rehearsal.inprocess import Rehearsal, rehearse  # noqa: E402
 
-from maljan.analysis.setup_prompts import (  # noqa: E402
+from malspark.analysis.setup_prompts import (  # noqa: E402
     PLACEHOLDER_FORMAT,
     PLACEHOLDER_NAME,
     PLACEHOLDER_PATH,
     PLACEHOLDER_SHA256,
     format_fragments,
 )
-from maljan.core.input_meter import digest  # noqa: E402
+from malspark.core.input_meter import digest  # noqa: E402
 
 
 def _loopback_binds() -> bool:
@@ -76,7 +76,7 @@ def _system_prompts(body: dict[str, Any]) -> list[str]:
 
 def _placeholder_job(text: str, real: dict[str, str]) -> str:
     """``text`` as the builder writes it for the placeholder job."""
-    from maljan.agents.prompt_fragments import format_fragment
+    from malspark.agents.prompt_fragments import format_fragment
 
     neutral = format_fragment(*PLACEHOLDER_FORMAT)
     for value, placeholder in sorted(real.items(), key=lambda kv: -len(kv[0])):

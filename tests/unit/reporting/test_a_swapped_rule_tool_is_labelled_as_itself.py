@@ -10,8 +10,8 @@ run with another tool of the kind swapped in pair their shared rules.
 
 from __future__ import annotations
 
-from maljan.reporting.ledger_report import CAPABILITIES_TITLE, RULE_MATCHES_TITLE, titled_tool
-from maljan.reporting.run_diff import RunRecord, _detection_items, diff_runs
+from malspark.reporting.ledger_report import CAPABILITIES_TITLE, RULE_MATCHES_TITLE, titled_tool
+from malspark.reporting.run_diff import RunRecord, _detection_items, diff_runs
 
 
 def test_a_title_gives_back_its_tool_and_any_other_title_nothing() -> None:

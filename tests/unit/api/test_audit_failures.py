@@ -22,7 +22,7 @@ class _BrokenFactory:
 async def test_auth_audit_failure_is_an_error_and_is_counted(monkeypatch, caplog):
     monkeypatch.setattr(audit_module, "async_session_factory", _BrokenFactory())
     before = observability.counters.audit_write_failures
-    with caplog.at_level(logging.ERROR, logger="maljan.api.audit"):
+    with caplog.at_level(logging.ERROR, logger="malspark.api.audit"):
         await auth_module._audit(None, None, "auth.login.success", request=None)
     assert observability.counters.audit_write_failures == before + 1
     errors = [r for r in caplog.records if r.levelno == logging.ERROR]

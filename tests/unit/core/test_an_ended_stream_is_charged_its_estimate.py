@@ -13,10 +13,10 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage
 
-from maljan.analysis.run_summary import spend_lines
-from maljan.core.spend import SpendMeter
-from maljan.core.token_ledger import TokenLedger, record_response_usage
-from maljan.llm.stream_watch import ENDED_KEY, ESTIMATED_USAGE_KEY, ESTIMATED_USAGE_SOURCE
+from malspark.analysis.run_summary import spend_lines
+from malspark.core.spend import SpendMeter
+from malspark.core.token_ledger import TokenLedger, record_response_usage
+from malspark.llm.stream_watch import ENDED_KEY, ESTIMATED_USAGE_KEY, ESTIMATED_USAGE_SOURCE
 
 PRICE = {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 2.0, "cached_input_usd_per_mtok": 0.1}
 

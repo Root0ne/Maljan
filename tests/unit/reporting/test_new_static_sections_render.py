@@ -19,7 +19,7 @@ things a reader needs in order to go and look at the payload.
 
 from __future__ import annotations
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     FamilyAttribution,
     FileHashes,
     MalwareReport,
@@ -27,7 +27,7 @@ from maljan.reporting.models import (
     SampleIdentity,
     StaticAnalysis,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 
 def _report(static: StaticAnalysis | None = None, **attr: object) -> MalwareReport:
@@ -281,7 +281,7 @@ class TestComputedSignalsThatWereNeverPrinted:
     """
 
     def test_a_homograph_domain_names_what_it_imitates(self) -> None:
-        from maljan.reporting.models import NetworkDomain, NetworkIOCs
+        from malspark.reporting.models import NetworkDomain, NetworkIOCs
 
         report = _report()
         report.network = NetworkIOCs(
@@ -301,7 +301,7 @@ class TestComputedSignalsThatWereNeverPrinted:
         assert "punycode" in md
 
     def test_a_dga_score_reaches_the_reader(self) -> None:
-        from maljan.reporting.models import NetworkDomain, NetworkIOCs
+        from malspark.reporting.models import NetworkDomain, NetworkIOCs
 
         report = _report()
         report.network = NetworkIOCs(
@@ -312,7 +312,7 @@ class TestComputedSignalsThatWereNeverPrinted:
 
     def test_an_ordinary_domain_gains_no_noise(self) -> None:
         """The reason column is shared, so a clean domain must stay clean."""
-        from maljan.reporting.models import NetworkDomain, NetworkIOCs
+        from malspark.reporting.models import NetworkDomain, NetworkIOCs
 
         report = _report()
         report.network = NetworkIOCs(domains=[NetworkDomain(fqdn="example.com")])
@@ -322,7 +322,7 @@ class TestComputedSignalsThatWereNeverPrinted:
         assert "punycode" not in md
 
     def test_magic_bytes_let_a_reader_disagree_with_the_file_type(self) -> None:
-        from maljan.reporting.models import FileHashes, SampleIdentity
+        from malspark.reporting.models import FileHashes, SampleIdentity
 
         report = _report()
         report.identity = SampleIdentity(
@@ -347,7 +347,7 @@ class TestTheComposedSectionsReachTheReport:
     """
 
     def test_the_prose_sections_and_their_evidence_refs_render(self) -> None:
-        from maljan.reporting.models import TechnicalAnalysis, TechnicalSubsection
+        from malspark.reporting.models import TechnicalAnalysis, TechnicalSubsection
 
         report = _report()
         report.technical_analysis = TechnicalAnalysis(
@@ -364,7 +364,7 @@ class TestTheComposedSectionsReachTheReport:
 
     def test_the_spared_processes_are_shown_not_just_the_killed_ones(self) -> None:
         """The exclusions are often the more identifying half of the list."""
-        from maljan.reporting.models import ServiceProcessKill, TechnicalAnalysis
+        from malspark.reporting.models import ServiceProcessKill, TechnicalAnalysis
 
         report = _report()
         report.technical_analysis = TechnicalAnalysis(
@@ -377,7 +377,7 @@ class TestTheComposedSectionsReachTheReport:
         assert "explorer.exe" in md
 
     def test_c2_channels_render(self) -> None:
-        from maljan.reporting.models import C2Channel
+        from malspark.reporting.models import C2Channel
 
         report = _report()
         report.c2_channels = [
@@ -390,7 +390,7 @@ class TestTheComposedSectionsReachTheReport:
     def test_a_stored_conclusion_keeps_its_rating_and_drops_its_restatement(self) -> None:
         """The conclusion restated the summary and is no longer a section; a
         stored report's sophistication rating moves beside the verdict."""
-        from maljan.reporting.models import Conclusion
+        from malspark.reporting.models import Conclusion
 
         report = _report()
         report.conclusion = Conclusion(text="A commodity loader.", sophistication_rating="low")
@@ -417,7 +417,7 @@ class TestTheComposedSectionsReachTheReport:
         so all three formats were losing the composer output together and all
         three are fixed by one change. Worth pinning: if HTML ever grows its own
         section list, this is what notices."""
-        from maljan.reporting.renderers.html import HtmlRenderer
+        from malspark.reporting.renderers.html import HtmlRenderer
 
         report = _report()
         report.intro_background = "A commodity loader."
@@ -435,7 +435,7 @@ class TestTheComposedSectionsReachTheReport:
         deterministic sections above it. Marking it is the same concession the
         "(unverified)" family badge makes.
         """
-        from maljan.reporting.models import TechnicalAnalysis, TechnicalSubsection
+        from malspark.reporting.models import TechnicalAnalysis, TechnicalSubsection
 
         report = _report()
         report.intro_background = "Background prose."
@@ -458,7 +458,7 @@ class TestTheComposedSectionsReachTheReport:
     def test_the_note_alone_writes_nothing_under_the_report_model(self) -> None:
         """An empty TechnicalAnalysis carries the note and nothing else; no
         subsection is headed as the report model's words."""
-        from maljan.reporting.models import TechnicalAnalysis
+        from malspark.reporting.models import TechnicalAnalysis
 
         report = _report()
         report.technical_analysis = TechnicalAnalysis()
@@ -477,7 +477,7 @@ class TestTheComposedSectionsReachTheReport:
         populated from sandbox telemetry, so usually empty — but when a dropped
         child resolves the C2 rather than the parent, this is the finding, and
         the domains table had no column for it."""
-        from maljan.reporting.models import NetworkDomain, NetworkIOCs
+        from malspark.reporting.models import NetworkDomain, NetworkIOCs
 
         report = _report()
         report.network = NetworkIOCs(

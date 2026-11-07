@@ -20,7 +20,7 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.llm.generation_rate import (
+from malspark.llm.generation_rate import (
     TIMEOUT_MARGIN,
     UNMEASURED_REQUEST_TIMEOUT_SECONDS,
     GenerationRates,
@@ -123,8 +123,8 @@ class TestTheTimeoutFollowsTheRate:
     def test_the_unmeasured_timeout_is_the_one_the_client_is_built_with(self) -> None:
         from pydantic import SecretStr
 
-        from maljan.core.config import Settings
-        from maljan.llm.openai_provider import OpenAIProvider
+        from malspark.core.config import Settings
+        from malspark.llm.openai_provider import OpenAIProvider
 
         settings = Settings(_env_file=None)  # type: ignore[call-arg]
         settings.llm.openai.base_url = "http://127.0.0.1:8080/v1"
@@ -183,9 +183,9 @@ class TestEveryRealCallIsMeasured:
     def test_the_container_meters_every_model_it_builds(self) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
-        from maljan.llm.generation_rate import RateMeter
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
+        from malspark.llm.generation_rate import RateMeter
 
         container = ServiceContainer(Settings(_env_file=None), mock=True)  # type: ignore[call-arg]
         registry = MagicMock()
@@ -215,12 +215,12 @@ def _measured() -> GenerationRates:
 
 class TestTheJudgeAndTheComposerAskForIt:
     def test_the_verdict_call_is_sized_from_the_judge_s_model(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
-        from maljan.core.config import get_settings
+        from malspark.agents.judge_agent import JudgeAgent
+        from malspark.core.config import get_settings
 
         judge = JudgeAgent(llm=_Named())  # type: ignore[arg-type]
         judge.generation_rates = _measured()
-        from maljan.agents.judge_agent import judge_output_cap
+        from malspark.agents.judge_agent import judge_output_cap
 
         assert get_settings() is not None
         cap = judge_output_cap().tokens
@@ -230,14 +230,14 @@ class TestTheJudgeAndTheComposerAskForIt:
         )
 
     def test_a_standalone_judge_keeps_the_configured_value(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         judge = JudgeAgent(llm=_Named())  # type: ignore[arg-type]
 
         assert judge._verdict_timeout(600.0) == 600.0
 
     def test_a_composer_section_is_sized_from_the_reporter_s_model(self) -> None:
-        from maljan.reporting.composer import ReportComposer
+        from malspark.reporting.composer import ReportComposer
 
         composer = ReportComposer(
             llm=_Named(),  # type: ignore[arg-type]
@@ -250,7 +250,7 @@ class TestTheJudgeAndTheComposerAskForIt:
         assert composer._section_timeout() == pytest.approx(2 * 900 / 3.8 * TIMEOUT_MARGIN)
 
     def test_a_composer_with_no_rates_keeps_the_configured_wait(self) -> None:
-        from maljan.reporting.composer import ReportComposer
+        from malspark.reporting.composer import ReportComposer
 
         composer = ReportComposer(llm=_Named(), per_section_timeout=120)  # type: ignore[arg-type]
 
@@ -259,7 +259,7 @@ class TestTheJudgeAndTheComposerAskForIt:
 
 class TestTheRunSummaryRecordsIt:
     def _summary(self) -> Any:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         rates = _measured()
         rates.call_timeout("judge:verdict", SLOW, 600.0, 8192)
@@ -292,7 +292,7 @@ class TestTheRunSummaryRecordsIt:
         assert "## Generation Rate" in self._summary().to_markdown()
 
     def test_a_run_that_measured_nothing_records_nothing(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         builder = RunSummaryBuilder(start_time=0.0).set_generation(GenerationRates().snapshot())
 
@@ -311,7 +311,7 @@ class _Failing(FakeMessagesListChatModel):
 
 class TestAFallbackListIsMeasuredModelByModel:
     def _list(self) -> Any:
-        from maljan.llm.fallback import FallbackChatModel
+        from malspark.llm.fallback import FallbackChatModel
 
         first = _Failing(responses=[_ollama_answer(1, 1.0)])
         second = FakeMessagesListChatModel(responses=[_ollama_answer(38, 10.0)])
@@ -322,7 +322,7 @@ class TestAFallbackListIsMeasuredModelByModel:
         )
 
     def test_the_answer_counts_against_the_model_that_gave_it(self) -> None:
-        from maljan.llm.fallback import provider_failure
+        from malspark.llm.fallback import provider_failure
 
         assert provider_failure(ConnectionError("connection refused")) is not None
         model = self._list()
@@ -336,7 +336,7 @@ class TestAFallbackListIsMeasuredModelByModel:
         assert set(rates.snapshot()["models"]) == {"second-model"}
 
     def test_a_call_is_sized_for_the_model_that_now_answers(self) -> None:
-        from maljan.llm.generation_rate import model_name_of
+        from malspark.llm.generation_rate import model_name_of
 
         model = self._list()
         assert model_name_of(model) == "first-model"
@@ -351,8 +351,8 @@ class TestTheSectionCapBoundsTheCall:
     def _composer(provider: str, thinking_off: bool) -> tuple[Any, Any]:
         from unittest.mock import MagicMock
 
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         settings = Settings(_env_file=None)  # type: ignore[call-arg]
         settings.llm.provider = provider
@@ -392,9 +392,9 @@ class TestTheSectionCapBoundsTheCall:
     def test_each_model_of_the_list_is_capped_by_its_own_provider_s_switch(self) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.core.config import REPORTER_AGENT_KEY, AgentLLMConfig, ModelChoice, Settings
-        from maljan.core.container import ServiceContainer
-        from maljan.llm.registry import _cap_for_provider
+        from malspark.core.config import REPORTER_AGENT_KEY, AgentLLMConfig, ModelChoice, Settings
+        from malspark.core.container import ServiceContainer
+        from malspark.llm.registry import _cap_for_provider
 
         settings = Settings(_env_file=None)  # type: ignore[call-arg]
         settings.llm.ollama.disable_thinking = True
@@ -426,8 +426,8 @@ class TestTheSectionCapBoundsTheCall:
         assert kwargs == {"max_tokens": 900}
 
     def test_an_ollama_model_takes_the_cap_as_num_predict(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.llm.ollama_provider import OllamaProvider
+        from malspark.core.config import Settings
+        from malspark.llm.ollama_provider import OllamaProvider
 
         built: Any = OllamaProvider(Settings(_env_file=None)).build_model(  # type: ignore[call-arg]
             "qwen3.8:27b", 0.1, max_tokens=900
@@ -441,8 +441,8 @@ class TestAComposerSectionOnItsOwnClock:
     def test_the_list_measures_its_deadline_on_the_section_s_sized_wait(self) -> None:
         from unittest.mock import patch
 
-        from maljan.reporting.composer import ReportComposer
-        from maljan.reporting.models import MalwareReport
+        from malspark.reporting.composer import ReportComposer
+        from malspark.reporting.models import MalwareReport
 
         seen: list[tuple[float, float]] = []
 
@@ -463,11 +463,11 @@ class TestAComposerSectionOnItsOwnClock:
 
         composer._invoke = _never  # type: ignore[method-assign]
         with (
-            patch("maljan.reporting.composer.is_empty", lambda _b: False),
-            patch("maljan.reporting.composer.bundle_for", lambda *_a, **_k: {}),
+            patch("malspark.reporting.composer.is_empty", lambda _b: False),
+            patch("malspark.reporting.composer.bundle_for", lambda *_a, **_k: {}),
             # The conclusion is an analyst report section: its bundle is its own.
-            patch("maljan.reporting.composer.analyst_bundle", lambda *_a, **_k: {}),
-            patch("maljan.reporting.composer._bundle_text", lambda *_a, **_k: ""),
+            patch("malspark.reporting.composer.analyst_bundle", lambda *_a, **_k: {}),
+            patch("malspark.reporting.composer._bundle_text", lambda *_a, **_k: ""),
         ):
             asyncio.run(
                 composer._author("conclusion", MalwareReport.model_construct(), {}, Any, "x")
@@ -477,7 +477,7 @@ class TestAComposerSectionOnItsOwnClock:
         assert seen == [(pytest.approx(2 * 900 / 3.8 * TIMEOUT_MARGIN), 0.4)]
 
     def test_a_section_the_cap_cut_says_so(self) -> None:
-        from maljan.reporting.composer import ReportComposer, _ProseOut
+        from malspark.reporting.composer import ReportComposer, _ProseOut
 
         class _Cut:
             model_name = "slow-model"
@@ -491,7 +491,7 @@ class TestAComposerSectionOnItsOwnClock:
         composer = ReportComposer(llm=_Cut(), section_max_tokens=900)  # type: ignore[arg-type]
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(
-                "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False
+                "malspark.reporting.composer.structured_output_supported_for_llm", lambda _l: False
             )
             result = asyncio.run(
                 composer._invoke([HumanMessage(content="x")], _ProseOut, section="conclusion")
@@ -504,7 +504,7 @@ class TestAComposerSectionOnItsOwnClock:
 def test_one_tag_on_two_servers_is_two_paces() -> None:
     from langchain_ollama import ChatOllama
 
-    from maljan.llm.generation_rate import model_name_of
+    from malspark.llm.generation_rate import model_name_of
     from tests.credential_shapes import password
 
     local = ChatOllama(model="qwen3.8:27b", base_url="http://127.0.0.1:11434")
@@ -524,9 +524,9 @@ class TestAModelListSwitchSticksForTheReportStage:
         from langchain_core.language_models.chat_models import BaseChatModel
         from langchain_core.outputs import ChatGeneration, ChatResult
 
-        from maljan.llm.fallback import FallbackChatModel, restart_models
-        from maljan.reporting.composer import ReportComposer, _ProseOut
-        from maljan.reporting.models import MalwareReport
+        from malspark.llm.fallback import FallbackChatModel, restart_models
+        from malspark.reporting.composer import ReportComposer, _ProseOut
+        from malspark.reporting.models import MalwareReport
 
         class _Stalls(BaseChatModel):
             calls: list[int] = []
@@ -574,13 +574,13 @@ class TestAModelListSwitchSticksForTheReportStage:
             ]
 
         with (
-            patch("maljan.reporting.composer.is_empty", lambda _b: False),
-            patch("maljan.reporting.composer.bundle_for", lambda *_a, **_k: {}),
+            patch("malspark.reporting.composer.is_empty", lambda _b: False),
+            patch("malspark.reporting.composer.bundle_for", lambda *_a, **_k: {}),
             # The conclusion is an analyst report section: its bundle is its own.
-            patch("maljan.reporting.composer.analyst_bundle", lambda *_a, **_k: {}),
-            patch("maljan.reporting.composer._bundle_text", lambda *_a, **_k: ""),
+            patch("malspark.reporting.composer.analyst_bundle", lambda *_a, **_k: {}),
+            patch("malspark.reporting.composer._bundle_text", lambda *_a, **_k: ""),
             patch(
-                "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False
+                "malspark.reporting.composer.structured_output_supported_for_llm", lambda _l: False
             ),
         ):
             authored = asyncio.run(_four_sections())
@@ -592,8 +592,8 @@ class TestAModelListSwitchSticksForTheReportStage:
 
 def _appendix_text(run_summary: dict) -> str:
     """The report's run-summary appendix for a report carrying ``run_summary``."""
-    from maljan.reporting.models import MalwareReport
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.models import MalwareReport
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     report = MalwareReport.model_validate(
         {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}
@@ -644,7 +644,7 @@ class TestThePromptReadIsTimedToo:
         assert "prompt_tokens" not in rates.snapshot()["timeouts"]["judge:verdict"]
 
     def test_the_report_states_the_derivation(self) -> None:
-        from maljan.analysis.run_summary import generation_lines
+        from malspark.analysis.run_summary import generation_lines
 
         rates = self._rates(write=20.0, read=100.0, whole=15.0)
         rates.call_timeout("composer:section", "m", 120.0, 8192, prompt_tokens=24000)
@@ -661,7 +661,7 @@ class TestThePromptReadIsTimedToo:
 
         from langchain_core.outputs import ChatGeneration, LLMResult
 
-        from maljan.llm.generation_rate import RateMeter
+        from malspark.llm.generation_rate import RateMeter
 
         rates = GenerationRates()
         meter = RateMeter(rates, "m")
@@ -687,8 +687,8 @@ class TestTheRequestCarriesItsOwnTimeout:
     def _openai(max_tokens: int) -> Any:
         from pydantic import SecretStr
 
-        from maljan.core.config import Settings
-        from maljan.llm.openai_provider import OpenAIProvider
+        from malspark.core.config import Settings
+        from malspark.llm.openai_provider import OpenAIProvider
 
         settings = Settings(_env_file=None)  # type: ignore[call-arg]
         settings.llm.openai.base_url = "https://api.example.com"
@@ -713,7 +713,7 @@ class TestTheRequestCarriesItsOwnTimeout:
         assert rates.request_timeout("fast", 8192) == UNMEASURED_REQUEST_TIMEOUT_SECONDS
 
     def test_the_request_payload_carries_the_sized_timeout(self) -> None:
-        from maljan.llm.generation_rate import model_name_of
+        from malspark.llm.generation_rate import model_name_of
 
         built = self._openai(393216)
         rates = GenerationRates()
@@ -733,7 +733,7 @@ class TestTheRequestCarriesItsOwnTimeout:
         assert "timeout" not in payload
 
     def test_a_request_within_its_client_s_timeout_is_left_to_it(self) -> None:
-        from maljan.llm.generation_rate import model_name_of
+        from malspark.llm.generation_rate import model_name_of
 
         built = self._openai(8192)
         rates = GenerationRates()
@@ -752,9 +752,9 @@ class TestTheRequestCarriesItsOwnTimeout:
     def test_an_anthropic_request_is_sized_the_same_way(self) -> None:
         from pydantic import SecretStr
 
-        from maljan.core.config import Settings
-        from maljan.llm.anthropic_provider import AnthropicProvider
-        from maljan.llm.generation_rate import model_name_of
+        from malspark.core.config import Settings
+        from malspark.llm.anthropic_provider import AnthropicProvider
+        from malspark.llm.generation_rate import model_name_of
 
         settings = Settings(_env_file=None)  # type: ignore[call-arg]
         settings.llm.anthropic.api_key = SecretStr("hosted")
@@ -770,9 +770,9 @@ class TestTheRequestCarriesItsOwnTimeout:
     def test_the_deepseek_dialect_carries_the_timeout_and_its_cap_together(self) -> None:
         from pydantic import SecretStr
 
-        from maljan.core.config import Settings
-        from maljan.llm.generation_rate import model_name_of
-        from maljan.llm.openai_provider import OpenAIProvider
+        from malspark.core.config import Settings
+        from malspark.llm.generation_rate import model_name_of
+        from malspark.llm.openai_provider import OpenAIProvider
 
         settings = Settings(_env_file=None)  # type: ignore[call-arg]
         settings.llm.openai.base_url = "https://api.example.com"
@@ -789,7 +789,7 @@ class TestTheRequestCarriesItsOwnTimeout:
         assert payload["extra_body"]["max_tokens"] == 393216
 
     def test_a_responses_api_request_is_sized_from_its_output_cap(self) -> None:
-        from maljan.llm.generation_rate import request_timeout_for
+        from malspark.llm.generation_rate import request_timeout_for
 
         class _Metered:
             callbacks: list[Any] = []
@@ -808,9 +808,9 @@ class TestTheRequestCarriesItsOwnTimeout:
     def test_a_gemini_request_is_sized_the_same_way(self) -> None:
         from pydantic import SecretStr
 
-        from maljan.core.config import Settings
-        from maljan.llm.gemini_provider import GeminiProvider
-        from maljan.llm.generation_rate import model_name_of
+        from malspark.core.config import Settings
+        from malspark.llm.gemini_provider import GeminiProvider
+        from malspark.llm.generation_rate import model_name_of
 
         settings = Settings(_env_file=None)  # type: ignore[call-arg]
         settings.llm.gemini.api_key = SecretStr("hosted")
@@ -829,7 +829,7 @@ class TestTheRequestCarriesItsOwnTimeout:
         assert sent["timeout"] == pytest.approx(64000 / 40 * TIMEOUT_MARGIN)
 
     def test_a_healed_model_keeps_its_meter(self) -> None:
-        from maljan.llm.generation_rate import RateMeter, carry_rate_meter
+        from malspark.llm.generation_rate import RateMeter, carry_rate_meter
 
         class _Model:
             callbacks: list[Any] = []

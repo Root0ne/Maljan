@@ -16,9 +16,9 @@ import pytest
 from langchain_ollama import ChatOllama
 from tests.unit.agents.test_a_loop_has_no_default_limit import _analyst, _Model, _run
 
-from maljan.core.spend import SpendCeilingStop, SpendMeter, spend_bound
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.generation_rate import model_name_of
+from malspark.core.spend import SpendCeilingStop, SpendMeter, spend_bound
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.generation_rate import model_name_of
 
 PRICE = {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 4.0}
 

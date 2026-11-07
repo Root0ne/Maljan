@@ -27,13 +27,13 @@ from app.services.agent_map import (
     AGENT_PROFILES_KEY,
     validate_agent_map,
 )
-from maljan.agents.composition import aresolve_agent, reachable_agents, reads_static_provider
-from maljan.agents.prompt_fragments import resolve_attached
-from maljan.agents.prompts import REVERSER_PROMPT
-from maljan.core.model_assignments import assignments_for
-from maljan.core.settings_overrides import build_settings
-from maljan.providers.static.ghidra import GHIDRA_GUIDANCE, GHIDRA_WORKFLOW
-from maljan.providers.static.r2 import R2StaticProvider
+from malspark.agents.composition import aresolve_agent, reachable_agents, reads_static_provider
+from malspark.agents.prompt_fragments import resolve_attached
+from malspark.agents.prompts import REVERSER_PROMPT
+from malspark.core.model_assignments import assignments_for
+from malspark.core.settings_overrides import build_settings
+from malspark.providers.static.ghidra import GHIDRA_GUIDANCE, GHIDRA_WORKFLOW
+from malspark.providers.static.r2 import R2StaticProvider
 
 DOCUMENT = Path(__file__).resolve().parents[2] / "docs" / "examples" / "profiles" / "all-tools.json"
 TEAM = "all_tools"
@@ -163,9 +163,9 @@ class _Container:
     sandbox_report = None
 
     def __init__(self, settings: Any) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger
-        from maljan.llm.context_window import budget_for_settings
-        from maljan.providers.servers import ServerRegistry
+        from malspark.core.truncation_ledger import TruncationLedger
+        from malspark.llm.context_window import budget_for_settings
+        from malspark.providers.servers import ServerRegistry
 
         self.config = settings
         self._providers: dict[str, Any] = {}
@@ -176,7 +176,7 @@ class _Container:
         self._registry = ServerRegistry(settings, truncation_ledger=self._ledger)
 
     def get_static_provider(self, provider_id: str | None = None) -> Any:
-        from maljan.providers.registry import get_static_provider
+        from malspark.providers.registry import get_static_provider
 
         wanted = str(provider_id or self.config.static.provider)
         if wanted not in self._providers:
@@ -209,7 +209,7 @@ class _Container:
 
 @pytest.fixture
 def container(ghidra_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[_Container]:
-    from maljan.providers.servers import ServerHandle
+    from malspark.providers.servers import ServerHandle
 
     monkeypatch.setattr(ServerHandle, "_build_toolkit", lambda self, *a, **k: _Toolkit(self.name))
     built = _Container(_settings(ghidra_url))
@@ -239,7 +239,7 @@ def _servers(resolved: Any) -> set[str]:
 class TestTheDocument:
     def test_it_is_an_import_document(self) -> None:
         document = _document()
-        assert document["format"] == "maljan-settings/1"
+        assert document["format"] == "malspark-settings/1"
         assert set(document["values"]) == {AGENT_DEFINITIONS_KEY, AGENT_PROFILES_KEY}
 
     def test_the_settings_api_accepts_it(self) -> None:

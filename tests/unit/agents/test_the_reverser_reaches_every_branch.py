@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from maljan.agents.prompts import REVERSER_PROMPT
+from malspark.agents.prompts import REVERSER_PROMPT
 
 TEAM = Path(__file__).resolve().parents[3] / "docs" / "examples" / "profiles" / "all-tools.json"
 

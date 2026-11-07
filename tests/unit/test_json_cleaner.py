@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from maljan.utils.json_cleaner import extract_json, repair_json, safe_parse_json
+from malspark.utils.json_cleaner import extract_json, repair_json, safe_parse_json
 
 
 class TestExtractJson:

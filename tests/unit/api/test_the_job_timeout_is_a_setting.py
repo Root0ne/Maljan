@@ -66,7 +66,7 @@ class TestTheSetting:
     def test_zero_is_refused(self) -> None:
         """A stored 0 is refused loudly, naming the key and the remedy, never run
         with the default (no timeout) in its place."""
-        from maljan.core.settings_overrides import StoredValueRefused
+        from malspark.core.settings_overrides import StoredValueRefused
 
         with pytest.raises(StoredValueRefused) as refused:
             build_job_settings({"job_timeout": 0}, None)
@@ -233,7 +233,7 @@ class TestTheQueueClaimIsALease:
         # A kill now, before any renewal, leaves a claim that expires in 90 s.
         assert redis.ttl_ms[key] == JOB_OWNER_TTL_SECONDS * 1000
         await release_queue_claim(ctx)
-        assert "maljan_queue_lease" not in ctx
+        assert "malspark_queue_lease" not in ctx
 
     @pytest.mark.asyncio
     async def test_the_lease_is_renewed_and_ends_when_the_key_is_gone(
@@ -250,6 +250,6 @@ class TestTheQueueClaimIsALease:
         await asyncio.sleep(0.05)
         assert redis.renewals >= 3
         del redis.ttl_ms[key]
-        task = ctx["maljan_queue_lease"]
+        task = ctx["malspark_queue_lease"]
         await asyncio.wait_for(task, 1.0)
         assert task.done() and not task.cancelled()

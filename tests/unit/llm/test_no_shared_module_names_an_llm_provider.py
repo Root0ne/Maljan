@@ -1,7 +1,7 @@
 """No module outside an LLM provider's own adapter decides anything by a provider's name.
 
 Every fact the platform needs about a provider is declared on its adapter
-(``maljan.llm.provider_base``) and asked through ``facts_of``. A comparison, a
+(``malspark.llm.provider_base``) and asked through ``facts_of``. A comparison, a
 membership test or a table keyed by a provider's name anywhere else is a
 behaviour a provider registered tomorrow would not get, so this test reads
 every module of the core and the API and refuses one.
@@ -13,7 +13,7 @@ import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-SOURCES = (ROOT / "src" / "maljan", ROOT / "apps" / "api" / "app")
+SOURCES = (ROOT / "src" / "malspark", ROOT / "apps" / "api" / "app")
 
 # The names of the shipped providers and the chat-model types their clients report.
 PROVIDER_NAMES = frozenset(
@@ -34,11 +34,11 @@ PROVIDER_NAMES = frozenset(
 # names the format it speaks when it builds its client.
 OWN_MODULES = frozenset(
     {
-        "src/maljan/llm/openai_provider.py",
-        "src/maljan/llm/anthropic_provider.py",
-        "src/maljan/llm/ollama_provider.py",
-        "src/maljan/llm/gemini_provider.py",
-        "src/maljan/llm/tool_replies.py",
+        "src/malspark/llm/openai_provider.py",
+        "src/malspark/llm/anthropic_provider.py",
+        "src/malspark/llm/ollama_provider.py",
+        "src/malspark/llm/gemini_provider.py",
+        "src/malspark/llm/tool_replies.py",
     }
 )
 

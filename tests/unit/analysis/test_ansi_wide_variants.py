@@ -1,7 +1,7 @@
 """Half the import table was invisible because of one letter.
 
 Found by running Qu1cksc0pe against the same sample and diffing. It categorised
-140 of 218 imports; Maljan categorised 81 of 217. The difference was not depth
+140 of 218 imports; Malspark categorised 81 of 217. The difference was not depth
 of research — it was that Win32 ships most string-taking APIs twice,
 ``GetSystemDirectoryA`` and ``GetSystemDirectoryW``, and a hand-curated table
 naturally lists one of each pair. Thirteen imports on that sample were nothing
@@ -22,12 +22,12 @@ caught by the pre-existing test asserting a lone GetUserNameA maps to nothing.
 
 from __future__ import annotations
 
-from maljan.analysis.api_capability_db import (
+from malspark.analysis.api_capability_db import (
     load_api_attck_map,
     load_api_behaviour_db,
     reset_cache,
 )
-from maljan.core.paths import resolve_data
+from malspark.core.paths import resolve_data
 
 _BEHAVIOUR = str(resolve_data("data/api_behaviour_map_v1.json"))
 _ATTCK = str(resolve_data("data/api_attck_map_v1.json"))
@@ -110,7 +110,7 @@ class TestTheMeasuredEffect:
         reset_cache()
 
     def test_a_wide_only_set_still_maps(self) -> None:
-        """A discovery rule was missing from Maljan's output for the audited
+        """A discovery rule was missing from Malspark's output for the audited
         sample and present in the other tool's, for exactly this reason.
 
         That rule is gone — measured, it appeared on one ordinary binary in

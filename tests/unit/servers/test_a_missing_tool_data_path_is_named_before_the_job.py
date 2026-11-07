@@ -18,9 +18,9 @@ from typing import Any
 import pytest
 
 from app.services.tool_availability import as_rows, unavailable_tools
-from maljan.core.config import Settings
-from maljan.tools import capabilities, emulated_strings, sidecar_needs
-from maljan.tools.capabilities import ToolNeeds, data, manifest, module, remedy_for
+from malspark.core.config import Settings
+from malspark.tools import capabilities, emulated_strings, sidecar_needs
+from malspark.tools.capabilities import ToolNeeds, data, manifest, module, remedy_for
 
 # A corpus that holds: the check before a job looks for a non-empty file, and
 # the scan for a rule, so a fixture that means "held" writes one.
@@ -93,11 +93,11 @@ class TestTheLookAtAPath:
         assert data("rules.yaml").installed() is None
 
     def test_the_override_in_the_servers_environment_replaces_the_default(self, root: Path) -> None:
-        req = data("absent", override="MALJAN_T492_RULES")
+        req = data("absent", override="MALSPARK_T492_RULES")
         _populated(root / "given")
-        assert req.installed({"MALJAN_T492_RULES": "given"}) is None
-        assert req.installed({"MALJAN_T492_RULES": "gone"}) == (
-            "gone is missing or empty (named by MALJAN_T492_RULES)"
+        assert req.installed({"MALSPARK_T492_RULES": "given"}) is None
+        assert req.installed({"MALSPARK_T492_RULES": "gone"}) == (
+            "gone is missing or empty (named by MALSPARK_T492_RULES)"
         )
         assert "named by the default" in str(req.installed({}))
 
@@ -124,8 +124,8 @@ class TestTheLookAtAPath:
         assert cell["optional_dependency"] == "colorsys"
 
     def test_the_remedy_names_the_path_and_what_names_it(self) -> None:
-        remedy = data("data/r", setting="a.b", override="MALJAN_R").remedy
-        assert remedy.startswith("put the data in data/r, or point a.b or MALJAN_R at")
+        remedy = data("data/r", setting="a.b", override="MALSPARK_R").remedy
+        assert remedy.startswith("put the data in data/r, or point a.b or MALSPARK_R at")
         assert "make external" in remedy
 
     def test_a_missing_module_and_missing_data_keep_both_remedies(self) -> None:
@@ -139,7 +139,7 @@ class TestTheSidecarsDeclarations:
     def test_every_declared_setting_is_a_setting_whose_default_is_the_declared_path(
         self,
     ) -> None:
-        from maljan.tools.capabilities import _setting_value
+        from malspark.tools.capabilities import _setting_value
 
         declared = [
             req
@@ -159,11 +159,11 @@ class TestReadinessNamesAMissingDataPath:
         """The analysis server's capa reads its block's override where one is set."""
         settings = Settings()
         settings.static.capa.rules_dir = str(_populated(host / "set"))
-        settings.mcp.servers["analysis"].env = {"MALJAN_CAPA_RULES_DIR": "data/capa-rules"}
+        settings.mcp.servers["analysis"].env = {"MALSPARK_CAPA_RULES_DIR": "data/capa-rules"}
         (row,) = as_rows(unavailable_tools(settings))
         assert (row["server"], row["tool"]) == ("analysis", "capa")
         assert row["reason"] == (
-            "data/capa-rules is missing or empty (named by MALJAN_CAPA_RULES_DIR)"
+            "data/capa-rules is missing or empty (named by MALSPARK_CAPA_RULES_DIR)"
         )
         assert row["remediation"] == sidecar_needs.CAPA_RULES.remedy
         assert row["manifest_code"] == "missing_dependency"
@@ -192,10 +192,10 @@ class TestReadinessNamesAMissingDataPath:
     def test_sigmas_corpus_missing_is_named_with_its_variable(self, host: Path) -> None:
         _populated(host / "data" / "capa-rules")
         settings = Settings()
-        settings.mcp.servers["analysis"].env = {"MALJAN_SIGMA_RULES_DIR": "none"}
+        settings.mcp.servers["analysis"].env = {"MALSPARK_SIGMA_RULES_DIR": "none"}
         found = unavailable_tools(settings)
         assert [u.tool for u in found] == ["sigma_match", "sigma_match_sandbox"]
-        assert all("named by MALJAN_SIGMA_RULES_DIR" in u.reason for u in found)
+        assert all("named by MALSPARK_SIGMA_RULES_DIR" in u.reason for u in found)
 
     def test_a_server_with_its_own_import_path_has_its_data_unchecked(self, host: Path) -> None:
         settings = Settings()

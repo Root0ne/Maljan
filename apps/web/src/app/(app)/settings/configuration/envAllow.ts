@@ -2,7 +2,7 @@
  * The environment names a built-in sidecar is always started with.
  *
  * The names themselves are not written down here. `REQUIRED_ENV_ALLOW` in
- * `src/maljan/core/config.py` is the rule the API enforces, and it now travels
+ * `src/malspark/core/config.py` is the rule the API enforces, and it now travels
  * on the server-map catalog entry the editor already fetches — a copy in this
  * file was a copy that could drift from the save, and then the editor would
  * show a built-in's fixed names wrongly and silently restore names it had said

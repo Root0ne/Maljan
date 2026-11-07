@@ -1,5 +1,5 @@
 {
-  "format": "maljan-settings/1",
+  "format": "malspark-settings/1",
   "values": {
     "core.agents.definitions": {
       "all_tools_static_r2": {

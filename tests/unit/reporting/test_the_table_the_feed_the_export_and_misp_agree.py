@@ -35,10 +35,11 @@ from app.services.report_service import (
     ioc_feed_rows,
     with_current_iocs,
 )
-from maljan.memory.attck_loader import technique_entry
-from maljan.reporting.builder import build_consolidated_iocs
-from maljan.reporting.misp import build_misp_attributes
-from maljan.reporting.models import (
+from malspark.core.previous_name import PREVIOUS_NAME
+from malspark.memory.attck_loader import technique_entry
+from malspark.reporting.builder import build_consolidated_iocs
+from malspark.reporting.misp import build_misp_attributes
+from malspark.reporting.models import (
     DynamicBehavior,
     FileHashes,
     JudgeIndicator,
@@ -54,14 +55,14 @@ from maljan.reporting.models import (
     StringIOC,
     TTPMapping,
 )
-from maljan.reporting.renderers import MarkdownRenderer
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers import MarkdownRenderer
+from malspark.reporting.renderers.stix_renderer import (
     PLATFORM_INDICATES_EDGE,
     ExtendedSTIXRenderer,
     pattern_values,
     publishes,
 )
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.stix_models import Bundle
 
 SHA256 = "36dabc40fa8983ce900a90b8156d2c754875fe1b5413a997843c4a0ef3908220"
 SHA1 = "e456eb06758c7349a3636c15c91e1a9c30bb7927"
@@ -245,7 +246,7 @@ class TestEveryRowHasAPublishAnswer:
             assert value.replace("\\", "\\\\") not in exported, value
 
     def test_a_judge_keep_is_no_second_source_for_an_unattributed_row(self) -> None:
-        from maljan.reporting.models import JudgeIndicator
+        from malspark.reporting.models import JudgeIndicator
 
         report = _report(
             judge_indicators=[JudgeIndicator(kind="hash", value=STRAY, algorithm="SHA-256")]
@@ -263,8 +264,8 @@ class TestEveryRowHasAPublishAnswer:
         assert STRAY not in json.dumps(_export(report))
 
     def test_a_judge_keep_against_the_sandbox_s_fact_publishes_it_naming_both(self) -> None:
-        from maljan.pipeline.validation import UNATTRIBUTED_INDICATOR_CODE
-        from maljan.reporting.models import JudgeIndicator
+        from malspark.pipeline.validation import UNATTRIBUTED_INDICATOR_CODE
+        from malspark.reporting.models import JudgeIndicator
 
         asked = {
             "code": UNATTRIBUTED_INDICATOR_CODE,
@@ -285,7 +286,7 @@ class TestEveryRowHasAPublishAnswer:
     def test_a_judge_hash_for_a_stored_run_s_unattributed_dropped_file_stays_withheld(
         self,
     ) -> None:
-        from maljan.reporting.models import JudgeIndicator
+        from malspark.reporting.models import JudgeIndicator
         from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import (
             _benchmark,
         )
@@ -576,7 +577,7 @@ class TestTheExport:
     def test_a_folded_indicator_s_sets_are_merged_onto_the_sample_s(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import judge_postprocess
+        from malspark.agents import judge_postprocess
 
         merged: list[tuple[str, str]] = []
         real = judge_postprocess._merge_indicator_sets
@@ -641,8 +642,8 @@ class TestTheMispAttributes:
     def test_a_category_misp_refuses_the_type_in_falls_back_to_payload_delivery(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.reporting import misp
-        from maljan.reporting.models import ConsolidatedIOC
+        from malspark.reporting import misp
+        from malspark.reporting.models import ConsolidatedIOC
 
         # The sample's own digests filed as dropped artifacts: MISP takes an
         # MD5 there and a TLSH not.
@@ -655,7 +656,7 @@ class TestTheMispAttributes:
         assert "tlsh" not in MISP_CATEGORY_TYPES["Artifacts dropped"]
 
     def test_a_kind_misp_has_no_type_for_is_text_and_never_for_ids(self) -> None:
-        from maljan.reporting.models import ConsolidatedIOC
+        from malspark.reporting.models import ConsolidatedIOC
 
         # A capture's JA3S is published by no rule (it names no process), so
         # the typing is read off a row given as published.
@@ -732,13 +733,13 @@ class TestTheMispAttributes:
         assert first == second
         assert len({a["uuid"] for a in first}) == len(first)
         expected = uuid.uuid5(
-            uuid.uuid5(uuid.NAMESPACE_URL, "maljan:misp-attribute"), f"{OWNER}|md5|{MD5}"
+            uuid.uuid5(uuid.NAMESPACE_URL, f"{PREVIOUS_NAME}:misp-attribute"), f"{OWNER}|md5|{MD5}"
         )
         assert next(a["uuid"] for a in first if a["value"] == MD5) == str(expected)
         assert not {a["uuid"] for a in first} & {a["uuid"] for a in other}
 
     def test_the_build_writes_them_into_the_report(self) -> None:
-        from maljan.reporting.builder import MalwareReportBuilder
+        from malspark.reporting.builder import MalwareReportBuilder
 
         report = MalwareReportBuilder(
             file_hash=SHA256,
@@ -760,9 +761,8 @@ class TestTheMispAttributes:
 
         assert isinstance(report.misp_attributes, list)
         (attribute,) = [a for a in report.misp_attributes if a["value"] == SHA256]
-        expected = uuid.uuid5(
-            uuid.uuid5(uuid.NAMESPACE_URL, "maljan:misp-attribute"), f"{OWNER}|sha256|{SHA256}"
-        )
+        namespace = uuid.uuid5(uuid.NAMESPACE_URL, f"{PREVIOUS_NAME}:misp-attribute")
+        expected = uuid.uuid5(namespace, f"{OWNER}|sha256|{SHA256}")
         assert attribute["uuid"] == str(expected)
 
 

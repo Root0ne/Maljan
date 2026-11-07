@@ -18,8 +18,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from maljan.core.config import ATTCK_REFRESH_DAYS_MAX
-from maljan.core.settings_overrides import (
+from malspark.core.config import ATTCK_REFRESH_DAYS_MAX
+from malspark.core.settings_overrides import (
     StoredValueRefused,
     settings_from_store,
     stored_settings,
@@ -172,7 +172,7 @@ def test_the_console_still_loads_and_is_served_the_refused_keys() -> None:
 def test_the_refusal_carries_no_refused_value_in_its_traceback() -> None:
     import traceback
 
-    from maljan.core.settings_overrides import settings_from_store
+    from malspark.core.settings_overrides import settings_from_store
 
     secret = "sk-PROBE-" + "x" * 40
     stored = {"llm.max_spend_usd_per_job": secret}

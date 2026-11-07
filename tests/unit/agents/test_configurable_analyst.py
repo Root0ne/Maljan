@@ -13,8 +13,8 @@ from langchain_core.language_models.fake_chat_models import FakeMessagesListChat
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.composition import ResolvedAgent
-from maljan.agents.configurable_analyst import ConfigurableAnalyst
+from malspark.agents.composition import ResolvedAgent
+from malspark.agents.configurable_analyst import ConfigurableAnalyst
 
 
 class _Recording(FakeMessagesListChatModel):
@@ -63,7 +63,7 @@ def test_analyze_sends_the_resolved_prompt_and_the_data():
 
 
 def test_revise_uses_the_shared_revision_framing():
-    from maljan.agents.base_agent import revision_messages
+    from malspark.agents.base_agent import revision_messages
 
     agent = _agent()
     agent.revise("RAW", "OWN", {"static": "S"}, "FEEDBACK")
@@ -177,7 +177,7 @@ def test_a_genuine_answer_starting_with_warn_is_not_mistaken_for_a_degradation()
 # anyway. Two layers, in that order.
 # ---------------------------------------------------------------------------
 
-_PATH = "/srv/maljan/data/samples/abc123.exe"
+_PATH = "/srv/malspark/data/samples/abc123.exe"
 _CHUNK = (
     '{\n  "note": "Live analysis run",\n  "sha256": "abc123",\n'
     f'  "analysis_file_path": "{_PATH}"\n}}'
@@ -331,7 +331,7 @@ class TestABareFilenameToolArgIsRewritten:
     def test_a_free_text_input_argument_is_no_longer_treated_as_a_path(self):
         """``input`` names free text as often as it names a file; a lookup tool
         asked about the sample by name must keep the name it was given."""
-        from maljan.agents.tool_pinning import is_path_argument as _is_path_argument
+        from malspark.agents.tool_pinning import is_path_argument as _is_path_argument
 
         assert _is_path_argument("input") is False
         assert _is_path_argument("query") is False

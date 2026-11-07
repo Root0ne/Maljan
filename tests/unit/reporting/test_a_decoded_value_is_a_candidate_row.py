@@ -16,16 +16,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.stix_renderer import (
     emulation_from_ledger,
     publishes,
     recovered_network_values,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, Artifact
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, Artifact
 
 C2 = "relay7.example.net"
 C2_URL = f"https://{C2}/Gate/Poll.php"

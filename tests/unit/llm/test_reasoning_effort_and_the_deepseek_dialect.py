@@ -24,9 +24,9 @@ import httpx
 import pytest
 from langchain_core.messages import HumanMessage
 
-from maljan.core.config import Settings
-from maljan.core.token_ledger import TokenLedger, record_response_usage, turn_usage
-from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
+from malspark.core.config import Settings
+from malspark.core.token_ledger import TokenLedger, record_response_usage, turn_usage
+from malspark.llm.openai_provider import OpenAIProvider, forget_standard_only
 
 from .streamed_wire import reply
 
@@ -119,7 +119,7 @@ class TestTheReasoningEffort:
         assert "reasoning_effort" not in wire.bodies[0]
 
     def test_it_is_in_the_catalog_without_a_default(self) -> None:
-        from maljan.core.settings_catalog import core_catalog
+        from malspark.core.settings_catalog import core_catalog
 
         entry = next(e for e in core_catalog() if e.path == "llm.openai.reasoning_effort")
         assert entry.type == "str"
@@ -167,7 +167,7 @@ class TestTheCapReachesDeepSeek:
         assert "max_tokens" not in wire.bodies[0]
 
     def test_the_settings_probe_asks_with_the_same_fields(self) -> None:
-        from maljan.llm.openai_provider import OpenAIProvider
+        from malspark.llm.openai_provider import OpenAIProvider
 
         thinking_off = _settings(HOSTED, compat="deepseek", disable_thinking=True)
         body = OpenAIProvider.one_turn_request(thinking_off, HOSTED, "deepseek-flash", "max").body
@@ -209,7 +209,7 @@ class TestTheUsageParts:
         assert usage == {"input_tokens": 9, "output_tokens": 2}
 
     def test_the_ledger_and_the_report_sentence_carry_them(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         ledger = TokenLedger()
         answer = _ask(_settings(HOSTED, compat="deepseek"), _Wire(DEEPSEEK_USAGE))
@@ -233,7 +233,7 @@ class TestTheUsageParts:
         assert "101 of the output reasoning (reported for 1 call)" in tokens["sentence"]
 
     def test_a_run_that_reported_no_part_says_nothing_of_one(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         ledger = TokenLedger()
         plain = _ask(_settings(HOSTED), _Wire({"prompt_tokens": 9, "completion_tokens": 2}))

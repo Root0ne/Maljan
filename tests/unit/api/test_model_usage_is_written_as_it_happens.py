@@ -21,8 +21,8 @@ import pytest
 from tests.integration._session_probe import SessionFactory
 
 from app.worker import analysis_worker as worker_module
-from maljan.core.token_ledger import TokenLedger, call_record
-from maljan.pipeline.events import MODEL_USAGE
+from malspark.core.token_ledger import TokenLedger, call_record
+from malspark.pipeline.events import MODEL_USAGE
 
 
 class TestTheLedgerSaysEachCall:
@@ -67,8 +67,8 @@ class TestTheLedgerSaysEachCall:
         assert ledger.snapshot()["llm_calls"] == 1
 
     def test_a_job_s_container_puts_each_call_on_its_feed(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         sent: list[tuple[str, dict[str, Any]]] = []
         container = ServiceContainer(

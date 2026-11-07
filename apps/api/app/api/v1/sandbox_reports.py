@@ -5,7 +5,7 @@ already runs its own sandbox brings the report it has. Validation is layered so
 nothing is stored before it is known to be a sandbox report: stream to a size
 cap, inflate a gzip under the same cap, parse the JSON, sniff the format, and
 only then put the object. The format, its task id and its target hash are read
-from the registry's formats (``maljan.providers.sandbox.readers.sandbox_formats``:
+from the registry's formats (``malspark.providers.sandbox.readers.sandbox_formats``:
 the declared report formats, built-ins plus ``sandbox.report_formats``, and the
 registered readers no declaration names), never from a format's name in this
 route. A
@@ -20,7 +20,7 @@ Where the operator allows it (``"unread"`` in ``sandbox.upload.allowed_formats``
 a report no format recognises is accepted unread instead of refused: it is
 stored, a run reads it as raw blocks alone, and the upload answers with a
 proposed format declaration read from its shape
-(``maljan.core.report_proposals``). An admin accepts the proposal, as written
+(``malspark.core.report_proposals``). An admin accepts the proposal, as written
 or edited (``POST /sandbox-report-formats/accept``): the declaration is saved
 with its name allowed, and the upload is read as it from then on. Until then
 the report stays unread. Without the opt-in, an unrecognised report is refused
@@ -40,14 +40,14 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
-from maljan.core.report_formats import (
+from malspark.core.report_formats import (
     BUILTIN_REPORT_FORMATS,
     UNREAD_FORMAT,
     ReportFormat,
     sniff,
 )
-from maljan.core.safe_json import loads
-from maljan.providers.sandbox.readers import (
+from malspark.core.safe_json import loads
+from malspark.providers.sandbox.readers import (
     mapping_refusal,
     named_reader_refusal,
     report_reader,
@@ -83,7 +83,7 @@ from app.services.report_formats_lock import (
 from app.services.settings_service import effective_core_settings
 
 if TYPE_CHECKING:
-    from maljan.core.config import SandboxConfig
+    from malspark.core.config import SandboxConfig
 
 logger = get_logger("api.sandbox_reports")
 
@@ -267,7 +267,7 @@ UNREAD_WARNING = (
 
 def _proposal(payload: dict[str, Any]) -> dict[str, Any] | None:
     """The proposed declaration for an unread report, or ``None`` where none could be read."""
-    from maljan.core.report_proposals import propose_format
+    from malspark.core.report_proposals import propose_format
 
     try:
         return propose_format(payload)
@@ -661,8 +661,8 @@ def _trial_read(payload: dict[str, Any], declaration: ReportFormat, fallback: An
     miss would pass on it while reading only what the unread read gave. Any
     other reader must read the report without failing.
     """
-    from maljan.providers.sandbox.readers import format_mapping
-    from maljan.providers.sandbox.rest_mapping import (
+    from malspark.providers.sandbox.readers import format_mapping
+    from malspark.providers.sandbox.rest_mapping import (
         CHANNELS,
         apply_mapping,
         compile_mapping,

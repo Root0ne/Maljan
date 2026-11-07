@@ -9,9 +9,9 @@ import time
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.providers.static.capa_yara import CapaYaraStaticProvider
-from maljan.tools import staging
+from malspark.core.config import Settings
+from malspark.providers.static.capa_yara import CapaYaraStaticProvider
+from malspark.tools import staging
 
 
 def _provider(tmp_path=None):
@@ -106,7 +106,7 @@ def test_yara_hits_land_in_the_technical_evidence(monkeypatch, tmp_path):
 
 
 def test_the_evidence_text_carries_every_hit():
-    from maljan.providers.static.capa_yara import _render_table
+    from malspark.providers.static.capa_yara import _render_table
 
     text = _render_table([{"rule": f"rule_{i}", "namespace": "x"} for i in range(5000)])
     assert "rule_4999" in text and "…" not in text

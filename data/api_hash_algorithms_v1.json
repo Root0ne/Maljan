@@ -1,6 +1,6 @@
 {
  "version": 1,
- "source": "Published name-hash algorithms a Windows program uses to find a function by a 32-bit value instead of by its name. Each entry names the primitive (implemented in maljan.tools.api_hashes), the encoding the name is hashed in, the case it is folded to first, whether its terminating NUL is hashed too, and, for the forms that add a hash of the module's name, how that name is hashed.",
+ "source": "Published name-hash algorithms a Windows program uses to find a function by a 32-bit value instead of by its name. Each entry names the primitive (implemented in malspark.tools.api_hashes), the encoding the name is hashed in, the case it is folded to first, whether its terminating NUL is hashed too, and, for the forms that add a hash of the module's name, how that name is hashed.",
  "algorithms": [
   {
    "id": "crc32_ascii",

@@ -1,6 +1,6 @@
 """Every place that reads settings in force registers their secret values for shown text (T-482).
 
-Masking by value (``maljan.core.settings_masking.masked_values``) masks what
+Masking by value (``malspark.core.settings_masking.masked_values``) masks what
 the process holds: the store as it is read (``SettingsService.load_overrides``,
 encrypted rows included, again after a save or a reset and before the
 console's read), the console's cached core settings on each rebuild, an app,
@@ -26,9 +26,9 @@ from app.models import RuntimeSetting
 from app.services import settings_service as svc
 from app.services.server_map import TOKEN_MASK, server_env_key
 from app.services.settings_catalog_api import catalog_index
-from maljan.core import settings_masking as sm
-from maljan.core.config import MCPServerConfig
-from maljan.core.settings_overrides import build_settings
+from malspark.core import settings_masking as sm
+from malspark.core.config import MCPServerConfig
+from malspark.core.settings_overrides import build_settings
 from tests.credential_shapes import lowercase_body
 
 SERVERS = "core.mcp.servers"
@@ -207,7 +207,7 @@ def test_a_worker_and_a_job_register_their_values():
 
 
 def test_an_app_registers_the_values_of_its_settings():
-    from maljan.app import _remember_the_secrets_of
+    from malspark.app import _remember_the_secrets_of
 
     value = _value(8)
     settings = build_settings({})

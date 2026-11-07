@@ -83,7 +83,7 @@ def _build(_memory: Any) -> ValidationKVStore:
 
 def register() -> ValidationKVStore:
     """Register ``validation_kv`` with the product's registry; answer the one store."""
-    from maljan.memory.store_factory import register_memory_backend
+    from malspark.memory.store_factory import register_memory_backend
 
     register_memory_backend(BACKEND_ID, _build, label="validation", probe_label=PROBE_LABEL)
     return STORE
@@ -95,7 +95,7 @@ def unregister() -> None:
     The registry has no public way to take a backend out (a product never
     needs one); this harness reaches into it, and only for its own id.
     """
-    from maljan.memory import store_factory
+    from malspark.memory import store_factory
 
     store_factory._BACKENDS.pop(BACKEND_ID, None)
     store_factory.forget_built_stores()

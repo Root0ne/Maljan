@@ -21,20 +21,20 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     UNCITED_IDENTIFIER_CODE,
     identifier_citation_violations,
     schema_violations,
 )
-from maljan.reporting.composer import (
+from malspark.reporting.composer import (
     ReportComposer,
     _ConfigOut,
     _HostIdentifiersOut,
     section_contract,
 )
-from maljan.reporting.evidence_bundles import bundle_for, is_empty
-from maljan.reporting.models import (
+from malspark.reporting.evidence_bundles import bundle_for, is_empty
+from malspark.reporting.models import (
     EvidenceIndexRow,
     FileHashes,
     HostIdentifier,
@@ -42,7 +42,7 @@ from maljan.reporting.models import (
     SampleIdentity,
     TechnicalAnalysis,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 VALUE = "ExampleCorp\\Cache\\state.bin"
 
@@ -63,7 +63,7 @@ class TestTheContract:
         assert "For example" in contract
 
     def test_the_example_is_valid_against_its_schema(self) -> None:
-        from maljan.reporting.composer import _EXAMPLES
+        from malspark.reporting.composer import _EXAMPLES
 
         _HostIdentifiersOut.model_validate(json.loads(_EXAMPLES["host_identifiers"]))
 
@@ -74,7 +74,7 @@ class TestTheContract:
         assert "a number included" in contract
 
     def test_an_object_with_no_list_of_records_is_not_told_about_items(self) -> None:
-        from maljan.reporting.composer import _IntroOut
+        from malspark.reporting.composer import _IntroOut
 
         assert "An item of a list" not in section_contract("introduction", _IntroOut)
 
@@ -161,7 +161,7 @@ class TestTheComposerWritesIt:
         llm = _RawLLM({"host_identifiers section": answer})
         comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(comp.compose(report, facts_block="[ev_0012] floss: example"))
 
@@ -197,7 +197,7 @@ class TestTheReportPrintsIt:
 
     def test_a_row_the_ioc_table_publishes_names_the_table_that_does(self) -> None:
         """The footer said no row was published, while the IOC table published some of them."""
-        from maljan.reporting.models import NetworkIOCs, NetworkIP, PersistenceMechanism
+        from malspark.reporting.models import NetworkIOCs, NetworkIP, PersistenceMechanism
 
         key = "HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
         address = "185.220.101.5"
@@ -242,7 +242,7 @@ class TestTheReportPrintsIt:
         assert "| not stated |" in row
 
     def test_the_section_is_asked_to_carry_a_purpose_an_analyst_stated(self) -> None:
-        from maljan.reporting.composer import _INSTRUCTIONS
+        from malspark.reporting.composer import _INSTRUCTIONS
 
         assert (
             "an analyst claim above says what the sample uses the value for"

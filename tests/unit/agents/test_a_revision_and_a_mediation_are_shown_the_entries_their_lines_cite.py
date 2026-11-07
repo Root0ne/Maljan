@@ -16,17 +16,17 @@ import asyncio
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.judge_agent import CONTRADICTIONS_BLOCK_QUESTION, JudgeAgent
-from maljan.llm.context_window import ANSWER_SHARE, ContextBudget
-from maljan.pipeline.debate_facts import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.judge_agent import CONTRADICTIONS_BLOCK_QUESTION, JudgeAgent
+from malspark.llm.context_window import ANSWER_SHARE, ContextBudget
+from malspark.pipeline.debate_facts import (
     DEBATE_ENTRIES_HEAD,
     DEBATE_ENTRIES_UNFIT,
     LINE_MARK_RULE,
     MEDIATION_ENTRIES_HEAD,
     MEDIATION_ENTRIES_UNFIT,
 )
-from maljan.schemas.isr_models import AgentISR
+from malspark.schemas.isr_models import AgentISR
 
 ENTRIES = {
     "ev_0011": "[ev_0011] decompile:\nvoid f5750() { key(); }",

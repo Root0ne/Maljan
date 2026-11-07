@@ -9,9 +9,9 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import create_model
 
-from maljan.core.config import SampleOpenConfig
-from maljan.providers.base import StaticJobContext
-from maljan.providers.static.ghidra import GhidraStaticProvider
+from malspark.core.config import SampleOpenConfig
+from malspark.providers.base import StaticJobContext
+from malspark.providers.static.ghidra import GhidraStaticProvider
 
 
 def test_the_declared_open_tool_and_argument_are_pinned():

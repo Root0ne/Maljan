@@ -20,8 +20,8 @@ import hashlib
 import pytest
 
 from app.services.agent_map import validate_definitions
-from maljan.agents import prompts
-from maljan.core.config import (
+from malspark.agents import prompts
+from malspark.core.config import (
     FORMER_SEED_PROMPT_DIGESTS,
     Settings,
     as_stored_builtin,

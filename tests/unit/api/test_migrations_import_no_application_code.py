@@ -2,7 +2,7 @@
 
 Alembic imports *every* revision file on every run, to build the history —
 including revisions from releases nobody has run in a year. A revision that
-imports `maljan` therefore couples the whole migration history to a name in the
+imports `malspark` therefore couples the whole migration history to a name in the
 application: rename or delete that name and `alembic upgrade head` stops
 working on every database, including the ones the revision has already been
 applied to.
@@ -26,9 +26,9 @@ import pytest
 
 VERSIONS = Path(__file__).resolve().parents[3] / "apps/api/alembic/versions"
 
-# What a revision may not reach into. `app` is the FastAPI package and `maljan`
+# What a revision may not reach into. `app` is the FastAPI package and `malspark`
 # the core one; both move under the revisions' feet.
-FORBIDDEN_ROOTS = {"maljan", "app"}
+FORBIDDEN_ROOTS = {"malspark", "app"}
 
 
 def _revisions() -> list[Path]:

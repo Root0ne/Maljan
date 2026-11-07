@@ -31,16 +31,16 @@ from typing import Any
 import pytest
 from tests.linear_cost import FLOOR_SECONDS, cpu_seconds
 
-from maljan.analysis.tool_effects import sends_sample_bytes
-from maljan.core import served_declarations as sd
-from maljan.core.config import Settings
-from maljan.core.derived_declarations import (
+from malspark.analysis.tool_effects import sends_sample_bytes
+from malspark.core import served_declarations as sd
+from malspark.core.config import Settings
+from malspark.core.derived_declarations import (
     derived_tool_facts,
     discloses,
     lay_under,
     service_facts,
 )
-from maljan.core.reputation import (
+from malspark.core.reputation import (
     SHAPE_READER,
     _shape_nodes,
     pack_lookups,
@@ -48,9 +48,9 @@ from maljan.core.reputation import (
     read_shape,
     reputation_of,
 )
-from maljan.core.tool_declarations import ToolDeclarations, ToolFacts, launch_identity
-from maljan.providers import served_listing
-from maljan.providers.served_listing import unlisted as _unlisted
+from malspark.core.tool_declarations import ToolDeclarations, ToolFacts, launch_identity
+from malspark.providers import served_listing
+from malspark.providers.served_listing import unlisted as _unlisted
 
 ROOT = Path(__file__).resolve().parents[3]
 LISTING = json.loads((ROOT / "tests" / "fixtures" / "virustotal_listing.json").read_text())
@@ -114,7 +114,7 @@ def test_a_never_seen_service_s_tools_read_as_the_built_in_s_field_by_field() ->
 
 
 def test_the_built_in_listing_reads_as_its_former_declaration_did() -> None:
-    from maljan.core.declared_reading import legacy_by_name
+    from malspark.core.declared_reading import legacy_by_name
 
     former = legacy_by_name()
     read = derived_tool_facts(LISTING["tools"])
@@ -254,7 +254,7 @@ def test_the_shape_reading_is_bounded() -> None:
     assert read_shape(wide).malicious is None
     # A flat object of millions of members, and as many list items, read in
     # bounded time: the walk stops at ``SHAPE_NODES``.
-    from maljan.core.reputation import SHAPE_NODES
+    from malspark.core.reputation import SHAPE_NODES
 
     flat = {f"k{i}": i for i in range(1_000_000)}
     flat["malicious"] = 1
@@ -438,7 +438,7 @@ def test_a_path_s_word_wins_over_a_hash_s(name: str) -> None:
 def test_only_a_trusted_server_s_hints_lift_the_reading_of_bytes_it_takes(
     nothing_kept: None,
 ) -> None:
-    from maljan.core.derived_declarations import closed_by_hints
+    from malspark.core.derived_declarations import closed_by_hints
 
     closed = _tool("render", BYTES, readOnlyHint=True, openWorldHint=False)
     assert discloses(closed) and not discloses(closed, trusted=True)
@@ -480,8 +480,8 @@ def test_a_definition_that_cannot_be_read_is_read_as_sending_the_sample() -> Non
 def test_a_listing_that_cannot_be_read_keeps_what_was_read_before(
     nothing_kept: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.agents import mcp_client
-    from maljan.core import derived_declarations
+    from malspark.agents import mcp_client
+    from malspark.core import derived_declarations
 
     before = derived_tool_facts(LISTING["tools"])
     sd.register_served("mcp:svc", {}, "L", before)
@@ -553,7 +553,7 @@ def test_what_others_submitted_or_uploaded_is_not_a_submission(
 
 
 def test_a_trusted_service_reads_a_closed_bytes_tool_as_what_it_is(nothing_kept: None) -> None:
-    from maljan.core.derived_declarations import closed_by_hints
+    from malspark.core.derived_declarations import closed_by_hints
 
     scan = _tool(
         "scan_bytes",
@@ -661,7 +661,7 @@ def test_read_only_never_excuses_sending_and_such_a_tool_is_never_a_lookup(
 def test_a_server_s_own_word_never_excuses_sending_on_a_block_that_does_not_trust_it(
     nothing_kept: None,
 ) -> None:
-    from maljan.tools.declared_facts import FACTS_META_KEY
+    from malspark.tools.declared_facts import FACTS_META_KEY
 
     listed = [{**_tool("push", BYTES), "_meta": {FACTS_META_KEY: {}}}]
     read = derived_tool_facts(listed)
@@ -698,7 +698,7 @@ def test_an_operator_who_says_what_a_tool_sends_is_never_overruled() -> None:
 
 
 def test_the_built_in_submit_tools_stay_disclosing_and_unticked() -> None:
-    from maljan.core import virustotal
+    from malspark.core import virustotal
 
     read = derived_tool_facts(LISTING["tools"])
     assert {n for n, f in read.items() if sends_sample_bytes(f)} == set(virustotal.SUBMIT_TOOLS)
@@ -791,9 +791,9 @@ def test_an_operator_lookup_ranked_after_the_service_or_unranked_is_asked_after_
 
 
 def test_the_service_s_name_is_its_lookup_s_name_and_its_record_s() -> None:
-    from maljan.core.declared_reading import facts_record
-    from maljan.core.reputation import record_at_write
-    from maljan.reporting.tool_kinds import stated_name
+    from malspark.core.declared_reading import facts_record
+    from malspark.core.reputation import record_at_write
+    from malspark.reporting.tool_kinds import stated_name
 
     settings = Settings(_env_file=None)
     declared = ToolDeclarations.from_settings(settings)
@@ -841,8 +841,8 @@ def test_a_lookup_s_declared_paths_are_read_on_a_reputation_service(nothing_kept
 
 
 def test_a_service_row_whose_stored_facts_hold_paths_is_read_by_them() -> None:
-    from maljan.core.declared_reading import facts_record
-    from maljan.core.reputation import record_at_write
+    from malspark.core.declared_reading import facts_record
+    from malspark.core.reputation import record_at_write
 
     paths = {
         "stats": "/**7/last_analysis_stats",
@@ -917,7 +917,7 @@ def test_a_stored_entry_whose_facts_name_no_reader_reads_as_it_always_did() -> N
 
 @pytest.mark.no_kept_reputation_service
 def test_a_fresh_deployment_reads_no_lookup_of_the_service_until_it_is_listed() -> None:
-    from maljan.agents.composition import capability_servers
+    from malspark.agents.composition import capability_servers
 
     settings = Settings(_env_file=None)
     servers = dict(settings.mcp.servers)
@@ -969,7 +969,7 @@ def test_a_moved_block_forgets_what_was_read(nothing_kept: None) -> None:
 def test_a_job_lists_a_reputation_service_nothing_is_kept_for(
     nothing_kept: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.providers import server_probe
+    from malspark.providers import server_probe
 
     monkeypatch.setattr(served_listing, "unlisted", _unlisted)
     served_listing._NOT_BEFORE.clear()
@@ -1000,14 +1000,14 @@ def test_a_job_lists_a_reputation_service_nothing_is_kept_for(
 
 
 def test_no_shipped_server_declaration_names_a_reputation_service_s_tool() -> None:
-    from maljan.core import builtin_declarations
+    from malspark.core import builtin_declarations
 
     shipped = json.dumps(builtin_declarations._SERVER_BLOCKS)
     for name in RENAMED:
         assert not re.search(rf"\b{name}\b", shipped), name
     assert builtin_declarations.server_declaration("virustotal") == {}
     # Nor does a reading of a reputation answer name one service's fields.
-    text = (ROOT / "src" / "maljan" / "core" / "reputation.py").read_text()
+    text = (ROOT / "src" / "malspark" / "core" / "reputation.py").read_text()
     for field in ("last_analysis_stats", "popular_threat", "first_submission_date"):
         assert field not in text, field
 
@@ -1019,8 +1019,8 @@ def test_no_shipped_server_declaration_names_a_reputation_service_s_tool() -> No
 
 def _with_stored_change(change: dict[str, Any], **block: Any) -> Settings:
     """The settings an operator's stored change of the service's lookup builds, as stored."""
-    from maljan.core.settings_overrides import build_settings
-    from maljan.core.tool_declarations import with_mark
+    from malspark.core.settings_overrides import build_settings
+    from malspark.core.tool_declarations import with_mark
 
     # A stored row holds the whole entry, as a save writes it.
     entry = Settings(_env_file=None).mcp.servers["virustotal"].model_dump(mode="json")
@@ -1094,7 +1094,7 @@ def test_a_stored_change_survives_the_settings_crossing_a_process_as_json() -> N
 
 def test_a_save_of_the_block_keeps_its_stored_change() -> None:
     from app.services.server_map import validate_server_map
-    from maljan.core.tool_declarations import with_mark
+    from malspark.core.tool_declarations import with_mark
 
     entry = Settings(_env_file=None).mcp.servers["virustotal"].model_dump(mode="json")
     entry.pop("auth_token", None)
@@ -1106,7 +1106,7 @@ def test_a_save_of_the_block_keeps_its_stored_change() -> None:
 
 
 def test_an_edit_of_a_kindless_reputation_change_points_at_the_service_s_rank() -> None:
-    from maljan.core.tool_declarations import strict_declarations
+    from malspark.core.tool_declarations import strict_declarations
 
     with strict_declarations(), pytest.raises(ValueError) as refused:
         ToolFacts.model_validate(RANKED)
@@ -1117,7 +1117,7 @@ def test_an_edit_of_a_kindless_reputation_change_points_at_the_service_s_rank() 
 
 
 def test_the_console_offers_the_server_s_reputation_service() -> None:
-    from maljan.core.settings_annotations import DECLARATION_LEAVES
+    from malspark.core.settings_annotations import DECLARATION_LEAVES
 
     assert "reputation_service" in {leaf for leaf, _title, _text in DECLARATION_LEAVES}
     web = ROOT / "apps" / "web" / "src"
@@ -1128,9 +1128,9 @@ def test_the_console_offers_the_server_s_reputation_service() -> None:
 
 @pytest.mark.no_kept_reputation_service
 def test_the_first_attach_of_a_fresh_deployment_already_reads_what_it_sends() -> None:
-    from maljan.agents.mcp_client import MCPLangChainToolkit
-    from maljan.core.declared_reading import tools_in_force
-    from maljan.providers.servers import ServerHandle
+    from malspark.agents.mcp_client import MCPLangChainToolkit
+    from malspark.core.declared_reading import tools_in_force
+    from malspark.providers.servers import ServerHandle
 
     settings = Settings(_env_file=None)
     block = settings.mcp.servers["virustotal"]
@@ -1154,7 +1154,7 @@ def test_the_first_attach_of_a_fresh_deployment_already_reads_what_it_sends() ->
         seen.append(found)
         return found
 
-    import maljan.core.declared_reading as declared_reading
+    import malspark.core.declared_reading as declared_reading
 
     original = declared_reading.tools_in_force
     declared_reading.tools_in_force = _spy  # type: ignore[assignment]

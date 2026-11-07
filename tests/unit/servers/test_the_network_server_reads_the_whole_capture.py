@@ -43,9 +43,9 @@ def job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """This job's own staging directory, and no other root."""
     base = tmp_path / "staging"
     (base / JOB_LEAF / "captures").mkdir(parents=True)
-    monkeypatch.setenv("MALJAN_STAGING_DIR", str(base))
-    monkeypatch.setenv("MALJAN_STAGING_JOB", JOB_LEAF)
-    monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", "")
+    monkeypatch.setenv("MALSPARK_STAGING_DIR", str(base))
+    monkeypatch.setenv("MALSPARK_STAGING_JOB", JOB_LEAF)
+    monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", "")
     return base / JOB_LEAF
 
 

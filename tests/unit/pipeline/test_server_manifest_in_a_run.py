@@ -15,11 +15,11 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from langchain_core.tools import StructuredTool
 
-from maljan.core.config import MCPServerConfig
-from maljan.pipeline.nodes import note_unavailable_tools
-from maljan.pipeline.triage_pack import run_is_degraded
-from maljan.providers.servers import ServerHandle
-from maljan.tools.capabilities import ServerCapabilities
+from malspark.core.config import MCPServerConfig
+from malspark.pipeline.nodes import note_unavailable_tools
+from malspark.pipeline.triage_pack import run_is_degraded
+from malspark.providers.servers import ServerHandle
+from malspark.tools.capabilities import ServerCapabilities
 
 MANIFEST = {
     "server": "analysis",
@@ -72,7 +72,7 @@ def attached(monkeypatch):
         return made[-1]
 
     factory.tools = []
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", factory)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", factory)
 
     def _run_async(coro, label):
         coro.close()
@@ -82,8 +82,8 @@ def attached(monkeypatch):
 
         return asyncio.run(coro)
 
-    monkeypatch.setattr("maljan.providers.servers._run_async", _run_async)
-    monkeypatch.setattr("maljan.providers.servers._run_async_result", _run_async_result)
+    monkeypatch.setattr("malspark.providers.servers._run_async", _run_async)
+    monkeypatch.setattr("malspark.providers.servers._run_async_result", _run_async_result)
     return factory
 
 
@@ -150,7 +150,7 @@ class _Container:
 
 def _bound(name: str, server: str) -> StructuredTool:
     tool = StructuredTool.from_function(func=lambda: name, name=name, description=name)
-    tool.metadata = {"maljan_server": server}
+    tool.metadata = {"malspark_server": server}
     return tool
 
 
@@ -245,7 +245,7 @@ class TestAStageRecordsWhatItCannotHave:
             "server.analysis.archive_list_unavailable(py7zr is not installed (No module named "
             "'py7zr')); still answers zip and tar members; 7z needs py7zr; install"
         )
-        from maljan.pipeline.operator_choice import SampleFacts
+        from malspark.pipeline.operator_choice import SampleFacts
 
         assert run_is_degraded([reason], facts=SampleFacts("pe")) is False
         assert run_is_degraded([reason], facts=SampleFacts("7z")) is True
@@ -260,13 +260,13 @@ class TestAServerReasonMeetsTheSample:
     )
 
     def test_a_mach_o_parser_is_nothing_to_a_pe_sample(self) -> None:
-        from maljan.pipeline.nodes import reason_applies_to_format
+        from malspark.pipeline.nodes import reason_applies_to_format
 
         assert reason_applies_to_format(self.MACHO, "pe") is False
         assert reason_applies_to_format(self.MACHO, "mach-o") is True
 
     def test_every_other_reason_is_kept(self) -> None:
-        from maljan.pipeline.nodes import reason_applies_to_format
+        from malspark.pipeline.nodes import reason_applies_to_format
 
         assert reason_applies_to_format("server 'vt' could not be attached", "pe") is True
         assert reason_applies_to_format(self.MACHO, "") is True

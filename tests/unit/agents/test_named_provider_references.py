@@ -17,7 +17,7 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import ValidationError
 
-from maljan.agents.composition import (
+from malspark.agents.composition import (
     PROVIDER_ID_METADATA_KEY,
     aresolve_agent,
     pin_provider_sample,
@@ -26,9 +26,9 @@ from maljan.agents.composition import (
     servers_a_job_calls,
     static_provider_ids_for,
 )
-from maljan.agents.tool_pinning import DECLARED_NAME_METADATA_KEY
-from maljan.core.config import Settings, ToolRef
-from maljan.core.model_assignments import assignments_for
+from malspark.agents.tool_pinning import DECLARED_NAME_METADATA_KEY
+from malspark.core.config import Settings, ToolRef
+from malspark.core.model_assignments import assignments_for
 
 FIRST, SECOND = "ghidra", "r2"
 
@@ -91,8 +91,8 @@ class _Registry:
 
 class _Container:
     def __init__(self, cfg: Settings, providers: dict[str, _Provider]) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger
-        from maljan.llm.context_window import budget_for_settings
+        from malspark.core.truncation_ledger import TruncationLedger
+        from malspark.llm.context_window import budget_for_settings
 
         self.config = cfg
         self.providers = providers
@@ -364,7 +364,7 @@ def test_every_provider_of_the_agent_is_pinned_to_its_own_mirror():
 
 def test_the_worker_mirrors_the_sample_for_every_named_provider():
     from app.worker.analysis_worker import profile_static_providers
-    from maljan.core.container import ServiceContainer
+    from malspark.core.container import ServiceContainer
 
     cfg = _settings([{"kind": "provider", "provider": SECOND}])
     assert profile_static_providers(ServiceContainer(cfg, mock=True)) == [
@@ -374,8 +374,8 @@ def test_the_worker_mirrors_the_sample_for_every_named_provider():
 
 
 def test_a_named_provider_is_selected_and_its_servers_counted():
-    from maljan.core.tool_declarations import selected_static_providers
-    from maljan.providers.registry import static_provider_servers
+    from malspark.core.tool_declarations import selected_static_providers
+    from malspark.providers.registry import static_provider_servers
 
     cfg = _settings([{"kind": "provider", "provider": SECOND}])
     assert SECOND in selected_static_providers(cfg)
@@ -383,8 +383,8 @@ def test_a_named_provider_is_selected_and_its_servers_counted():
 
 
 def test_a_prompt_may_name_both_providers_tools_without_a_warning(monkeypatch):
-    from maljan.agents.prompt_tools import declared_set
-    from maljan.core import builtin_declarations
+    from malspark.agents.prompt_tools import declared_set
+    from malspark.core import builtin_declarations
 
     declared = {
         FIRST: {"tool_facts": {"open_file": {}, "decompile": {}}},
@@ -459,7 +459,7 @@ def test_with_one_provider_a_failed_open_still_fails_the_resolution():
 
 
 def test_a_sample_one_provider_cannot_open_fails_that_call_not_the_loop():
-    from maljan.core.exceptions import SampleNotOpened, SampleNotOpenedOnOneProvider
+    from malspark.core.exceptions import SampleNotOpened, SampleNotOpenedOnOneProvider
 
     providers = _providers()
     providers[SECOND].call_raises = SampleNotOpened("R2 cannot read it.", provider=SECOND)
@@ -474,7 +474,7 @@ def test_a_sample_one_provider_cannot_open_fails_that_call_not_the_loop():
 
 
 def test_with_one_provider_an_unopened_sample_still_ends_the_loop():
-    from maljan.core.exceptions import SampleNotOpened
+    from malspark.core.exceptions import SampleNotOpened
 
     providers = _providers()
     providers[SECOND].call_raises = SampleNotOpened("R2 cannot read it.", provider=SECOND)
@@ -493,7 +493,7 @@ class _Plain:
 
 
 def test_a_tool_that_cannot_be_copied_is_kept_unless_it_must_be_renamed():
-    from maljan.agents.composition import _claim_provider_tools
+    from malspark.agents.composition import _claim_provider_tools
 
     tools: list[Any] = []
     seen: dict[str, str] = {}
@@ -504,7 +504,7 @@ def test_a_tool_that_cannot_be_copied_is_kept_unless_it_must_be_renamed():
 
 
 def test_a_namespaced_name_another_source_holds_falls_back_to_a_qualified_one():
-    from maljan.agents.composition import _claim_provider_tools
+    from malspark.agents.composition import _claim_provider_tools
 
     tools: list[Any] = []
     seen = {f"{SECOND}__open_file": "mcp-server"}
@@ -515,7 +515,7 @@ def test_a_namespaced_name_another_source_holds_falls_back_to_a_qualified_one():
 
 
 def test_a_servers_namespaced_name_another_source_holds_falls_back_to_a_qualified_one():
-    from maljan.providers.servers import ServerRegistry
+    from malspark.providers.servers import ServerRegistry
 
     tools: list[Any] = []
     seen = {"open_file": f"provider:{FIRST}", "box__open_file": f"provider:{SECOND}"}
@@ -549,7 +549,7 @@ def _analyst(providers: dict[str, Any], provider_ids: tuple[str, ...]) -> Any:
     import logging
     from types import SimpleNamespace
 
-    from maljan.agents.configurable_analyst import ConfigurableAnalyst
+    from malspark.agents.configurable_analyst import ConfigurableAnalyst
 
     class _Holder:
         def get_static_provider(self, provider_id: str | None = None) -> Any:
@@ -567,7 +567,7 @@ def _analyst(providers: dict[str, Any], provider_ids: tuple[str, ...]) -> Any:
 
 
 def test_one_provider_that_did_not_open_the_sample_leaves_the_loop_to_the_other():
-    from maljan.core.exceptions import SampleNotOpened
+    from malspark.core.exceptions import SampleNotOpened
 
     providers = {
         FIRST: _Opening(FIRST, SampleNotOpened("G cannot.", provider=FIRST)),
@@ -588,7 +588,7 @@ def test_one_provider_that_did_not_open_the_sample_leaves_the_loop_to_the_other(
 
 
 def test_every_provider_that_did_not_open_the_sample_stops_the_loop():
-    from maljan.core.exceptions import SampleNotOpened
+    from malspark.core.exceptions import SampleNotOpened
 
     first = SampleNotOpened("G cannot.", provider=FIRST)
     providers = {FIRST: _Opening(FIRST, first), SECOND: _Opening(SECOND, SampleNotOpened("R."))}
@@ -600,7 +600,7 @@ def test_every_provider_that_did_not_open_the_sample_stops_the_loop():
 
 
 def test_the_pre_pass_opens_the_sample_on_each_provider_and_goes_on_past_one_that_cannot():
-    from maljan.core.exceptions import SampleNotOpened
+    from malspark.core.exceptions import SampleNotOpened
 
     providers = {
         FIRST: _Opening(FIRST, SampleNotOpened("G cannot.", provider=FIRST)),
@@ -625,9 +625,9 @@ def test_an_agent_with_one_provider_keeps_the_base_check():
 
 
 def test_a_failed_call_on_one_provider_is_recorded_with_the_path_it_was_sent():
-    from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
-    from maljan.core.exceptions import SampleNotOpened
-    from maljan.schemas.evidence import EvidenceCounter
+    from malspark.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
+    from malspark.core.exceptions import SampleNotOpened
+    from malspark.schemas.evidence import EvidenceCounter
 
     def held_to_a_path(path: str = "") -> str:
         failure = SampleNotOpened("R2 cannot read it.", provider=SECOND)
@@ -650,7 +650,7 @@ def test_a_failed_call_on_one_provider_is_recorded_with_the_path_it_was_sent():
 
 
 def test_a_later_providers_priority_hint_names_its_tools_as_offered(monkeypatch):
-    from maljan.providers import base
+    from malspark.providers import base
 
     monkeypatch.setattr(
         base,
@@ -670,7 +670,7 @@ def test_a_later_providers_priority_hint_names_its_tools_as_offered(monkeypatch)
 
 
 def test_aggregate_notes_name_a_tool_by_its_fully_qualified_fallback():
-    from maljan.providers.servers import _offered_names
+    from malspark.providers.servers import _offered_names
 
     seen = {"open_file": f"provider:{FIRST}", "box__open_file": f"provider:{SECOND}"}
     assert _offered_names("box", [_tool("open_file"), _tool("list")], seen) == {

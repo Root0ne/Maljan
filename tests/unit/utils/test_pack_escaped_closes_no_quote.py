@@ -6,8 +6,8 @@ import re
 
 import pytest
 
-from maljan.tools.transforms import _ascii_reading, _utf16_reading
-from maljan.utils.written_forms import pack_escaped, pack_reads
+from malspark.tools.transforms import _ascii_reading, _utf16_reading
+from malspark.utils.written_forms import pack_escaped, pack_reads
 
 
 def test_a_backslash_before_a_quote_is_written_out() -> None:

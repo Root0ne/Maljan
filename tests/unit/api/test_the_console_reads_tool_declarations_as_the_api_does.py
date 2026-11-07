@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 
-from maljan.core.tool_declarations import (
+from malspark.core.tool_declarations import (
     KIND_DEPENDENT_FIELDS,
     KIND_FREE_FIELDS,
     NO_KIND,
@@ -99,7 +99,7 @@ def test_the_generated_cases_are_the_api_s_answers() -> None:
 
 
 def test_a_yes_or_no_field_written_as_a_falsy_word_is_not_set() -> None:
-    from maljan.core.tool_declarations import is_set
+    from malspark.core.tool_declarations import is_set
 
     for word in (0, "0", "false", "False", "no", "NO", "off", "n", "f", False):
         declaration = {"display_name": "X", "asserts_techniques": word}

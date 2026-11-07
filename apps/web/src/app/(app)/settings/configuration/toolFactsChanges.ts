@@ -2,7 +2,7 @@
  * A block's tool declarations as stored: its changes over what it ships, per tool.
  *
  * The API stores a built-in block's tool declarations one tool at a time
- * (`maljan.core.tool_declarations.tool_facts_changes`): nothing for a tool
+ * (`malspark.core.tool_declarations.tool_facts_changes`): nothing for a tool
  * left as shipped, the changed fields of an edited one, `null` for a shipped
  * tool removed, the whole declaration of a tool the block does not ship. The
  * declarations in force are the shipped ones with those changes over them
@@ -21,7 +21,7 @@ import type { ToolDeclarationFields, ToolFactsEntry } from "@/types/settings";
 import { sameJson } from "./declarationFields";
 
 /** The key and value that mark a map as a block's changes over what it ships
- *  (`maljan.core.tool_declarations.CHANGES_MARK` and `CHANGES_FORM`). */
+ *  (`malspark.core.tool_declarations.CHANGES_MARK` and `CHANGES_FORM`). */
 export const CHANGES_MARK = "";
 export const CHANGES_FORM = "changes";
 

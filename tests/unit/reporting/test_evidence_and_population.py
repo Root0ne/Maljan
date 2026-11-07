@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from maljan.reporting.builder import _build_version_history, build_consolidated_iocs
-from maljan.reporting.evidence_bundles import SECTIONS, bundle_for, is_empty
-from maljan.reporting.models import (
+from malspark.reporting.builder import _build_version_history, build_consolidated_iocs
+from malspark.reporting.evidence_bundles import SECTIONS, bundle_for, is_empty
+from malspark.reporting.models import (
     FileHashes,
     ImportRow,
     MalwareReport,
@@ -16,8 +16,8 @@ from maljan.reporting.models import (
     StaticAnalysis,
     StringIOC,
 )
-from maljan.reporting.renderers.stix_renderer import publishes
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.reporting.renderers.stix_renderer import publishes
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _report(**over: object) -> MalwareReport:
@@ -70,7 +70,7 @@ class TestConsolidatedIOCs:
 
 class TestFrontMatter:
     def test_report_number_format(self) -> None:
-        from maljan.reporting.builder import MalwareReportBuilder
+        from malspark.reporting.builder import MalwareReportBuilder
 
         b = MalwareReportBuilder(
             file_hash="a" * 64,
@@ -91,7 +91,7 @@ class TestFrontMatter:
         assert fm.malware_name == "Ransomware"
 
     def test_tlp_escalates_on_live_c2(self) -> None:
-        from maljan.reporting.builder import MalwareReportBuilder
+        from malspark.reporting.builder import MalwareReportBuilder
 
         b = MalwareReportBuilder(
             file_hash="a" * 64,
@@ -111,7 +111,7 @@ class TestFrontMatter:
         assert b._build_front_matter(r2).tlp == "CLEAR"
 
     def test_version_history_single_row(self) -> None:
-        fm = ReportFrontMatter(report_date="2026-07-13", team="Maljan")
+        fm = ReportFrontMatter(report_date="2026-07-13", team="Malspark")
         vh = _build_version_history(fm)
         assert len(vh) == 1
         assert vh[0].date == "2026-07-13"

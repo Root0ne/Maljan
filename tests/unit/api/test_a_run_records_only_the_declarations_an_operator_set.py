@@ -9,8 +9,8 @@ one of the shipped data (``settings_overrides.trim_declarations``).
 from __future__ import annotations
 
 from app.worker.analysis_worker import settings_snapshot
-from maljan.core.builtin_declarations import shipped_digest
-from maljan.core.config import Settings
+from malspark.core.builtin_declarations import shipped_digest
+from malspark.core.config import Settings
 
 
 def _leaves(snap: dict, field: str) -> list[str]:

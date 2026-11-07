@@ -11,10 +11,10 @@ from typing import Any
 
 from tests.unit.tools.synthetic_pe import SyntheticPE
 
-from maljan.analysis.evidence_roots import FAILED, run_roots
-from maljan.schemas.evidence import LedgerEntry
-from maljan.tools import pe_image
-from maljan.tools.transforms import transform_bytes
+from malspark.analysis.evidence_roots import FAILED, run_roots
+from malspark.schemas.evidence import LedgerEntry
+from malspark.tools import pe_image
+from malspark.tools.transforms import transform_bytes
 
 
 def _sample(tmp_path: Path) -> tuple[str, int]:

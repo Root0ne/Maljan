@@ -51,10 +51,10 @@ export default function Sidebar() {
         {/* The mark is a static SVG in public/; next/image would route it
             through the image optimizer, which refuses SVG by default. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo.svg" alt="Maljan" width={27} height={28} />
+        <img src="/logo.svg" alt="Malspark" width={27} height={28} />
         {expanded && (
           <span className="ml-3 text-sm font-semibold text-text-primary tracking-wide">
-            MALJAN
+            MALSPARK
           </span>
         )}
       </div>

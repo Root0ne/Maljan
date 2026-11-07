@@ -17,15 +17,15 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.core.config import Settings, ValidationConfig
-from maljan.pipeline.validation import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.core.config import Settings, ValidationConfig
+from malspark.pipeline.validation import (
     ANALYST_CUT_CODE,
     ANALYST_REPEATED_CODE,
     analyst_repeated_violation,
     claims_repeated,
 )
-from maljan.schemas.isr_models import AgentISR
+from malspark.schemas.isr_models import AgentISR
 from tests.claim_block_counts import begun_and_distinct
 
 
@@ -161,7 +161,7 @@ class _Analyst(BaseAnalyst):
 def _check(analyst: _Analyst, first: str = RUNAWAY) -> AgentISR:
     isr = analyst._text_to_isr(first, 0)
     with (
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
     ):
         return analyst._validate_isr(isr, "evidence")
@@ -188,7 +188,7 @@ class TestTheValidationTurn:
         isr = analyst._text_to_isr(RUNAWAY, 0)
         analyst._last_answer_cut = (4096, RUNAWAY)
         with (
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         ):
             analyst._validate_isr(isr, "evidence")
@@ -204,7 +204,7 @@ class TestTheValidationTurn:
         isr = analyst._text_to_isr(RUNAWAY, 0)
         analyst._last_answer_cut = (4096, RUNAWAY)
         with (
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         ):
             analyst._validate_isr(isr, "evidence")
@@ -222,7 +222,7 @@ class TestTheValidationTurn:
         isr = analyst._text_to_isr(RUNAWAY, 0)
         analyst._last_answer_cut = (4096, RUNAWAY)
         with (
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         ):
             return analyst, analyst._validate_isr(isr, "evidence")
@@ -273,7 +273,7 @@ class TestTheValidationTurn:
 
 
 def test_a_chunk_whose_answer_repeats_is_asked_inside_its_chunk() -> None:
-    from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
+    from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
 
     analyst = _Analyst([])
     answers = [RUNAWAY, DISTINCT]
@@ -307,7 +307,7 @@ def test_a_chunk_whose_answer_repeats_is_asked_inside_its_chunk() -> None:
 
 
 def test_a_chunk_is_named_by_its_place_in_the_list_the_analyst_is_handed() -> None:
-    from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
+    from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
 
     analyst = _Analyst([])
     answers = [DISTINCT, RUNAWAY]

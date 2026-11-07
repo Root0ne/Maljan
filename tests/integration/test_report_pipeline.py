@@ -1,6 +1,6 @@
 """Integration tests for the comprehensive malware report (Faz 2 + Faz 3).
 
-Verifies that MaljanApp.run() with mock mode populates the new state fields
+Verifies that MalsparkApp.run() with mock mode populates the new state fields
 (``malware_report``, ``malware_report_markdown``, ``stix_bundle_extended``)
 and that the dumped report round-trips through ``MalwareReport``.
 
@@ -14,12 +14,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.app import MaljanApp
-from maljan.core.config import Settings
-from maljan.reporting.builder import NO_SUMMARY_REASON
-from maljan.reporting.models import KeyFinding, MalwareReport
-from maljan.reporting.narrative_agent import NarrativeAgent, NarrativeOutput
-from maljan.schemas.stix_models import Bundle
+from malspark.app import MalsparkApp
+from malspark.core.config import Settings
+from malspark.reporting.builder import NO_SUMMARY_REASON
+from malspark.reporting.models import KeyFinding, MalwareReport
+from malspark.reporting.narrative_agent import NarrativeAgent, NarrativeOutput
+from malspark.schemas.stix_models import Bundle
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def mock_settings() -> Settings:
 
 class TestReportNodePopulatesState:
     def test_state_contains_malware_report(self, mock_settings: Settings) -> None:
-        app = MaljanApp(config=mock_settings, mock=True)
+        app = MalsparkApp(config=mock_settings, mock=True)
         result = app.run("deadbeef" * 8, file_name="report-test.exe")
 
         assert result.get("malware_report") is not None, "malware_report missing"
@@ -43,7 +43,7 @@ class TestReportNodePopulatesState:
         assert result.get("stix_bundle_extended") is not None
 
     def test_malware_report_round_trips_through_pydantic(self, mock_settings: Settings) -> None:
-        app = MaljanApp(config=mock_settings, mock=True)
+        app = MalsparkApp(config=mock_settings, mock=True)
         result = app.run("deadbeef" * 8, file_name="report-test.exe")
 
         report = MalwareReport.model_validate(result["malware_report"])
@@ -54,7 +54,7 @@ class TestReportNodePopulatesState:
         assert any(r.startswith(NO_SUMMARY_REASON) for r in report.degradation_reasons)
 
     def test_markdown_contains_required_headings(self, mock_settings: Settings) -> None:
-        app = MaljanApp(config=mock_settings, mock=True)
+        app = MalsparkApp(config=mock_settings, mock=True)
         result = app.run("deadbeef" * 8, file_name="report-test.exe")
         markdown = result["malware_report_markdown"]
         assert markdown.startswith("# ")
@@ -63,7 +63,7 @@ class TestReportNodePopulatesState:
         assert "## 8. MITRE ATT&CK mapping" in markdown
 
     def test_extended_bundle_round_trips(self, mock_settings: Settings) -> None:
-        app = MaljanApp(config=mock_settings, mock=True)
+        app = MalsparkApp(config=mock_settings, mock=True)
         result = app.run("deadbeef" * 8, file_name="report-test.exe")
         bundle_dict = result["stix_bundle_extended"]
         rebuilt = Bundle.model_validate(bundle_dict)
@@ -80,7 +80,7 @@ class TestReportNodeDisabled:
         s.negotiation.max_iterations = 1
         s.reporting.enabled = False
 
-        app = MaljanApp(config=s, mock=True)
+        app = MalsparkApp(config=s, mock=True)
         result = app.run("deadbeef" * 8, file_name="report-test.exe")
 
         # Legacy outputs still present.
@@ -94,7 +94,7 @@ class TestNarrativeFallbackInMock:
     """In mock mode no report model runs, and the platform writes no prose for it."""
 
     def test_the_report_says_no_summary_was_written(self, mock_settings: Settings) -> None:
-        app = MaljanApp(config=mock_settings, mock=True)
+        app = MalsparkApp(config=mock_settings, mock=True)
         result = app.run("deadbeef" * 8, file_name="mock-test.exe")
         report = MalwareReport.model_validate(result["malware_report"])
 
@@ -119,7 +119,7 @@ class TestNarrativeWithMockLLM:
 
     @pytest.fixture
     def canned_narrative(self) -> NarrativeOutput:
-        from maljan.reporting.models import DefensiveRecommendation
+        from malspark.reporting.models import DefensiveRecommendation
 
         return NarrativeOutput(
             executive_summary=(
@@ -164,14 +164,14 @@ class TestNarrativeWithMockLLM:
         agent = MagicMock(spec=NarrativeAgent)
         agent.generate = AsyncMock(return_value=canned_narrative)
 
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         monkeypatch.setattr(ServiceContainer, "get_narrative_agent", lambda self: agent)
 
         # Still build with mock=True so the rest of the pipeline (judge LLM etc.)
         # stays mocked. ``get_narrative_agent`` is forced to return the
         # MagicMock so the report_node will dispatch into apply_narrative.
-        app = MaljanApp(config=mock_settings, mock=True)
+        app = MalsparkApp(config=mock_settings, mock=True)
         result = app.run("deadbeef" * 8, file_name="narr-test.exe")
 
         report = MalwareReport.model_validate(result["malware_report"])
@@ -187,11 +187,11 @@ class TestNarrativeWithMockLLM:
         agent = MagicMock(spec=NarrativeAgent)
         agent.generate = AsyncMock(return_value=None)  # forced failure
 
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         monkeypatch.setattr(ServiceContainer, "get_narrative_agent", lambda self: agent)
 
-        app = MaljanApp(config=mock_settings, mock=True)
+        app = MalsparkApp(config=mock_settings, mock=True)
         result = app.run("deadbeef" * 8, file_name="fallback-test.exe")
         report = MalwareReport.model_validate(result["malware_report"])
 
@@ -209,7 +209,7 @@ class TestDetectionSignaturesInReport:
         """A report with no family attribution never names a rule after one.
 
         The guardrail exists to stop an **unverified family name** being
-        embedded in a generated rule title (the ``Maljan_AutoGen_unknown`` stub
+        embedded in a generated rule title (the ``Malspark_AutoGen_unknown`` stub
         from the 2026-05-29 Linux ELF audit). It fires on
         ``family set AND family_grounded is False``
         (``detection_signatures._family_grounded_reason``).
@@ -229,7 +229,7 @@ class TestDetectionSignaturesInReport:
         ``tests/unit/reporting/test_detection_signatures.py``'s
         ``TestYaraFamilyGroundedGate``.
         """
-        app = MaljanApp(config=mock_settings, mock=True)
+        app = MalsparkApp(config=mock_settings, mock=True)
         result = app.run("deadbeef" * 8, file_name="detect-test.exe")
         report = MalwareReport.model_validate(result["malware_report"])
 
@@ -250,7 +250,7 @@ class TestDetectionSignaturesInReport:
         s.reporting.enabled = True
         s.reporting.auto_generate_detection_rules = False
 
-        app = MaljanApp(config=s, mock=True)
+        app = MalsparkApp(config=s, mock=True)
         result = app.run("deadbeef" * 8, file_name="no-detect.exe")
         report = MalwareReport.model_validate(result["malware_report"])
         assert report.detection_signatures == []

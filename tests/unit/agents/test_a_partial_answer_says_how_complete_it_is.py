@@ -17,17 +17,17 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.agents.mcp_client import MCPLangChainToolkit
-from maljan.analysis import coverage
-from maljan.schemas.answer_completeness import (
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.agents.mcp_client import MCPLangChainToolkit
+from malspark.analysis import coverage
+from malspark.schemas.answer_completeness import (
     COMPLETENESS_PREFIX,
     completeness_line,
     platform_cut,
     read_answer,
 )
-from maljan.schemas.evidence import LedgerEntry, parse_structured
-from maljan.schemas.evidence_spill import EvidenceSpill
+from malspark.schemas.evidence import LedgerEntry, parse_structured
+from malspark.schemas.evidence_spill import EvidenceSpill
 
 LISTING = "void FUN_00401000(void) {\n  int counter = 0;\n  return;\n}\n" * 400
 
@@ -42,7 +42,7 @@ class _Store:
 
 
 def _ghidra(limit: int) -> Any:
-    from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
+    from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
 
     client = GhidraHTTPClient.__new__(GhidraHTTPClient)
     client._max_output_chars = limit
@@ -298,7 +298,7 @@ class TestTheReview:
         assert "shows 1 of" in completeness_line(answer, text_chars=len(text))
 
     def test_a_replayed_answer_states_its_first_cut_and_is_charged(self) -> None:
-        from maljan.agents.evidence_recorder import earlier_chunk_answer
+        from malspark.agents.evidence_recorder import earlier_chunk_answer
 
         charged: list[str] = []
 
@@ -315,7 +315,7 @@ class TestTheReview:
         assert charged[0] in said
 
     def test_a_read_back_answer_states_the_held_cut_and_its_tool_s_paging(self) -> None:
-        from maljan.agents.tool_answer_clearing import read_evidence_tool
+        from malspark.agents.tool_answer_clearing import read_evidence_tool
 
         client = _ghidra(4000)
 
@@ -389,7 +389,7 @@ class TestTheReview:
 
 
 def test_a_cursor_pages_and_a_limit_bounds() -> None:
-    from maljan.agents.output_shortening import bounding_arguments, narrowing_arguments
+    from malspark.agents.output_shortening import bounding_arguments, narrowing_arguments
 
     names = ("topic", "cursor", "query", "offset", "limit", "max_rows", "page_size", "k")
     assert "cursor" in narrowing_arguments(names)
@@ -406,9 +406,9 @@ def test_the_line_s_room_is_kept_back_only_while_the_answer_still_fits(
     limit: int, kept_back: bool
 ) -> None:
     """A limit too small for the answer and the line keeps the answer's place."""
-    from maljan.agents.tool_fence import fence_lines_room
-    from maljan.llm.context_window import answering_for
-    from maljan.schemas.answer_completeness import cut_line_room
+    from malspark.agents.tool_fence import fence_lines_room
+    from malspark.llm.context_window import answering_for
+    from malspark.schemas.answer_completeness import cut_line_room
 
     text = "B" * 5000
     toolkit = MCPLangChainToolkit(None, max_output_chars=limit)

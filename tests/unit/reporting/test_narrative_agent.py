@@ -18,16 +18,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from maljan.pipeline.validation import FEEDBACK_PREAMBLE
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import (
+from malspark.pipeline.validation import FEEDBACK_PREAMBLE
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import (
     DefensiveRecommendation,
     EvidenceIndexRow,
     KeyFinding,
     MalwareReport,
     TTPMapping,
 )
-from maljan.reporting.narrative_agent import (
+from malspark.reporting.narrative_agent import (
     NarrativeAgent,
     NarrativeOutput,
     _message_text,
@@ -159,14 +159,14 @@ class TestNarrativeOutputSchema:
     def test_the_prompt_sets_no_upper_size(self) -> None:
         import re
 
-        from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXPECTED_OBJECT
+        from malspark.reporting.narrative_agent import _SYSTEM_PROMPT, EXPECTED_OBJECT
 
         for text in (_SYSTEM_PROMPT, EXPECTED_OBJECT):
             assert not re.search(r"\d+\s*(-|to)\s*\d+", text)
             assert not re.search(r"\b(at most|no more than|up to)\b", text)
 
     def test_the_prompt_states_the_minimums_the_schema_holds(self) -> None:
-        from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXPECTED_OBJECT
+        from malspark.reporting.narrative_agent import _SYSTEM_PROMPT, EXPECTED_OBJECT
 
         assert NarrativeOutput.model_fields["executive_summary"].metadata[0].min_length == 120
         assert "at least 120 characters" in _SYSTEM_PROMPT
@@ -257,7 +257,7 @@ class TestPromptBuilder:
         assert "second quote" in text
 
     def test_every_published_fact_is_shown(self) -> None:
-        from maljan.reporting.models import (
+        from malspark.reporting.models import (
             DynamicBehavior,
             NetworkDomain,
             NetworkIOCs,
@@ -320,7 +320,7 @@ def structured_output_endpoint(monkeypatch: Any) -> None:
     configuration.
     """
     monkeypatch.setattr(
-        "maljan.reporting.narrative_agent.structured_output_supported_for_llm",
+        "malspark.reporting.narrative_agent.structured_output_supported_for_llm",
         lambda _llm: True,
     )
 
@@ -489,7 +489,7 @@ class TestMessageText:
 
 def test_repeated_key_becomes_a_list_instead_of_the_last_value_winning() -> None:
     """The exact shape the model emits: one key, three times, in one object."""
-    from maljan.reporting.narrative_agent import _parse_keeping_duplicate_keys
+    from malspark.reporting.narrative_agent import _parse_keeping_duplicate_keys
 
     raw = (
         '{"executive_summary": "verdict",'
@@ -504,20 +504,20 @@ def test_repeated_key_becomes_a_list_instead_of_the_last_value_winning() -> None
 
 
 def test_fenced_json_still_parses() -> None:
-    from maljan.reporting.narrative_agent import _parse_keeping_duplicate_keys
+    from malspark.reporting.narrative_agent import _parse_keeping_duplicate_keys
 
     parsed = _parse_keeping_duplicate_keys('```json\n{"a": 1, "a": 2}\n```')
     assert parsed == {"a": [1, 2]}
 
 
 def test_unparseable_text_defers_rather_than_raising() -> None:
-    from maljan.reporting.narrative_agent import _parse_keeping_duplicate_keys
+    from malspark.reporting.narrative_agent import _parse_keeping_duplicate_keys
 
     assert _parse_keeping_duplicate_keys("I could not produce JSON.") is None
 
 
 def test_single_object_is_wrapped_for_a_list_field() -> None:
-    from maljan.reporting.narrative_agent import _coerce_narrative_payload
+    from malspark.reporting.narrative_agent import _coerce_narrative_payload
 
     out = _coerce_narrative_payload({"key_findings": {"text": "one finding"}})
     assert out["key_findings"] == [{"text": "one finding"}]
@@ -532,7 +532,7 @@ def test_coercion_repairs_shape_but_never_invents_content() -> None:
     import pydantic
     import pytest
 
-    from maljan.reporting.narrative_agent import NarrativeOutput, _coerce_narrative_payload
+    from malspark.reporting.narrative_agent import NarrativeOutput, _coerce_narrative_payload
 
     payload = _coerce_narrative_payload(
         {
@@ -551,7 +551,7 @@ class TestTheKeyFindingsAreAskedForAsAnExactObject:
     showed the exact object; the key findings are asked for the same way."""
 
     def test_the_prompt_shows_the_object_and_its_keys_are_the_schema_s(self) -> None:
-        from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXPECTED_OBJECT
+        from malspark.reporting.narrative_agent import _SYSTEM_PROMPT, EXPECTED_OBJECT
 
         assert EXPECTED_OBJECT in _SYSTEM_PROMPT
         shown = json.loads(EXPECTED_OBJECT)
@@ -562,13 +562,13 @@ class TestTheKeyFindingsAreAskedForAsAnExactObject:
         )
 
     def test_the_example_is_a_valid_answer(self) -> None:
-        from maljan.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT
+        from malspark.reporting.narrative_agent import _SYSTEM_PROMPT, EXAMPLE_OBJECT
 
         assert EXAMPLE_OBJECT in _SYSTEM_PROMPT
         NarrativeOutput.model_validate(json.loads(EXAMPLE_OBJECT))
 
     def test_the_prompt_asks_for_estimative_language_and_citations(self) -> None:
-        from maljan.reporting.narrative_agent import _SYSTEM_PROMPT
+        from malspark.reporting.narrative_agent import _SYSTEM_PROMPT
 
         assert "estimative words" in _SYSTEM_PROMPT
         assert "[ev_0007]" in _SYSTEM_PROMPT
@@ -653,19 +653,19 @@ class TestTheRoundIsSizedFromItsBudget:
         )
 
     def test_with_no_rate_the_configured_wait_stands(self) -> None:
-        from maljan.llm.generation_rate import GenerationRates
+        from malspark.llm.generation_rate import GenerationRates
 
         assert self._agent(GenerationRates()).round_timeout(600.0) == 600.0
 
     def test_a_measured_pace_sizes_every_attempt(self) -> None:
-        from maljan.llm.generation_rate import TIMEOUT_MARGIN, GenerationRates
-        from maljan.reporting.narrative_agent import NARRATIVE_ATTEMPTS
+        from malspark.llm.generation_rate import TIMEOUT_MARGIN, GenerationRates
+        from malspark.reporting.narrative_agent import NARRATIVE_ATTEMPTS
 
         rates = GenerationRates()
         rates.observe(self.MODEL, 4000, 100.0, "output tokens over the call's wall clock")
         agent = self._agent(rates)
         with patch(
-            "maljan.reporting.narrative_agent.structured_output_supported_for_llm",
+            "malspark.reporting.narrative_agent.structured_output_supported_for_llm",
             return_value=False,
         ):
             seconds = agent.round_timeout(600.0)
@@ -676,8 +676,8 @@ class TestTheRoundIsSizedFromItsBudget:
         assert row["budget"].startswith("393216 tokens")
 
     def test_the_report_node_puts_no_outer_cut_on_a_measured_round(self) -> None:
-        from maljan.llm.generation_rate import GenerationRates
-        from maljan.pipeline.nodes import _narrative_timeout
+        from malspark.llm.generation_rate import GenerationRates
+        from malspark.pipeline.nodes import _narrative_timeout
 
         rates = GenerationRates()
         rates.observe(self.MODEL, 4000, 100.0, "output tokens over the call's wall clock")

@@ -22,7 +22,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     MARKED_IN_PLACE,
     NO_TABLE_ANSWER,
@@ -31,8 +31,8 @@ from maljan.pipeline.validation import (
     record_flagged_statements,
     unpublished_value_violations,
 )
-from maljan.reporting.composer import ReportComposer, _C2Out, _ProseOut
-from maljan.reporting.models import (
+from malspark.reporting.composer import ReportComposer, _C2Out, _ProseOut
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkDomain,
@@ -42,8 +42,8 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.narrative_agent import published_answers
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.narrative_agent import published_answers
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 PUBLISHED = "gate.example.com"
 REFUSED = "198.51.100.7"
@@ -213,7 +213,9 @@ def _invoke(schema: type, *answers: str) -> tuple[Any, _RawLLM, ReportComposer, 
     comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
     comp._report = report
     comp._answers = published_answers(report)
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
+    ):
         result = asyncio.run(
             comp._invoke([HumanMessage(content="write it")], schema, section="command_and_control")
         )
@@ -280,10 +282,10 @@ class TestTheComposerAsksOnce:
 
 class TestAnUnreadableTable:
     def test_the_composer_asks_once_saying_the_table_could_not_be_read(self) -> None:
-        from maljan.reporting import composer as composer_module
+        from malspark.reporting import composer as composer_module
 
         with patch(
-            "maljan.reporting.narrative_agent.published_answers",
+            "malspark.reporting.narrative_agent.published_answers",
             side_effect=RuntimeError("unreadable"),
         ):
             answers = composer_module._published_answers(_report())
@@ -292,10 +294,10 @@ class TestAnUnreadableTable:
         assert "the IOC table could not be read" in found.message
 
     def test_a_rebuild_that_fails_with_no_stored_row_refuses_every_value(self) -> None:
-        from maljan.reporting import composer as composer_module
+        from malspark.reporting import composer as composer_module
 
         with patch(
-            "maljan.reporting.builder.build_consolidated_iocs",
+            "malspark.reporting.builder.build_consolidated_iocs",
             side_effect=RuntimeError("unreadable"),
         ):
             answers = composer_module._published_answers(_report())
@@ -304,7 +306,7 @@ class TestAnUnreadableTable:
         assert "the IOC table could not be read" in found.message
 
     def test_a_rebuild_that_fails_reads_the_stored_rows_as_section_9_does(self) -> None:
-        from maljan.reporting.models import ConsolidatedIOC
+        from malspark.reporting.models import ConsolidatedIOC
 
         stored = "no: the stored table's answer"
         report = _report(
@@ -315,7 +317,7 @@ class TestAnUnreadableTable:
             ]
         )
         with patch(
-            "maljan.reporting.builder.build_consolidated_iocs",
+            "malspark.reporting.builder.build_consolidated_iocs",
             side_effect=RuntimeError("unreadable"),
         ):
             answers = published_answers(report)
@@ -344,7 +346,7 @@ class TestTheReportStatesTheState:
         assert f"not published by this run: {REFUSED.replace('.', '[.]')} ({REFUSAL})" in line
 
     def test_a_table_cell_carries_the_state_beside_the_value(self) -> None:
-        from maljan.reporting.models import C2Channel, ConfigItem, HostIdentifier
+        from malspark.reporting.models import C2Channel, ConfigItem, HostIdentifier
 
         report = _report(
             technical_analysis=TechnicalAnalysis(
@@ -372,7 +374,7 @@ class TestTheReportStatesTheState:
         assert "no:" not in channel
 
     def test_an_endpoint_with_no_mark_of_its_own_carries_the_table_s_state(self) -> None:
-        from maljan.reporting.models import C2Channel
+        from malspark.reporting.models import C2Channel
 
         refused_host = "relay.example.net"
         report = _report(

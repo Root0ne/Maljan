@@ -12,7 +12,7 @@ import sys
 import atheris
 
 with atheris.instrument_imports():
-    from maljan.core import safe_json
+    from malspark.core import safe_json
 
 # The guard's "marked N containers" warning would print on every deep input.
 logging.disable(logging.CRITICAL)

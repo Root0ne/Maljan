@@ -40,7 +40,7 @@ EIGHT_HOURS = 28_800
 @pytest.fixture(autouse=True)
 def _isolated_runtime_settings(monkeypatch: pytest.MonkeyPatch):
     from app import runtime_config as rc
-    from maljan.core.config import reset_settings_cache
+    from malspark.core.config import reset_settings_cache
 
     async def _mock_mode_allowed_override() -> dict[str, Any]:
         return {"api.mock_mode_allowed": True}
@@ -60,7 +60,7 @@ def _no_object_store(tmp_path: Path):
         patch.dict(
             "os.environ",
             {
-                "MALJAN_MOCK_MODE": "true",
+                "MALSPARK_MOCK_MODE": "true",
                 "UPLOAD_TEMP_DIR": str(tmp_path / "tmp"),
                 "SAMPLES_DIR": str(tmp_path / "samples"),
             },
@@ -160,7 +160,7 @@ async def test_the_job_timeout_stops_the_run_and_keeps_what_it_produced(
 
     with (
         _overrides({"job_timeout": EIGHT_HOURS}),
-        patch("maljan.app.MaljanApp.arun", new=_runs_past_its_limit),
+        patch("malspark.app.MalsparkApp.arun", new=_runs_past_its_limit),
         patch.object(worker_module, "CANCEL_POLL_SECONDS", 0.01),
         patch.object(worker_module, "job_clock", clock),
     ):
@@ -228,7 +228,7 @@ async def test_a_report_stopped_in_the_making_keeps_its_written_sections(
 
     with (
         _overrides({"job_timeout": EIGHT_HOURS}),
-        patch("maljan.app.MaljanApp.arun", new=_stops_inside_the_composer),
+        patch("malspark.app.MalsparkApp.arun", new=_stops_inside_the_composer),
         patch.object(worker_module, "CANCEL_POLL_SECONDS", 0.01),
         patch.object(worker_module, "job_clock", clock),
     ):
@@ -261,7 +261,7 @@ async def test_the_operators_cancel_keeps_what_the_run_produced(redis_stub: Magi
         return {}
 
     with (
-        patch("maljan.app.MaljanApp.arun", new=_cancelled_by_the_api),
+        patch("malspark.app.MalsparkApp.arun", new=_cancelled_by_the_api),
         patch.object(worker_module, "CANCEL_POLL_SECONDS", 0.01),
     ):
         result = await _run(factory, redis_stub, job)
@@ -288,7 +288,7 @@ async def test_a_worker_shutdown_keeps_what_the_run_produced(redis_stub: MagicMo
         await asyncio.sleep(3600)
         return {}
 
-    with patch("maljan.app.MaljanApp.arun", new=_long_run):
+    with patch("malspark.app.MalsparkApp.arun", new=_long_run):
         task = asyncio.create_task(_run(factory, redis_stub, job))
         await running.wait()
         task.cancel()
@@ -324,7 +324,7 @@ async def test_with_no_job_timeout_a_run_longer_than_eight_hours_is_not_cut(
 
     with (
         _overrides({}),
-        patch("maljan.app.MaljanApp.arun", new=_runs_nine_hours),
+        patch("malspark.app.MalsparkApp.arun", new=_runs_nine_hours),
         patch.object(worker_module, "CANCEL_POLL_SECONDS", 0.01),
         patch.object(worker_module, "job_clock", clock),
     ):

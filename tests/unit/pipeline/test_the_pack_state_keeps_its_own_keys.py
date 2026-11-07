@@ -17,18 +17,18 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import Settings
-from maljan.core.pack_steps import PackStep, default_steps, effective_steps, step_vocabulary
-from maljan.core.settings_overrides import pack_steps_left_out
-from maljan.pipeline.conditions import (
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.core.config import Settings
+from malspark.core.pack_steps import PackStep, default_steps, effective_steps, step_vocabulary
+from malspark.core.settings_overrides import pack_steps_left_out
+from malspark.pipeline.conditions import (
     HELD_SCHEDULES,
     PACK_LEFT_OUT,
     TriageFacts,
     pack_state,
     pack_state_keys,
 )
-from maljan.pipeline.triage_pack import PackResult
+from malspark.pipeline.triage_pack import PackResult
 
 SERVER = {"command": "invented-rules", "enabled": True}
 

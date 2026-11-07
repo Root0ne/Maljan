@@ -24,7 +24,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Maljan - Multi-Agent Malware Analysis",
+  title: "Malspark - Multi-Agent Malware Analysis",
   description:
     "Professional multi-agent malware analysis platform with AI-powered threat intelligence.",
   icons: {

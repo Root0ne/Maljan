@@ -21,8 +21,8 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.pipeline.evidence_summary import yara_rule_strings
-from maljan.pipeline.validation import (
+from malspark.pipeline.evidence_summary import yara_rule_strings
+from malspark.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     RULE_MATCH_AS_ACTION_CODE,
     UNGROUNDED_CAPABILITY_CODE,
@@ -31,21 +31,21 @@ from maljan.pipeline.validation import (
     rule_match_statement_violations,
     section_capability_violations,
 )
-from maljan.reporting.composer import (
+from malspark.reporting.composer import (
     RULE_ONLY_NOTE,
     ReportComposer,
     _FlowOut,
     _published_techniques,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     FileHashes,
     FlaggedStatement,
     MalwareReport,
     SampleIdentity,
     TTPMapping,
 )
-from maljan.reporting.narrative_agent import build_prompt_text
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.narrative_agent import build_prompt_text
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 RULE = "example_hollowing_rule"
 
@@ -196,7 +196,7 @@ def _compose(llm: _Answers, report: MalwareReport) -> Any:
     composer._grounding = CapabilityGrounding.from_report(report)
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
-            "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: False
+            "malspark.reporting.composer.structured_output_supported_for_llm", lambda _l: False
         )
         return asyncio.run(
             composer._invoke([HumanMessage(content="x")], _FlowOut, section="execution_flow")
@@ -284,7 +284,7 @@ class TestTheMark:
         assert f"{first} {mark} {second} {mark}" in md
 
     def test_a_sentence_in_a_table_cell_is_marked(self) -> None:
-        from maljan.reporting.renderers.markdown import _Context
+        from malspark.reporting.renderers.markdown import _Context
 
         report = _report()
         report.flagged_statements = [
@@ -315,7 +315,7 @@ class TestTheMark:
         assert f"{sentence} **[not established by this run: exfiltration; not asked]**" in md
 
     def test_the_structured_path_records_its_findings_as_not_asked(self) -> None:
-        from maljan.pipeline.validation import CapabilityGrounding as _G
+        from malspark.pipeline.validation import CapabilityGrounding as _G
 
         class _Structured:
             model_name = "m"
@@ -333,7 +333,7 @@ class TestTheMark:
         composer._grounding = _G.from_report(report)
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(
-                "maljan.reporting.composer.structured_output_supported_for_llm", lambda _l: True
+                "malspark.reporting.composer.structured_output_supported_for_llm", lambda _l: True
             )
             asyncio.run(
                 composer._invoke([HumanMessage(content="x")], _FlowOut, section="execution_flow")
@@ -343,7 +343,7 @@ class TestTheMark:
         assert all(row.asked is False for row in report.flagged_statements)
 
     def test_one_mark_per_cell_for_two_sentences_under_it(self) -> None:
-        from maljan.reporting.renderers.markdown import _Context
+        from malspark.reporting.renderers.markdown import _Context
 
         report = _report()
         report.flagged_statements = [

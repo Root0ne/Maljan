@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from maljan.reporting.builder import build_consolidated_iocs
-from maljan.reporting.models import (
+from malspark.reporting.builder import build_consolidated_iocs
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkDomain,

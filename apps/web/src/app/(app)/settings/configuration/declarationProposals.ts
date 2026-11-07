@@ -1,6 +1,6 @@
 /**
  * The declarations a server probe proposes for the tools nobody declared
- * (`maljan.core.declaration_proposals`), and what accepting one stages.
+ * (`malspark.core.declaration_proposals`), and what accepting one stages.
  *
  * A proposal is data the server's own schemas and answers suggest, shown to
  * an admin. Nothing here saves anything: accepting a field or a whole tool

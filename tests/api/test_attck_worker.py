@@ -14,7 +14,7 @@ import pytest
 
 from app.worker import attck_worker
 from app.worker.queues import ANALYSIS_QUEUE, ATTCK_QUEUE, ENRICHMENT_QUEUE
-from maljan.memory import attck_loader, attck_update
+from malspark.memory import attck_loader, attck_update
 
 
 def _factory(days: Any) -> Any:
@@ -154,7 +154,9 @@ class TestTheCatalogueInThisProcess:
         monkeypatch.setattr(attck_worker, "_seen_signature", None)
         dropped: list[str] = []
         monkeypatch.setattr(attck_loader, "reset_caches", lambda: dropped.append("loader"))
-        monkeypatch.setattr("maljan.tools.knowledge.reset_indices", lambda: dropped.append("index"))
+        monkeypatch.setattr(
+            "malspark.tools.knowledge.reset_indices", lambda: dropped.append("index")
+        )
 
         bundle = directory / "enterprise-attack.json"
         bundle.write_text("{}")

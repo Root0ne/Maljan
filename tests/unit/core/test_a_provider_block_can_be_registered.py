@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.core import declared_reading, tool_declarations
-from maljan.core.config import Settings
-from maljan.core.tool_declarations import (
+from malspark.core import declared_reading, tool_declarations
+from malspark.core.config import Settings
+from malspark.core.tool_declarations import (
     forget_provider_block,
     provider_block_at,
     provider_blocks,
@@ -55,7 +55,7 @@ def test_the_shipped_blocks_are_unchanged_and_first() -> None:
 
 
 def test_a_registered_block_is_read_walked_and_forgotten(unowned_r2_block: str) -> None:
-    from maljan.core.settings_overrides import declaration_blocks
+    from malspark.core.settings_overrides import declaration_blocks
 
     settings = Settings(_env_file=None)
     register_provider_block(SOURCE, unowned_r2_block)
@@ -70,7 +70,7 @@ def test_a_registered_block_is_read_walked_and_forgotten(unowned_r2_block: str) 
 
 
 def test_a_provider_class_naming_its_block_joins_on_registration(unowned_r2_block: str) -> None:
-    from maljan.providers.registry import forget_static_provider, register_static_provider
+    from malspark.providers.registry import forget_static_provider, register_static_provider
 
     @register_static_provider("invented_block_g12")
     class _Invented:
@@ -114,7 +114,7 @@ def test_a_built_in_providers_block_is_refused_to_another_source() -> None:
 
 
 def test_a_provider_class_with_a_refused_block_is_not_registered() -> None:
-    from maljan.providers.registry import _STATIC_REGISTRY, register_static_provider
+    from malspark.providers.registry import _STATIC_REGISTRY, register_static_provider
 
     with pytest.raises(ValueError, match="overlaps it"):
 
@@ -137,7 +137,7 @@ def test_a_registered_block_another_source_holds_is_refused(unowned_r2_block: st
 
 
 def test_a_missing_block_is_logged_once_not_on_every_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    from maljan.core.logger import logger
+    from malspark.core.logger import logger
 
     said: list[str] = []
     monkeypatch.setattr(logger, "warning", lambda msg, *args: said.append(msg % args))

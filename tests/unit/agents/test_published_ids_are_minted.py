@@ -15,7 +15,7 @@ from __future__ import annotations
 import copy
 import re
 
-from maljan.agents.judge_postprocess import postprocess_judge_bundle
+from malspark.agents.judge_postprocess import postprocess_judge_bundle
 
 # The identifier pattern of the STIX 2.1 JSON schemas: an RFC 4122 UUID, its
 # version digit 1-5 and its variant digit 8, 9, a or b.
@@ -61,7 +61,7 @@ def _judge_bundle() -> dict:
                 "relationship_type": "uses",
                 "source_ref": MALWARE,
                 "target_ref": PATTERN,
-                "x_maljan_confidence": 0.95,
+                "x_malspark_confidence": 0.95,
             },
         ],
     }
@@ -95,7 +95,7 @@ class TestEveryPublishedIdIsAUuid:
         assert (indicates["source_ref"], indicates["target_ref"]) == (indicator, malware)
         assert (uses["source_ref"], uses["target_ref"]) == (malware, pattern)
         # The annotation travels with the edge; only the labels changed.
-        assert uses["x_maljan_confidence"] == 0.95
+        assert uses["x_malspark_confidence"] == 0.95
 
     def test_two_runs_that_copied_the_same_id_publish_two_objects(self) -> None:
         first = postprocess_judge_bundle(_judge_bundle())
@@ -153,7 +153,7 @@ class TestEveryPublishedIdIsAUuid:
 
 class TestTheJudgeIsNotAskedForUuids:
     def test_the_prompt_asks_for_labels_and_says_who_assigns_the_ids(self) -> None:
-        from maljan.agents.judge_agent import JUDGE_VERDICT_SYSTEM
+        from malspark.agents.judge_agent import JUDGE_VERDICT_SYSTEM
 
         assert "uuid4" not in JUDGE_VERDICT_SYSTEM
         assert "<type>--<label>" in JUDGE_VERDICT_SYSTEM

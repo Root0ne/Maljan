@@ -27,8 +27,8 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline.validation import WEAK_ALIGNMENT_CODE, validate_isr
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.validation import WEAK_ALIGNMENT_CODE, validate_isr
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 FIXTURE = json.loads(
     (Path(__file__).resolve().parents[2] / "fixtures" / "attck_alignment_recorded.json").read_text(
@@ -160,7 +160,7 @@ class TestTheCorrectionsThatAreStillSent:
         assert sent, "a gate that can never question anything is not a gate"
 
     def test_every_candidate_named_is_in_the_sample_scope(self) -> None:
-        from maljan.pipeline.validation import expected_technique_scope
+        from malspark.pipeline.validation import expected_technique_scope
 
         for row in _rows("other_claims") + _rows("scoped_claims"):
             _claim_out, messages = _checked(row)
@@ -178,7 +178,7 @@ class TestTheCorrectionsThatAreStillSent:
                 )
 
     def test_a_named_candidate_beats_the_claim_by_the_margin(self) -> None:
-        from maljan.pipeline.validation import ALIGNMENT_MARGIN
+        from malspark.pipeline.validation import ALIGNMENT_MARGIN
 
         for row in _rows("other_claims"):
             _claim_out, messages = _checked(row)

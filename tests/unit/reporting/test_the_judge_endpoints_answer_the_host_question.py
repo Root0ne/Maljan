@@ -24,22 +24,22 @@ import pathlib
 import re
 from typing import Any
 
-from maljan.pipeline.validation import validate_verdict_bundle
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import (
+from malspark.pipeline.validation import validate_verdict_bundle
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import (
     MalwareReport,
     NetworkDomain,
     NetworkIOCs,
     NetworkIP,
     NetworkURL,
 )
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_ENDPOINT_CODE,
     UNPUBLISHABLE_PATTERN_CODE,
     UNPUBLISHED_VALUE_CODE,
     ExtendedSTIXRenderer,
 )
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.stix_models import Bundle
 
 # The reviewer's four-value bundle: a private-use name, a reserved name, a
 # loopback address and a version number out of a strings table.
@@ -395,7 +395,7 @@ class TestAPatternIsNotOneComparison:
 
     def test_a_qualifier_timestamp_is_not_read_as_an_endpoint(self) -> None:
         """A qualified pattern, written as the grammar writes it (``t'…'``)."""
-        from maljan.reporting.renderers.stix_renderer import _judge_indicator_problem
+        from malspark.reporting.renderers.stix_renderer import _judge_indicator_problem
 
         indicator = _judge_bundle(
             f"[ipv4-addr:value = '{C2_ADDRESS}'] "
@@ -444,7 +444,7 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
     failure to fix a decision this pipeline made about the judge's work.
     """
 
-    SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
+    SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "malspark"
     ROWS = pathlib.Path(__file__).resolve().parents[3] / "apps/web/src/lib/validationRows.ts"
 
     # A ``stix.`` code a producer really can fix, and that the console is right
@@ -523,7 +523,7 @@ class TestTheConsoleReadsTheseCodesAsTheExportsOwn:
         assert not (self.PRODUCER_FIXABLE & listed), sorted(self.PRODUCER_FIXABLE & listed)
 
     def test_the_codes_a_stored_run_carries_are_still_read(self) -> None:
-        from maljan.reporting.renderers.stix_renderer import LEGACY_UNPUBLISHABLE_CODES
+        from malspark.reporting.renderers.stix_renderer import LEGACY_UNPUBLISHABLE_CODES
 
         assert set(LEGACY_UNPUBLISHABLE_CODES) <= self._listed()
 

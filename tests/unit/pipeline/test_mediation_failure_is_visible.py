@@ -15,9 +15,9 @@ converged.
 
 from __future__ import annotations
 
-from maljan.core.config import Settings
-from maljan.pipeline.routing import ConsensusRouter
-from maljan.pipeline.state import AgentArgument
+from malspark.core.config import Settings
+from malspark.pipeline.routing import ConsensusRouter
+from malspark.pipeline.state import AgentArgument
 
 
 def _state(**over: object) -> dict:
@@ -105,7 +105,7 @@ class TestTheNodeStampsIt:
         import asyncio
         from unittest.mock import AsyncMock, MagicMock
 
-        from maljan.pipeline.nodes import make_negotiation_node
+        from malspark.pipeline.nodes import make_negotiation_node
 
         events: list[tuple[str, dict]] = []
         container = MagicMock()

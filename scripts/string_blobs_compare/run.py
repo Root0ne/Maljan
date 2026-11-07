@@ -2,7 +2,7 @@
 
     uv run python -m scripts.string_blobs_compare.run --ref origin/dev
 
-The other revision's ``src/maljan/tools/string_blobs.py`` is read from git
+The other revision's ``src/malspark/tools/string_blobs.py`` is read from git
 (``--ref``) or from a file (``--module``) and loaded beside this tree's. Both
 decode the same images, built by ``tests/unit/tools/synthetic_pe.py`` from
 invented strings: one key byte and a rising key, each string ending in its NUL
@@ -35,9 +35,9 @@ from types import ModuleType
 
 from tests.unit.tools.synthetic_pe import TEXT_RVA, SyntheticPE
 
-from maljan.tools import string_blobs as this_tree
+from malspark.tools import string_blobs as this_tree
 
-MODULE = "src/maljan/tools/string_blobs.py"
+MODULE = "src/malspark/tools/string_blobs.py"
 FUNCTION = TEXT_RVA + 0x100
 STRING_AT = 0x40
 
@@ -142,7 +142,7 @@ def load_other(ref: str | None, module: str | None) -> ModuleType:
         ).stdout
         path = Path(tempfile.mkdtemp()) / "string_blobs_other.py"
         path.write_bytes(source)
-    spec = importlib.util.spec_from_file_location("maljan.tools.string_blobs_other", path)
+    spec = importlib.util.spec_from_file_location("malspark.tools.string_blobs_other", path)
     if spec is None or spec.loader is None:
         raise SystemExit(f"cannot load {path}")
     other = importlib.util.module_from_spec(spec)

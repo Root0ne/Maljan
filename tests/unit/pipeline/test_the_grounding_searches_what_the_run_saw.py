@@ -25,17 +25,17 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.agents.run_evidence_corpus import NO_CORPUS, CorpusState, RunEvidenceCorpus
-from maljan.pipeline.nodes import _what_the_run_saw
-from maljan.pipeline.validation import (
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.agents.run_evidence_corpus import NO_CORPUS, CorpusState, RunEvidenceCorpus
+from malspark.pipeline.nodes import _what_the_run_saw
+from malspark.pipeline.validation import (
     Violation,
     drop_ungrounded_indicators,
     partial_evidence_note,
     validate_verdict_bundle,
 )
-from maljan.schemas.evidence import apply_budget
-from maljan.schemas.stix_models import Bundle, Indicator
+from malspark.schemas.evidence import apply_budget
+from malspark.schemas.stix_models import Bundle, Indicator
 from tests.unit.pipeline._source_names import names_bound_to, names_imported_from
 
 # A name no reserved TLD rule refuses and no denylist carries, so what decides
@@ -92,7 +92,7 @@ class TestTheJudgeIsGroundedAgainstWhatTheRunSaw:
 
     @staticmethod
     def _violations(seen: list[str], state: CorpusState) -> list[Violation]:
-        from maljan.agents.judge_postprocess import build_evidence_corpus
+        from malspark.agents.judge_postprocess import build_evidence_corpus
 
         bundle = Bundle(objects=[Indicator(pattern=PATTERN)])  # type: ignore[list-item]
         return validate_verdict_bundle(
@@ -184,7 +184,7 @@ class TestAnAbsenceOverPartialEvidenceDropsNothing:
         assert "whole record" not in found[0].message
 
     def test_the_flag_survives_the_state_channel(self) -> None:
-        from maljan.pipeline.nodes import _violations_from_rows
+        from malspark.pipeline.nodes import _violations_from_rows
 
         (rebuilt,) = _violations_from_rows([self._advisory_row().to_dict()])
 
@@ -250,7 +250,7 @@ class TestTheCeilingIsHonest:
 # repository is written.
 UNGROUNDED_CODE = "stix.ungrounded_indicator"
 _CODE_PREFIX = "stix.ungrounded"
-_SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
+_SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "malspark"
 
 
 def _needles(tree: ast.AST, defined_elsewhere: set[str]) -> set[str]:
@@ -428,7 +428,7 @@ class TestNothingDropsAnObjectOverPartialEvidence:
         sources = {
             "codes.py": "UNGROUNDED_INDICATOR_CODE = 'stix.ungrounded_indicator'\n",
             "consumer.py": (
-                "from maljan.codes import UNGROUNDED_INDICATOR_CODE as GONE\n"
+                "from malspark.codes import UNGROUNDED_INDICATOR_CODE as GONE\n"
                 "def act(rows):\n"
                 "    return [r for r in rows if r.code != GONE]\n"
             ),
@@ -506,7 +506,7 @@ class TestACorpusThatKeptNothingIsStillTheCorpus:
         ]
 
     def _run(self, corpus: RunEvidenceCorpus | None) -> tuple[list[Violation], int, CorpusState]:
-        from maljan.agents.judge_postprocess import build_evidence_corpus
+        from malspark.agents.judge_postprocess import build_evidence_corpus
 
         entries = _recorded(corpus, self._answers())
         # Nothing here overruns the byte budget, so the stored ledger looks
@@ -586,7 +586,7 @@ class TestACorpusThatKeptNothingIsStillTheCorpus:
         assert state.missing_tools == ("get_dns",)
 
     def test_the_conjunction_never_launders_a_partial_source(self) -> None:
-        from maljan.agents.run_evidence_corpus import both_searched
+        from malspark.agents.run_evidence_corpus import both_searched
 
         whole = CorpusState()
         partial = CorpusState(complete=False, missing_answers=2, missing_tools=("get_dns",))
@@ -623,7 +623,7 @@ class TestTheCeilingBoundsWhatTheProcessSpends:
     def test_a_check_copies_nothing_of_the_record_it_searches(self) -> None:
         import tracemalloc
 
-        from maljan.agents.judge_postprocess import build_evidence_corpus
+        from malspark.agents.judge_postprocess import build_evidence_corpus
 
         corpus = self._corpus()
         parts = list(corpus.parts())
@@ -691,14 +691,14 @@ class TestTheFlagSurvivesEveryPlaceARowIsRebuilt:
         assert Violation(code="x", message="y").to_dict()["advisory"] == ""
 
     def test_the_state_channel_carries_it_back(self) -> None:
-        from maljan.pipeline.nodes import _violations_from_rows
+        from malspark.pipeline.nodes import _violations_from_rows
 
         (rebuilt,) = _violations_from_rows([self._row().to_dict()])
 
         assert rebuilt.advisory is True
 
     def test_the_tally_keeps_it_on_the_stored_row(self) -> None:
-        from maljan.pipeline.validation import ValidationTally
+        from malspark.pipeline.validation import ValidationTally
 
         tally = ValidationTally()
         tally.record_unresolved("judge", [self._row(), Violation(code="x", message="y")])
@@ -708,8 +708,8 @@ class TestTheFlagSurvivesEveryPlaceARowIsRebuilt:
         assert "advisory" not in ordinary
 
     def test_the_run_summary_carries_it_to_the_console(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
-        from maljan.pipeline.validation import validation_metrics
+        from malspark.analysis.run_summary import RunSummaryBuilder
+        from malspark.pipeline.validation import validation_metrics
 
         builder = RunSummaryBuilder(start_time=0.0)
         builder.set_sample("d" * 64, "sample.exe")
@@ -725,7 +725,7 @@ class TestTheFlagSurvivesEveryPlaceARowIsRebuilt:
         """The one other place a stored row is rebuilt into a metrics object."""
         import inspect
 
-        from maljan import cli
+        from malspark import cli
 
         source = inspect.getsource(cli)
         # ``dict(row)`` rather than three named keys, which is what keeps a
@@ -753,7 +753,7 @@ class TestTheCheckRunsOnWhicheverSourceTheRunHas:
     def _as_the_node_passes_it(
         sandbox_report: dict[str, Any] | None, answers: list[str]
     ) -> list[Violation]:
-        from maljan.agents.judge_postprocess import build_evidence_corpus
+        from malspark.agents.judge_postprocess import build_evidence_corpus
 
         # ``interesting_strings`` is None at the node's call site, so the token
         # set is the sandbox report's network entries and nothing else.
@@ -837,8 +837,8 @@ class TestTheClosedContainerFailsSafe:
 
     @staticmethod
     def _container() -> Any:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         return ServiceContainer(config=Settings(_env_file=None), mock=True)
 

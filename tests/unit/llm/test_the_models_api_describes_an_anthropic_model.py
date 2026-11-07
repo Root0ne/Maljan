@@ -15,12 +15,12 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.exceptions import LLMError
-from maljan.core.model_assignments import assignments_for
-from maljan.llm import context_window as cw
-from maljan.llm import model_capabilities, model_output_limits
-from maljan.llm.anthropic_provider import AnthropicProvider
+from malspark.core.config import Settings
+from malspark.core.exceptions import LLMError
+from malspark.core.model_assignments import assignments_for
+from malspark.llm import context_window as cw
+from malspark.llm import model_capabilities, model_output_limits
+from malspark.llm.anthropic_provider import AnthropicProvider
 
 MODEL = "claude-haiku-5-5"
 

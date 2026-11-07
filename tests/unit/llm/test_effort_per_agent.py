@@ -18,18 +18,18 @@ import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import ValidationError
 
-from maljan.core.config import (
+from malspark.core.config import (
     ANTHROPIC_EFFORT_LEVELS,
     AgentLLMConfig,
     AnthropicConfig,
     ModelChoice,
     Settings,
 )
-from maljan.core.exceptions import LLMError
-from maljan.llm import model_capabilities
-from maljan.llm.anthropic_provider import AnthropicProvider
-from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
-from maljan.llm.registry import LLMProviderRegistry
+from malspark.core.exceptions import LLMError
+from malspark.llm import model_capabilities
+from malspark.llm.anthropic_provider import AnthropicProvider
+from malspark.llm.openai_provider import OpenAIProvider, forget_standard_only
+from malspark.llm.registry import LLMProviderRegistry
 
 from .anthropic_wire import MODEL, Wire, install, message
 from .streamed_wire import reply
@@ -86,7 +86,7 @@ class TestTheField:
             assert ModelChoice(provider="anthropic", model="m", effort=level).effort == level
 
     def test_an_effort_whose_probe_record_would_not_fit_is_refused(self) -> None:
-        from maljan.core.model_assignments import FILED_MODEL_MAX_CHARS, filed_model
+        from malspark.core.model_assignments import FILED_MODEL_MAX_CHARS, filed_model
 
         model = "m" * 150
         with pytest.raises(ValidationError, match="shorten the effort"):
@@ -386,7 +386,7 @@ class TestTheBuildLine:
 
     @pytest.fixture(autouse=True)
     def _capture(self, caplog: pytest.LogCaptureFixture) -> Any:
-        from maljan.core.logger import logger
+        from malspark.core.logger import logger
 
         logger.addHandler(caplog.handler)
         caplog.set_level(logging.DEBUG)
@@ -454,7 +454,7 @@ class TestTheBuildLine:
 
 class TestTheChoices:
     def test_the_catalogue_says_an_entry_may_name_one(self) -> None:
-        from maljan.core.settings_catalog import core_catalog
+        from malspark.core.settings_catalog import core_catalog
 
         entry = next(e for e in core_catalog() if e.path == "llm.agents")
         assert "effort" in entry.description
@@ -462,7 +462,7 @@ class TestTheChoices:
         assert "llm.openai.reasoning_effort" in entry.description
 
     def test_anthropic_offers_the_settings_levels_until_the_model_is_described(self) -> None:
-        from maljan.llm.effort import effort_options
+        from malspark.llm.effort import effort_options
 
         options = effort_options(_anthropic_settings(effort="max"), "anthropic", MODEL)
         assert options["takes_effort"] is True
@@ -472,7 +472,7 @@ class TestTheChoices:
         assert options["global_value"] == "max"
 
     def test_a_described_model_offers_the_levels_it_takes(self) -> None:
-        from maljan.llm.effort import effort_options
+        from malspark.llm.effort import effort_options
 
         model_capabilities.note_model_description(
             {
@@ -495,7 +495,7 @@ class TestTheChoices:
         assert options["levels_source"] == "models_api"
 
     def test_a_level_the_description_leaves_out_is_one_the_build_accepts(self) -> None:
-        from maljan.llm.effort import effort_options
+        from malspark.llm.effort import effort_options
 
         model_capabilities.note_model_description(
             {"capabilities": {"effort": {"low": {"supported": True}, "high": {"supported": True}}}},
@@ -508,7 +508,7 @@ class TestTheChoices:
         AnthropicProvider(_anthropic_settings(effort="medium")).build_model(MODEL, 0.1)
 
     def test_a_model_the_api_says_takes_none_offers_none(self) -> None:
-        from maljan.llm.effort import effort_options
+        from malspark.llm.effort import effort_options
 
         model_capabilities.note_model_description(
             {"capabilities": {"effort": {"supported": False}}}, MODEL, "test"
@@ -518,7 +518,7 @@ class TestTheChoices:
         assert options["levels_source"] == "models_api"
 
     def test_openai_compatible_is_written_as_the_endpoint_names_it(self) -> None:
-        from maljan.llm.effort import effort_options
+        from malspark.llm.effort import effort_options
 
         options = effort_options(_openai_settings(reasoning_effort="max"), "openai", "m")
         assert options["takes_effort"] is True
@@ -528,7 +528,7 @@ class TestTheChoices:
 
     @pytest.mark.parametrize("provider", ["ollama", "gemini", "unknown"])
     def test_the_others_take_none(self, provider: str) -> None:
-        from maljan.llm.effort import effort_options
+        from malspark.llm.effort import effort_options
 
         options = effort_options(Settings(_env_file=None), provider, "m")
         assert options["takes_effort"] is False

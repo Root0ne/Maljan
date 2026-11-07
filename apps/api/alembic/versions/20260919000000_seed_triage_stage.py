@@ -66,7 +66,7 @@ _UPSERT_JSON_OTHER = sa.text(
 
 
 def triage_stage() -> dict[str, Any]:
-    """The stage document, as ``maljan.core.config.triage_stage`` writes it.
+    """The stage document, as ``malspark.core.config.triage_stage`` writes it.
 
     A copy rather than an import, for the reason every alembic revision keeps
     its own constants: this has to keep inserting the document that was

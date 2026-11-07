@@ -7,11 +7,11 @@ row, so both reads passed none. The names are read off the tool's own schema.
 
 from __future__ import annotations
 
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.agents.ledger_reads import LedgerReads
-from maljan.agents.tool_answer_clearing import read_evidence_narrowing, read_evidence_tool
-from maljan.schemas.answer_completeness import COMPLETENESS_PREFIX
-from maljan.schemas.evidence import LedgerEntry
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.agents.ledger_reads import LedgerReads
+from malspark.agents.tool_answer_clearing import read_evidence_narrowing, read_evidence_tool
+from malspark.schemas.answer_completeness import COMPLETENESS_PREFIX
+from malspark.schemas.evidence import LedgerEntry
 
 ROW = LedgerEntry(
     id="ev_0007",

@@ -14,11 +14,11 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.core.model_assignments import assignments_for, endpoint_for, endpoint_where
-from maljan.core.settings_overrides import build_settings
-from maljan.llm import context_window as cw
-from maljan.llm import model_capabilities, model_output_limits
-from maljan.llm.anthropic_provider import AnthropicProvider
+from malspark.core.model_assignments import assignments_for, endpoint_for, endpoint_where
+from malspark.core.settings_overrides import build_settings
+from malspark.llm import context_window as cw
+from malspark.llm import model_capabilities, model_output_limits
+from malspark.llm.anthropic_provider import AnthropicProvider
 
 MODEL = "claude-haiku-5-5"
 STUB = "http://127.0.0.1:8765"

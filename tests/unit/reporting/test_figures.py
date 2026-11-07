@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import xml.dom.minidom as _minidom
 
-from maljan.reporting.figures import (
+from malspark.reporting.figures import (
     build_attack_matrix,
     build_code_listings,
     build_entropy_chart,
@@ -13,7 +13,7 @@ from maljan.reporting.figures import (
     build_network_graph,
     build_process_tree,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     DynamicBehavior,
     FileHashes,
     MalwareReport,

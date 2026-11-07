@@ -14,24 +14,24 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import MCPServerConfig
-from maljan.pipeline.operator_choice import (
+from malspark.core.config import MCPServerConfig
+from malspark.pipeline.operator_choice import (
     SampleFacts,
     is_loss,
     is_operator_choice,
     lost_tools,
     split_operator_choices,
 )
-from maljan.pipeline.triage_pack import run_is_degraded
-from maljan.providers.sample_open import (
+from malspark.pipeline.triage_pack import run_is_degraded
+from malspark.providers.sample_open import (
     LISTED_SHARED_WITHHELD,
     NO_NOTE,
     UNCOVERED,
     UNREAD_SCHEMA,
     withheld_unpinned,
 )
-from maljan.providers.servers import AGENT_TOOL_UNAVAILABLE_REASON, SERVER_DISABLED, ServerHandle
-from maljan.tools.capabilities import ServerCapabilities, ToolNeeds, env, manifest, module
+from malspark.providers.servers import AGENT_TOOL_UNAVAILABLE_REASON, SERVER_DISABLED, ServerHandle
+from malspark.tools.capabilities import ServerCapabilities, ToolNeeds, env, manifest, module
 
 _SHARED = "remote http://localhost:8089 (backend 1)"
 
@@ -266,7 +266,7 @@ class TestAPartialAnswer:
             "error": "py7zr is not installed (No module named 'py7zr')",
             "structured": {"error": {"code": "missing_dependency", "message": "py7zr"}},
         }
-        from maljan.tools.errors import answered_short_of_a_library
+        from malspark.tools.errors import answered_short_of_a_library
 
         assert answered_short_of_a_library("archive_list", [failed])
         assert not answered_short_of_a_library("archive_list", [{**failed, "ok": True}])
@@ -335,9 +335,9 @@ _GENERIC = "this run had less evidence than a full analysis"
 
 
 def _header(reasons: list[str], facts: SampleFacts) -> str:
-    from maljan.pipeline.operator_choice import facts_record
-    from maljan.reporting.models import MalwareReport
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.pipeline.operator_choice import facts_record
+    from malspark.reporting.models import MalwareReport
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     kept = facts_record(facts)
     report = MalwareReport.model_validate(
@@ -377,7 +377,7 @@ def test_a_degraded_header_names_every_tool_the_run_lost(file_type: str) -> None
 
 def test_the_header_reads_the_facts_the_judge_kept() -> None:
     """A 7z carved from a PE: the summary keeps the failed call, and the header names the tool."""
-    from maljan.tools.errors import short_of_a_library_rows
+    from malspark.tools.errors import short_of_a_library_rows
 
     failed = {"tool": "archive_list", "ok": False, "error": "py7zr is not installed"}
     facts = _facts("pe", failures=(failed,))
@@ -390,13 +390,13 @@ def test_the_header_reads_the_facts_the_judge_kept() -> None:
 
 class TestTheJudgesParagraph:
     def test_a_run_with_only_choices_is_told_them_as_absences(self) -> None:
-        from maljan.pipeline.nodes import RUN_QUALITY_CHOICES, run_quality_note
+        from malspark.pipeline.nodes import RUN_QUALITY_CHOICES, run_quality_note
 
         note = run_quality_note([], degraded=False, choices=["a key never set"])
         assert note == f"RUN QUALITY — {RUN_QUALITY_CHOICES} a key never set."
 
     def test_no_choice_leaves_the_paragraph_as_it_was(self) -> None:
-        from maljan.pipeline.nodes import run_quality_note
+        from malspark.pipeline.nodes import run_quality_note
 
         assert run_quality_note([], degraded=False) == ""
         assert run_quality_note(["a reason"], degraded=True) == run_quality_note(

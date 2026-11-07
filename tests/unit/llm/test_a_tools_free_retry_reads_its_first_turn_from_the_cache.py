@@ -24,9 +24,9 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from maljan.core.config import Settings
-from maljan.llm import anthropic_history
-from maljan.llm.anthropic_provider import AnthropicProvider
+from malspark.core.config import Settings
+from malspark.llm import anthropic_history
+from malspark.llm.anthropic_provider import AnthropicProvider
 
 from .anthropic_wire import MODEL, Wire, _unmarked, install, message
 

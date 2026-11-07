@@ -13,11 +13,11 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.pipeline.nodes import brief_the_mediator, make_negotiation_node
-from maljan.pipeline.state import AgentArgument
-from maljan.pipeline.validation import Violation
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.pipeline.nodes import brief_the_mediator, make_negotiation_node
+from malspark.pipeline.state import AgentArgument
+from malspark.pipeline.validation import Violation
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _isr(name: str) -> AgentISR:
@@ -42,7 +42,7 @@ STATE: dict[str, Any] = {
 def test_the_mediator_carries_the_paths_and_the_round_an_ask_hands_on() -> None:
     judge = JudgeAgent(llm=MagicMock())
 
-    with patch("maljan.pipeline.nodes.brief_agent") as briefed:
+    with patch("malspark.pipeline.nodes.brief_agent") as briefed:
         brief_the_mediator(judge, STATE, MagicMock(), 1)
 
     briefed.assert_called_once()
@@ -78,8 +78,8 @@ def test_the_node_briefs_the_mediator_before_it_mediates() -> None:
 
     judge.mediate = _mediate  # type: ignore[method-assign]
     with (
-        patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False),
-        patch("maljan.pipeline.nodes.brief_agent"),
+        patch("malspark.pipeline.nodes.detect_sycophancy", return_value=False),
+        patch("malspark.pipeline.nodes.brief_agent"),
     ):
         asyncio.run(make_negotiation_node(_container(judge))(STATE))
 
@@ -100,8 +100,8 @@ def test_what_an_asked_agent_s_checks_said_is_written_under_the_judge() -> None:
 
     judge.mediate = AsyncMock(side_effect=_mediate)
     with (
-        patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False),
-        patch("maljan.pipeline.nodes.brief_agent"),
+        patch("malspark.pipeline.nodes.detect_sycophancy", return_value=False),
+        patch("malspark.pipeline.nodes.brief_agent"),
     ):
         result = asyncio.run(make_negotiation_node(_container(judge))(STATE))
 
@@ -115,8 +115,8 @@ def test_a_mediation_with_no_ask_writes_no_validation_row() -> None:
     judge = JudgeAgent(llm=MagicMock())
     judge.mediate = AsyncMock(return_value=_mediated())
     with (
-        patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False),
-        patch("maljan.pipeline.nodes.brief_agent"),
+        patch("malspark.pipeline.nodes.detect_sycophancy", return_value=False),
+        patch("malspark.pipeline.nodes.brief_agent"),
     ):
         result = asyncio.run(make_negotiation_node(_container(judge))(STATE))
 

@@ -14,10 +14,10 @@ from typing import Any
 
 import pytest
 
-from maljan.agents import tool_answer_clearing as tac
-from maljan.agents.base_agent import _stored_answer_of, _stored_copy_of
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.schemas.evidence_spill import EvidenceSpill
+from malspark.agents import tool_answer_clearing as tac
+from malspark.agents.base_agent import _stored_answer_of, _stored_copy_of
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.schemas.evidence_spill import EvidenceSpill
 
 WHOLE = "".join(f"row {index:03d} é\n" for index in range(40))
 
@@ -195,7 +195,7 @@ MIXED = "aé€😀" * 30
 
 class TestAPageAlwaysFitsTheRoom:
     def _tool(self, room: int, text: str = WHOLE * 4) -> Any:
-        from maljan.agents.mcp_client import MCPLangChainToolkit
+        from malspark.agents.mcp_client import MCPLangChainToolkit
 
         recorder = EvidenceRecorder("static", spill=_Store())
         recorder.record(
@@ -262,7 +262,7 @@ class TestAPageStatesOnlyItsOwnCut:
 
 class TestAPageGroundsTheCitedEntry:
     def test_the_corpus_joins_an_entry_with_the_pages_read_of_it(self) -> None:
-        from maljan.agents.run_evidence_corpus import RunEvidenceCorpus
+        from malspark.agents.run_evidence_corpus import RunEvidenceCorpus
 
         corpus = RunEvidenceCorpus(1_000_000)
         recorder = _recorder_with_a_cut_answer(_Store(), corpus)
@@ -276,8 +276,8 @@ class TestAPageGroundsTheCitedEntry:
         assert corpus.text_of_entry("ev_0002") == ""
 
     def test_a_value_only_on_a_page_is_in_the_text_of_the_cited_entry(self) -> None:
-        from maljan.agents.run_evidence_corpus import RunEvidenceCorpus
-        from maljan.pipeline.validation import EntryTexts
+        from malspark.agents.run_evidence_corpus import RunEvidenceCorpus
+        from malspark.pipeline.validation import EntryTexts
 
         marker = "uniquevalue-7f3a"
         text = WHOLE + marker + "\n" + WHOLE

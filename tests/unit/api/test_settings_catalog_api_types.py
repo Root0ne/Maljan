@@ -88,7 +88,7 @@ def test_the_api_catalog_holds_no_second_copy_of_the_qdrant_settings():
     401 every enrich run answered with. The ``core.memory`` half is the one
     that stayed, and it carries the secret.
     """
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     paths = {e.path for e in api_catalog()}
 

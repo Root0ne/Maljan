@@ -12,10 +12,10 @@ from typing import Any
 import pytest
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
-from maljan.agents.tool_fence import fenced
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
+from malspark.agents.tool_fence import fenced
+from malspark.schemas.evidence import EvidenceCounter
 
 
 class _StubAnalyst(BaseAnalyst):
@@ -117,7 +117,7 @@ class TestRecordedCalls:
             return "void f() {}"
 
         recorder = EvidenceRecorder("static")
-        tool = _tool(decompile_function, "decompile_function", {"maljan_server": "ghidra"})
+        tool = _tool(decompile_function, "decompile_function", {"malspark_server": "ghidra"})
         record_tools([tool], recorder)[0].invoke({"name": "FUN_00401310"})
         assert recorder.entries[0].server == "ghidra"
 
@@ -300,7 +300,7 @@ class TestPublishing:
         assert agent.get_last_tool_evidence() == []
 
     def test_the_budget_trim_is_counted_in_the_truncation_ledger(self) -> None:
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         def bulk() -> str:
             """Return a lot."""
@@ -314,7 +314,7 @@ class TestPublishing:
         agent = _agent()
         agent.truncation_ledger = TruncationLedger()
 
-        import maljan.agents.base_agent as base_agent_module
+        import malspark.agents.base_agent as base_agent_module
 
         class _Reporting:
             evidence_budget_bytes = 600
@@ -362,7 +362,7 @@ class TestPublishing:
 
         with (
             patch("langgraph.prebuilt.create_react_agent", _create),
-            patch("maljan.agents.base_agent._run_coro_blocking", _boom),
+            patch("malspark.agents.base_agent._run_coro_blocking", _boom),
             pytest.raises(TimeoutError),
         ):
             agent.execute_tool_loop([("system", "s"), ("human", "h")])

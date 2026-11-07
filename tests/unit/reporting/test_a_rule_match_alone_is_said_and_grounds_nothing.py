@@ -13,17 +13,17 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.analysis.corroboration import rule_match_only
-from maljan.pipeline.evidence_summary import yara_rule_strings
-from maljan.pipeline.validation import CapabilityGrounding, narrative_capability_violations
-from maljan.reporting.models import (
+from malspark.analysis.corroboration import rule_match_only
+from malspark.pipeline.evidence_summary import yara_rule_strings
+from malspark.pipeline.validation import CapabilityGrounding, narrative_capability_violations
+from malspark.reporting.models import (
     EvidenceSection,
     FileHashes,
     MalwareReport,
     SampleIdentity,
     TTPMapping,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 RULE = "example_credential_rule"
 
@@ -91,7 +91,7 @@ class TestEachRowIsReadWithTheLayerThatMatchedIt:
     """A row is shown under the layer that matched it, by its declared label, never by a name."""
 
     def test_an_operator_signature_tool_names_its_own_rules(self) -> None:
-        from maljan.core.declared_reading import shipped_by_name, stored_record
+        from malspark.core.declared_reading import shipped_by_name, stored_record
 
         # Declared as the shipped signature-rule tool is, under a label of its own.
         facts = shipped_by_name()["yara_scan"].model_copy(update={"source": "sigs"})
@@ -127,7 +127,7 @@ class TestEachRowIsReadWithTheLayerThatMatchedIt:
         assert rule_match_only(report) == {"T1003": "rule match only (sigs), no analyst claim"}
 
     def test_a_signature_entry_asserting_nothing_still_reaches_the_note(self) -> None:
-        from maljan.core.declared_reading import shipped_by_name, stored_record
+        from malspark.core.declared_reading import shipped_by_name, stored_record
 
         # Declared of the signature kind, but asserting no technique itself.
         facts = shipped_by_name()["yara_scan"].model_copy(

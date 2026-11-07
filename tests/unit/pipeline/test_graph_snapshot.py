@@ -17,9 +17,9 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.pipeline.builder import build_graph
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.pipeline.builder import build_graph
 
 GOLDEN = Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "graph_default.json"
 

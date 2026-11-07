@@ -15,7 +15,7 @@ from app.services.settings_service import (  # noqa: E402
     SettingsValidationError,
     ValueInfo,
 )
-from maljan.core.config import ALWAYS_ENABLED_AGENTS  # noqa: E402
+from malspark.core.config import ALWAYS_ENABLED_AGENTS  # noqa: E402
 
 
 @pytest.fixture
@@ -106,7 +106,7 @@ def test_patch_returns_applies_summary(client):
 
 def test_patch_warns_of_a_capability_no_server_serves_while_one_is_unlisted(client):
     """Not refused while a built-in server is unlisted, so said on the save instead."""
-    from maljan.core import served_declarations
+    from malspark.core import served_declarations
 
     stored = {
         "core.agents.definitions": {

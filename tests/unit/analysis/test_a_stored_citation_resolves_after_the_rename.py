@@ -15,9 +15,9 @@ from typing import Any
 import pytest
 from tests.unit.providers.test_sandbox_tools_golden import cape_reports
 
-from maljan.analysis import sandbox_sections as ss
-from maljan.schemas.sandbox_document import sandbox_document
-from maljan.schemas.sandbox_report import cape_report_to_sandbox_report
+from malspark.analysis import sandbox_sections as ss
+from malspark.schemas.sandbox_document import sandbox_document
+from malspark.schemas.sandbox_report import cape_report_to_sandbox_report
 
 _REPORTS = [(name, raw) for name, raw in cape_reports() if raw.get("CAPE")]
 _IDS = [name for name, _ in _REPORTS]

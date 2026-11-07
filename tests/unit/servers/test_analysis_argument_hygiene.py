@@ -42,11 +42,11 @@ def _the_test_s_own_directory_is_a_root(tmp_path: Path, monkeypatch: pytest.Monk
     """The sample a test writes is a sample this server may read.
 
     Every path argument is held to the staging directory plus the roots
-    ``MALJAN_SAMPLE_ROOTS`` names (see ``maljan.tools.roots``), which is how a
+    ``MALSPARK_SAMPLE_ROOTS`` names (see ``malspark.tools.roots``), which is how a
     deployment says where its samples arrive. A test that writes one under
     ``tmp_path`` says the same thing about that directory.
     """
-    monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", str(tmp_path))
+    monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", str(tmp_path))
 
 
 def _sample(tmp_path: Path) -> str:
@@ -82,7 +82,7 @@ class TestCarvedPayloadsLandUnderStaging:
         import os
 
         staging = tmp_path / "staging"
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(staging))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(staging))
         path, digest = self._sample(tmp_path)
         before = set(os.listdir(os.getcwd()))
 
@@ -119,7 +119,7 @@ class TestCarvedPayloadsLandUnderStaging:
         self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         staging = tmp_path / "staging"
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(staging))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(staging))
 
         answer = server.carve_payloads(str(tmp_path / "absent.bin"))
 
@@ -197,7 +197,7 @@ class TestThePageAndItsSuccessor:
     def test_the_default_page_fits_the_budget_the_answer_is_read_under(self, server: Any) -> None:
         import inspect
 
-        from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
+        from malspark.tools.strings import DEFAULT_STRINGS_LIMIT
 
         assert DEFAULT_STRINGS_LIMIT == 150
         assert inspect.signature(server.strings).parameters["limit"].default == 150
@@ -260,7 +260,7 @@ class TestReadingAFileAnEarlierCallWrote:
     @staticmethod
     def _staged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server: Any) -> Path:
         staging = tmp_path / "staging"
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(staging))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(staging))
         return Path(server._staging_dir())
 
     def test_a_carved_payload_is_read_through_it(
@@ -389,7 +389,7 @@ class TestOneRunReadsOnlyWhatItProduced:
 
     @staticmethod
     def _staged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, server: Any) -> Path:
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
         return Path(server._staging_dir())
 
     @staticmethod
@@ -454,7 +454,7 @@ class TestWhatCarvedPathMayName:
     def _sample_and_tree(server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         import hashlib
 
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
         server._staging_dir()
         body = b"SAMPLE-CONTENT\x00"
         sample = tmp_path / "s.bin"
@@ -506,8 +506,8 @@ class TestTheSweepPrunesCarvedTrees:
     ) -> None:
         import os
 
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
-        monkeypatch.setenv("MALJAN_STAGING_TTL_HOURS", "1")
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_TTL_HOURS", "1")
         base = Path(server._staging_dir())
         tree = server._carved_tree("f" * 64)
         tree.mkdir(parents=True, exist_ok=True)
@@ -525,8 +525,8 @@ class TestTheSweepPrunesCarvedTrees:
     def test_a_fresh_one_stays(
         self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
-        monkeypatch.setenv("MALJAN_STAGING_TTL_HOURS", "1")
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_TTL_HOURS", "1")
         base = Path(server._staging_dir())
         tree = server._carved_tree("e" * 64)
         tree.mkdir(parents=True, exist_ok=True)
@@ -541,8 +541,8 @@ class TestTheSweepPrunesCarvedTrees:
     ) -> None:
         import os
 
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
-        monkeypatch.setenv("MALJAN_STAGING_TTL_HOURS", "0")
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_TTL_HOURS", "0")
         base = Path(server._staging_dir())
         tree = server._carved_tree("d" * 64)
         tree.mkdir(parents=True, exist_ok=True)
@@ -572,7 +572,7 @@ class TestTheSixSpellingsAModelWrote:
 
     @staticmethod
     def _carved(server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
         server._staging_dir()
         sample = tmp_path / "dropper.exe"
         sample.write_bytes(
@@ -662,7 +662,7 @@ class TestReadingTheQuotesOffAValue:
     def test_a_quoted_absence_word_is_an_absence(
         self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
         server._staging_dir()
         sample = tmp_path / "s.bin"
         sample.write_bytes(b"SAMPLE-CONTENT\x00")
@@ -676,7 +676,7 @@ class TestReadingTheQuotesOffAValue:
 class TestWhatACarvedRefusalSays:
     @staticmethod
     def _carved(server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
         server._staging_dir()
         sample = tmp_path / "dropper.exe"
         sample.write_bytes(
@@ -719,7 +719,7 @@ class TestWhatACarvedRefusalSays:
 
     def test_a_call_that_named_no_carved_file_keeps_the_general_remedy(self, server: Any) -> None:
         """The argument's own remediation is for the argument's own failures."""
-        from maljan.tools.errors import REMEDIATIONS
+        from malspark.tools.errors import REMEDIATIONS
 
         answer = server.identify_file(path="/nowhere/at/all.bin")
 
@@ -743,7 +743,7 @@ class TestTheAnswerSaysWhichFieldToPassBack:
     def test_each_payload_carries_the_argument_s_own_name(
         self, server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
         server._staging_dir()
         sample = tmp_path / "dropper.exe"
         sample.write_bytes(
@@ -775,7 +775,7 @@ class TestEverySpellingDecidesConfinementTheSameWay:
     def _run_with_a_planted_link(
         server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> tuple[Path, Path, dict[str, Any]]:
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
         server._staging_dir()
         sample = tmp_path / "dropper.exe"
         sample.write_bytes(
@@ -852,10 +852,10 @@ class TestTheCarveWriterDoesNotFollowALink:
     def _sample_and_name(server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         import hashlib
 
-        from maljan.extractors.pe_extractor import carve_payloads as carve
-        from maljan.tools.binary import carved_file_name
+        from malspark.extractors.pe_extractor import carve_payloads as carve
+        from malspark.tools.binary import carved_file_name
 
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
         server._staging_dir()
         body = b"DECOY\x00" + b"MZ\x90\x00" + b"\x00" * 2048 + b"CARVED-PAYLOAD-MARKER\x00"
         sample = tmp_path / "dropper.exe"
@@ -915,7 +915,7 @@ class TestTheCarveWriterDoesNotFollowALink:
 class TestAValueTheFilesystemWouldRefuse:
     @staticmethod
     def _sample(server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
         server._staging_dir()
         sample = tmp_path / "s.bin"
         sample.write_bytes(b"SAMPLE-CONTENT\x00")

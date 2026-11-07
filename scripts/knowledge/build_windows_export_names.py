@@ -3,7 +3,7 @@
 
 Offline, operator-run, never imported by the pipeline and never run by a test.
 It writes ``data/windows_export_names_v1.json``, the name lists the analysis
-server's ``resolve_api_hashes`` tool hashes (``maljan.tools.api_hashes``).
+server's ``resolve_api_hashes`` tool hashes (``malspark.tools.api_hashes``).
 
 Why Wine's spec files. A hash resolver needs the names a Windows DLL exports,
 and the DLLs themselves are Microsoft's binaries: they cannot be shipped in this

@@ -21,12 +21,12 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-SOURCES = (ROOT / "src" / "maljan", ROOT / "apps" / "api" / "app")
-OWN = "src/maljan/providers/static/"
+SOURCES = (ROOT / "src" / "malspark", ROOT / "apps" / "api" / "app")
+OWN = "src/malspark/providers/static/"
 
 # The static provider ids the platform ships (``providers.static.BUILT_IN_MODULES``
 # registers them), the names a read keyed by a provider id would spell.
-from maljan.providers.registry import static_provider_ids  # noqa: E402
+from malspark.providers.registry import static_provider_ids  # noqa: E402
 
 PROVIDER_IDS = frozenset(static_provider_ids())
 
@@ -34,10 +34,10 @@ PROVIDER_IDS = frozenset(static_provider_ids())
 # key: the settings model and its catalogue, the declarations built from those
 # blocks, and the retired-environment migration. The settings shape is ts2 C1's.
 BLOCK_HOLDERS: dict[str, str] = {
-    "src/maljan/core/config.py": "the settings model holds each provider's block by its key",
-    "src/maljan/core/settings_annotations.py": "the settings catalogue describes each block",
-    "src/maljan/core/tool_declarations.py": "declarations are built from each provider's block",
-    "src/maljan/core/builtin_declarations.py": "the shipped declaration of each provider's block",
+    "src/malspark/core/config.py": "the settings model holds each provider's block by its key",
+    "src/malspark/core/settings_annotations.py": "the settings catalogue describes each block",
+    "src/malspark/core/tool_declarations.py": "declarations are built from each provider's block",
+    "src/malspark/core/builtin_declarations.py": "the shipped declaration of each provider's block",
 }
 
 
@@ -242,13 +242,13 @@ GUARDED_FORMS = [
     'path = state["static_sample_paths"]["ghidra"]',
     "url = cfg.static.ghidra.url",
     "block = settings.static.r2",
-    'importlib.import_module("maljan.providers.static.ghidra")',
-    'import_module("maljan.providers.static.ghidra.passes")',
-    "from maljan.providers.static.ghidra import GhidraStaticProvider",
-    "from maljan.providers.static.ghidra.passes import GhidraPasses",
-    "from maljan.providers.static import ghidra",
-    "import maljan.providers.static.ghidra",
-    "from maljan.analysis import ghidra_passes as p",
+    'importlib.import_module("malspark.providers.static.ghidra")',
+    'import_module("malspark.providers.static.ghidra.passes")',
+    "from malspark.providers.static.ghidra import GhidraStaticProvider",
+    "from malspark.providers.static.ghidra.passes import GhidraPasses",
+    "from malspark.providers.static import ghidra",
+    "import malspark.providers.static.ghidra",
+    "from malspark.analysis import ghidra_passes as p",
 ]
 
 
@@ -260,7 +260,7 @@ def test_the_guard_sees_each_way_a_provider_is_named(snippet: str) -> None:
 @pytest.mark.parametrize("snippet", GUARDED_FORMS)
 def test_each_form_mutated_into_a_real_module_is_refused(snippet: str) -> None:
     """The triage node's module is clean as it is, and refused with any one form added."""
-    where = "src/maljan/pipeline/nodes.py"
+    where = "src/malspark/pipeline/nodes.py"
     real = (ROOT / where).read_text(encoding="utf-8")
     assert offenders(real, where) == []
     body = "\n".join("    " + line for line in snippet.splitlines())
@@ -269,9 +269,9 @@ def test_each_form_mutated_into_a_real_module_is_refused(snippet: str) -> None:
 
 
 def test_a_settings_block_holder_may_hold_a_block_by_its_key() -> None:
-    assert offenders("url = cfg.static.ghidra.url", "src/maljan/core/config.py") == []
+    assert offenders("url = cfg.static.ghidra.url", "src/malspark/core/config.py") == []
     # A comparison is still refused there.
-    assert offenders('if cfg.static.provider == "r2": pass', "src/maljan/core/config.py")
+    assert offenders('if cfg.static.provider == "r2": pass', "src/malspark/core/config.py")
 
 
 def test_the_guard_lets_a_provider_asked_by_its_interface_be() -> None:
@@ -284,7 +284,7 @@ def test_the_guard_lets_a_provider_asked_by_its_interface_be() -> None:
         "if provider_id == NO_STATIC_PROVIDER: pass\n"
         'if entry.id == "ev_0001": pass\n'
         'value = row.get("rule")\n'
-        "from maljan.providers.static import import_built_ins\n"
-        'importlib.import_module("maljan.providers.static.r2")\n'
+        "from malspark.providers.static import import_built_ins\n"
+        'importlib.import_module("malspark.providers.static.r2")\n'
     )
     assert offenders(clean) == []

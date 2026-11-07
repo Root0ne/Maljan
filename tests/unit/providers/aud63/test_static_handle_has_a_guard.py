@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from maljan.core.config import Settings
-from maljan.providers.server_guard import ServerGuard
-from maljan.providers.static.r2 import R2StaticProvider
+from malspark.core.config import Settings
+from malspark.providers.server_guard import ServerGuard
+from malspark.providers.static.r2 import R2StaticProvider
 
 
 def test_defaults_set_no_deadline_cap_or_rest():
@@ -27,7 +27,7 @@ def test_operator_settings_are_applied():
 
 
 def test_a_static_rest_is_announced_and_listed_in_server_rests():
-    from maljan.core.container import ServiceContainer
+    from malspark.core.container import ServiceContainer
 
     seen: list[tuple[str, dict]] = []
     cfg = Settings(_env_file=None)

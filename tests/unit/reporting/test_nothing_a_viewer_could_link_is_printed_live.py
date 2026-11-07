@@ -19,15 +19,15 @@ import re
 
 import pytest
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     SampleIdentity,
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 
 def _report(sentence: str) -> MalwareReport:
@@ -138,7 +138,7 @@ def test_an_in_page_target_stays_a_link_and_a_relative_path_does_not() -> None:
 
 @pytest.mark.parametrize("cell", ["[x](//eViL.com/a)", "![i](//eViL.com/p.png)"])
 def test_a_mixed_case_host_in_a_context_cell_is_no_anchor_and_no_image(cell: str) -> None:
-    from maljan.reporting.models import StaticAnalysis, StringIOC
+    from malspark.reporting.models import StaticAnalysis, StringIOC
 
     report = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
@@ -176,7 +176,7 @@ UNRECORDED_UNDERSCORE_HOST = "www._x.ru"
 
 
 def _underscore_report() -> MalwareReport:
-    from maljan.reporting.models import EvidenceSection, NetworkDomain, NetworkIOCs
+    from malspark.reporting.models import EvidenceSection, NetworkDomain, NetworkIOCs
 
     return MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
@@ -229,7 +229,7 @@ FINDING_CODES = (
 
 
 def _finding_report(*hosts: str) -> MalwareReport:
-    from maljan.reporting.models import NetworkDomain, NetworkIOCs
+    from malspark.reporting.models import NetworkDomain, NetworkIOCs
 
     rows = [
         {
@@ -273,7 +273,7 @@ def test_a_host_in_a_finding_message_is_defanged_wherever_the_finding_prints(hos
 def test_the_reader_of_every_host_reads_a_label_with_an_underscore(host: str) -> None:
     # No run's values are given: the host is read by its own shape, labels
     # with an underscore before a name the reader takes for a host.
-    from maljan.reporting.renderers.markdown import _defanged_text, _finding_text
+    from malspark.reporting.renderers.markdown import _defanged_text, _finding_text
 
     sentence = f"it queries {host}."
     defanged = f"it queries {host.replace('.', '[.]')}"
@@ -305,7 +305,7 @@ UNDERSCORE_IDENTIFIERS = (
 
 @pytest.mark.parametrize("identifier", UNDERSCORE_IDENTIFIERS)
 def test_an_identifier_with_an_underscore_is_no_host(identifier: str) -> None:
-    from maljan.reporting.renderers.markdown import _defanged_text, _finding_text
+    from malspark.reporting.renderers.markdown import _defanged_text, _finding_text
 
     sentence = f"it calls {identifier} first"
     assert _defanged_text(sentence) == sentence
@@ -317,7 +317,7 @@ def test_an_identifier_with_an_underscore_is_no_host(identifier: str) -> None:
 def test_a_recorded_host_in_a_tool_cell_no_context_reads_is_defanged() -> None:
     # A sandbox's request row prints its user agent as the tool wrote it; the
     # closing pass reads the run's own values there too.
-    from maljan.reporting.models import NetworkDomain, NetworkIOCs, NetworkURL
+    from malspark.reporting.models import NetworkDomain, NetworkIOCs, NetworkURL
 
     report = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
@@ -342,7 +342,7 @@ def test_a_recorded_host_in_a_tool_cell_no_context_reads_is_defanged() -> None:
 
 @pytest.mark.parametrize("host", (*UNDERSCORE_HOSTS, UNRECORDED_UNDERSCORE_HOST))
 def test_an_underscore_host_a_tool_wrote_is_defanged_inline(host: str) -> None:
-    from maljan.reporting.renderers.markdown import _Context
+    from malspark.reporting.renderers.markdown import _Context
 
     said = _Context(_underscore_report()).inline(f"the tool saw {host} first")
 
@@ -358,7 +358,7 @@ RECORDED_ESCAPED_HOSTS = ("cdn_.evil.zip", "my_.files.sh")
 
 
 def _user_agent_report(user_agent: str) -> MalwareReport:
-    from maljan.reporting.models import NetworkDomain, NetworkIOCs, NetworkURL
+    from malspark.reporting.models import NetworkDomain, NetworkIOCs, NetworkURL
 
     return MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
@@ -392,7 +392,7 @@ def test_a_recorded_underscore_host_in_an_escaped_cell_is_defanged(host: str) ->
 @pytest.mark.parametrize("host", RECORDED_ESCAPED_HOSTS)
 def test_the_closing_pass_reads_a_recorded_value_in_its_escaped_spelling(host: str) -> None:
     # A cell a helper with no context escaped before any run value was read.
-    from maljan.reporting.renderers.markdown import _Context, _escaped_spelling
+    from malspark.reporting.renderers.markdown import _Context, _escaped_spelling
 
     escaped = _escaped_spelling(host)
     assert escaped != host
@@ -417,7 +417,7 @@ UNDERSCORE_HOSTS_IN_PATHS = (
 def test_an_underscore_host_after_a_slash_or_dots_or_in_mixed_case_is_defanged(
     written: str, host: str
 ) -> None:
-    from maljan.reporting.renderers.markdown import _defanged_text
+    from malspark.reporting.renderers.markdown import _defanged_text
 
     said = _defanged_text(f"it reads {written} first")
 
@@ -428,8 +428,8 @@ def test_an_underscore_host_after_a_slash_or_dots_or_in_mixed_case_is_defanged(
 def test_a_decompiled_listing_s_caption_and_code_are_defanged() -> None:
     import json
 
-    from maljan.reporting.figures import build_code_listings
-    from maljan.reporting.models import NetworkDomain, NetworkIOCs
+    from malspark.reporting.figures import build_code_listings
+    from malspark.reporting.models import NetworkDomain, NetworkIOCs
 
     code = (
         "void beacon(void)\n{\n"
@@ -467,8 +467,8 @@ def test_a_decompiled_listing_s_caption_and_code_are_defanged() -> None:
 def test_a_listing_reads_a_value_recorded_only_as_an_ioc_row() -> None:
     import json
 
-    from maljan.reporting.figures import build_code_listings
-    from maljan.reporting.models import StaticAnalysis, StringIOC
+    from malspark.reporting.figures import build_code_listings
+    from malspark.reporting.models import StaticAnalysis, StringIOC
 
     report = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
@@ -497,7 +497,7 @@ def test_a_listing_reads_a_value_recorded_only_as_an_ioc_row() -> None:
 def test_a_stored_report_s_figures_are_read_again_when_the_html_is_drawn() -> None:
     # Figures drawn before their text was defanged, stored with the report:
     # the HTML reads each again with the run's own values and every other one.
-    from maljan.reporting.models import Figure, NetworkDomain, NetworkIOCs
+    from malspark.reporting.models import Figure, NetworkDomain, NetworkIOCs
 
     listing = (
         '<pre class="listing">connect(&quot;https://relay.example.net/gate&quot;);\n'
@@ -575,15 +575,15 @@ KNOWN_DEFANGED_IDENTIFIERS = ("my_var.toString.call", "obj._impl.api.dev")
 def test_a_camel_case_identifier_is_defanged_rather_than_a_host_printed_live(
     identifier: str,
 ) -> None:
-    from maljan.reporting.renderers.markdown import _defanged_text
+    from malspark.reporting.renderers.markdown import _defanged_text
 
     assert _defanged_text(identifier) != identifier
     assert _defanged_text("_ldap._tcp.victimCorp.com") == "_ldap[.]_tcp[.]victimCorp[.]com"
 
 
 def test_a_figure_label_the_sample_named_is_defanged_when_drawn() -> None:
-    from maljan.reporting.figures import build_attack_matrix, build_entropy_chart
-    from maljan.reporting.models import PESection, StaticAnalysis, TTPMapping
+    from malspark.reporting.figures import build_attack_matrix, build_entropy_chart
+    from malspark.reporting.models import PESection, StaticAnalysis, TTPMapping
 
     report = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),

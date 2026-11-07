@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from maljan.analysis import yara_layer
-from maljan.core.config import Settings
-from maljan.providers.static.capa_yara import CapaYaraStaticProvider
+from malspark.analysis import yara_layer
+from malspark.core.config import Settings
+from malspark.providers.static.capa_yara import CapaYaraStaticProvider
 
 
 def test_every_rules_file_is_scanned_and_a_bad_one_costs_only_itself(monkeypatch, tmp_path):

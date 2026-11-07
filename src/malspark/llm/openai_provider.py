@@ -1,0 +1,1697 @@
+"""OpenAI LLM provider."""
+
+from __future__ import annotations
+
+import ipaddress
+import json
+import re
+import threading
+from contextvars import ContextVar
+from typing import Any
+from urllib.parse import urlparse
+
+from langchain_core.language_models.chat_models import BaseChatModel
+
+from malspark.core.config import OpenAIConfig, Settings
+from malspark.core.exceptions import LLMError
+from malspark.core.logger import logger
+from malspark.core.settings_overrides import redact_url
+from malspark.llm.provider_base import (
+    COMPLETION_MAX_TOKENS,
+    COMPLETION_PROMPT,
+    LLMProvider,
+    ModelListing,
+    OneTurnRequest,
+    _text,
+)
+from malspark.llm.registry import register_provider
+from malspark.llm.tool_replies import (  # noqa: F401 — the names this module has always offered
+    NO_REPLY_RECORDED,
+    NOT_RUN_REPLY,
+    answered_tool_calls,
+    with_answered_tool_calls,
+)
+
+# llama.cpp's DRY sampler, forwarded only when set (``llm.openai.dry_*``).
+LLAMA_CPP_DRY_KEYS: tuple[str, ...] = (
+    "dry_multiplier",
+    "dry_base",
+    "dry_allowed_length",
+    "dry_penalty_last_n",
+)
+
+# The request fields llama.cpp and its forks read and a hosted
+# OpenAI-compatible API rejects. Named here because two things need the list:
+# the builder, which decides whether to send them, and the 400 self-heal,
+# which decides whether a rejection is about one of ours.
+LLAMA_CPP_EXTRA_KEYS: tuple[str, ...] = (
+    "repeat_penalty",
+    "repetition_penalty",
+    "n_predict",
+    "max_tokens",
+    "chat_template_kwargs",
+    *LLAMA_CPP_DRY_KEYS,
+)
+
+# Base URLs already known to reject our extras, so the self-heal pays for the
+# discovery once per process rather than on every call. Keyed by base URL: two
+# endpoints behind one deployment can disagree.
+_STANDARD_ONLY_ENDPOINTS: set[str] = set()
+
+# "Unsupported parameter(s): n_predict", "unknown field \"repeat_penalty\"",
+# "extra fields not permitted: chat_template_kwargs" — every phrasing seen has
+# the parameter name in it, which is the only part worth matching.
+_UNSUPPORTED_PARAM_RE = re.compile(
+    r"unsupported|unrecognized|unknown|not permitted|invalid[_ ]?(?:request[_ ]?)?(?:param|field)",
+    re.IGNORECASE,
+)
+
+
+def is_local_endpoint(base_url: str | None) -> bool:
+    """Whether ``base_url`` names a server on this machine or this network.
+
+    What ``compat: auto`` decides on. A loopback, link-local or RFC1918 host is
+    a local server somebody started, and the only OpenAI-compatible servers
+    people run there are llama.cpp and its forks. A public hostname is a hosted
+    API, and hosted APIs validate their request bodies.
+
+    This is a guess at which server software answers, not the rule the
+    disclosure block places a host by (``core.host_locality``), and the two
+    differ on purpose. A single-label name, a ``.internal`` name and the
+    shared range (100.64.0.0/10) read as hosted here, because a compose
+    service or a gateway there is as often a proxy in front of a hosted API,
+    which refuses llama.cpp's extra fields, as it is llama.cpp; that rule takes
+    them as local, because they are inside the deployment. A documentation or
+    transition-range address reads as ``ipaddress.is_private`` answers here;
+    that rule places a transition address by the IPv4 address it carries.
+    Folding this guess into that rule would send llama.cpp's fields to every
+    such proxy, so they stay apart.
+    """
+    if not base_url:
+        return False
+    host = (urlparse(base_url).hostname or "").strip().lower()
+    if not host:
+        return False
+    if host in ("localhost", "localhost.localdomain") or host.endswith(".localhost"):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        # A name, not an address. ``.local`` is mDNS on the local network;
+        # anything else is resolved by somebody else and treated as hosted.
+        return host.endswith(".local")
+    return bool(address.is_loopback or address.is_link_local or address.is_private)
+
+
+def sends_llama_cpp_extras(base_url: str | None, compat: str) -> bool:
+    """Whether this endpoint gets the llama.cpp-only request fields."""
+    if not base_url:
+        # api.openai.com itself, which has always been left alone.
+        return False
+    if compat in ("standard", "deepseek"):
+        # ``deepseek`` is a hosted API with fields of its own, sent by
+        # ``OpenAIProvider._add_deepseek_fields`` instead.
+        return False
+    if base_url in _STANDARD_ONLY_ENDPOINTS:
+        # What the self-heal learned beats what ``auto`` would guess, and it
+        # beats an explicit ``llama_cpp`` too: the endpoint itself said no.
+        # The operator is told so by the heal that learned it, once — this is
+        # a predicate every model build calls, and a warning here is the same
+        # sentence per model for the life of the process.
+        return False
+    if compat == "llama_cpp":
+        return True
+    return is_local_endpoint(base_url)
+
+
+def add_thinking_switch(extra: dict[str, Any], disable_thinking: bool) -> None:
+    """Put ``chat_template_kwargs.enable_thinking=false`` into ``extra`` when asked.
+
+    A module-level function because two callers send this field and they have
+    to send the same one: this provider, on every model it builds for an
+    endpoint that takes the llama.cpp extras, and the settings probe, on the
+    one short turn it asks that endpoint for. The probe left it out, so a
+    reasoning model spent the probe's whole eight-token budget inside its own
+    chain of thought and came back with an empty answer — a green endpoint
+    reported as a model that says nothing, and a submit gate that then refused
+    every job.
+
+    Nothing already in ``extra`` is overwritten: a caller that set the key
+    itself has said something more specific than this switch.
+    """
+    if not disable_thinking:
+        return
+    kwargs = dict(extra.get("chat_template_kwargs") or {})
+    kwargs.setdefault("enable_thinking", False)
+    extra["chat_template_kwargs"] = kwargs
+
+
+def add_deepseek_thinking_switch(extra: dict[str, Any], disable_thinking: bool) -> None:
+    """Put DeepSeek's own ``thinking: {"type": "disabled"}`` into ``extra`` when asked.
+
+    DeepSeek's switch, not llama.cpp's: it accepts
+    ``chat_template_kwargs.enable_thinking=false`` and ignores it (measured: the
+    model still reasoned). Shared with the settings probe for the reason
+    ``add_thinking_switch`` is. Nothing already in ``extra`` is overwritten.
+    """
+    if disable_thinking:
+        extra.setdefault("thinking", {"type": "disabled"})
+
+
+def reasoning_effort_of(config: Any) -> str | None:
+    """The configured ``llm.openai.reasoning_effort``, or ``None`` when none is set.
+
+    Passed through as written — each API names its own levels — with only the
+    surrounding blanks taken off, so an empty field sends nothing.
+    """
+    value = str(getattr(config, "reasoning_effort", "") or "").strip()
+    return value or None
+
+
+def unsupported_parameter(message: str) -> str | None:
+    """The extra of ours a 400 is complaining about, or ``None``.
+
+    Only ours: an endpoint rejecting ``temperature`` is telling us something
+    else entirely, and dropping the llama.cpp extras would not fix it.
+    """
+    if not message or not _UNSUPPORTED_PARAM_RE.search(message):
+        return None
+    lowered = message.lower()
+    for key in LLAMA_CPP_EXTRA_KEYS:
+        # ``max_tokens`` is a standard field as well as an extra, so it is
+        # matched last and only when nothing more specific is named.
+        if key != "max_tokens" and key in lowered:
+            return key
+    # ``n_predict`` is one of the keys above and has already returned, so this
+    # last line answers for ``max_tokens`` alone.
+    return "max_tokens" if "max_tokens" in lowered else None
+
+
+def note_standard_only(base_url: str | None) -> bool:
+    """Record that this endpoint refuses our extras. True the first time."""
+    if not base_url or base_url in _STANDARD_ONLY_ENDPOINTS:
+        return False
+    _STANDARD_ONLY_ENDPOINTS.add(base_url)
+    return True
+
+
+def forget_standard_only(base_url: str | None = None) -> None:
+    """Forget what the self-heal learned — for a test, or a changed endpoint."""
+    if base_url is None:
+        _STANDARD_ONLY_ENDPOINTS.clear()
+    else:
+        _STANDARD_ONLY_ENDPOINTS.discard(base_url)
+
+
+def unshared_async_client(base_url: str | None, timeout: Any) -> Any | None:
+    """An httpx async client this model alone owns, or ``None`` if it cannot be built.
+
+    ``langchain_openai`` caches its async client with ``@lru_cache`` keyed on
+    ``(base_url, timeout, socket_options)``, so every model this provider builds
+    for one endpoint — the analysts', the judge's, the reporter's — shares a
+    single pool. An httpx pool belongs to the event loop that first awaited it,
+    and this process has two that make LLM calls: the shared agent loop and the
+    worker's own. The first call from the second loop dies inside httpx with
+    "bound to a different event loop", which the openai SDK reports as a bare
+    ``APIConnectionError("Connection error.")`` — the fault diagnosed for the
+    judge and then seen again on the narrative round.
+
+    The client is the model's own, and it keeps one pool per event loop it
+    sends on (``malspark.llm.loop_clients``), so a model held across two loops —
+    the narrative agent, the composer — never crosses them either. The
+    keepalive socket options langchain applies are kept by reusing its own
+    builder; a version that no longer exposes it falls back to a plain client
+    rather than to the shared one.
+    """
+    from malspark.llm.loop_clients import loop_bound_async_client  # noqa: PLC0415
+
+    try:
+        from langchain_openai.chat_models._client_utils import (  # noqa: PLC0415
+            _build_async_httpx_client,
+            _default_socket_options,
+        )
+
+        options = _default_socket_options()
+        return loop_bound_async_client(
+            lambda: _build_async_httpx_client(base_url, timeout, options)
+        )
+    except Exception as exc:  # noqa: BLE001 — a private helper is allowed to move
+        logger.debug("openai provider: langchain's client builder is unavailable (%s).", exc)
+    try:
+        import httpx  # noqa: PLC0415
+
+        return loop_bound_async_client(lambda: httpx.AsyncClient(timeout=timeout))
+    except Exception as exc:  # noqa: BLE001 — no client at all means the shared one
+        logger.warning(
+            "openai provider: could not build a private httpx pool (%s); this model "
+            "shares langchain's cached one and must only be used from one event loop.",
+            exc,
+        )
+        return None
+
+
+def clear_shared_httpx_clients() -> None:
+    """Empty ``langchain_openai``'s cached httpx clients. Never raises.
+
+    The belt to :func:`unshared_async_client`'s braces: a model built somewhere
+    that did not pass its own pool still holds a reference to the cached one,
+    and after an agent loop is retired that pool is bound to a loop nothing will
+    run again. Called from the container's retirement hook.
+    """
+    try:
+        from langchain_openai.chat_models import _client_utils  # noqa: PLC0415
+
+        for name in ("_cached_async_httpx_client", "_cached_sync_httpx_client"):
+            cached = getattr(_client_utils, name, None)
+            if cached is not None and hasattr(cached, "cache_clear"):
+                cached.cache_clear()
+    except Exception as exc:  # noqa: BLE001 — a cache that cannot be cleared is not a run
+        logger.debug("openai provider: the shared httpx client cache was not cleared (%s).", exc)
+
+
+# One subclass per ``ChatOpenAI`` class seen, so every model built from it
+# shares the class and pydantic builds its schema once.
+_TIMED_CLASSES: dict[type, type] = {}
+
+
+def server_timings_of(response: Any) -> dict[str, Any] | None:
+    """The ``timings`` object llama.cpp and its forks add to an answer, or ``None``.
+
+    It is not part of OpenAI's schema, so the SDK keeps it as an extra field
+    of the parsed response and ``langchain-openai`` never copies it across.
+    """
+    if isinstance(response, dict):
+        timings = response.get("timings")
+    else:
+        timings = getattr(response, "timings", None)
+        if timings is None:
+            timings = (getattr(response, "model_extra", None) or {}).get("timings")
+    return dict(timings) if isinstance(timings, dict) else None
+
+
+def with_server_timings(chat_class: Any) -> Any:
+    """``chat_class`` with the server's ``timings`` carried into each answer.
+
+    llama.cpp reports, on every answer, how many prompt tokens it read and how
+    long that took (``timings.prompt_n``/``prompt_ms``) and the same for the
+    tokens it generated. ``langchain-openai`` builds the answer from the
+    fields OpenAI defines and drops the rest, so the job's measured rates had
+    no prompt reading rate on this provider and a generation rate taken from
+    the wall clock. The subclass copies the object into the generation's
+    metadata unchanged, where ``RateMeter`` reads it; a server that sends none
+    leaves the answer as it was. Anything that is not a chat model class is
+    returned as it is.
+    """
+    if not isinstance(chat_class, type) or not hasattr(chat_class, "_create_chat_result"):
+        return chat_class
+    cached = _TIMED_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+
+    def _create_chat_result(self: Any, response: Any, generation_info: Any = None) -> Any:
+        result = chat_class._create_chat_result(self, response, generation_info)
+        timings = server_timings_of(response)
+        if timings is not None:
+            for generation in result.generations:
+                generation.generation_info = {
+                    **(generation.generation_info or {}),
+                    "timings": timings,
+                }
+                message = getattr(generation, "message", None)
+                metadata = getattr(message, "response_metadata", None)
+                if isinstance(metadata, dict):
+                    metadata.setdefault("timings", timings)
+        return result
+
+    timed = type(chat_class.__name__, (chat_class,), {"_create_chat_result": _create_chat_result})
+    timed.__module__ = __name__
+    _TIMED_CLASSES[chat_class] = timed
+    return timed
+
+
+# Where DeepSeek puts a thinking model's reasoning, beside ``content`` on the
+# assistant message, and where it has to be sent back.
+REASONING_CONTENT_KEY = "reasoning_content"
+
+# One subclass per chat class seen, as for ``_TIMED_CLASSES``.
+_REASONING_CLASSES: dict[type, type] = {}
+
+
+def _reasoning_of_choice(choice: Any) -> str | None:
+    """The ``reasoning_content`` of one raw choice, or ``None`` when it carries none."""
+    message = choice.get("message") if isinstance(choice, dict) else None
+    if not isinstance(message, dict):
+        return None
+    value = message.get(REASONING_CONTENT_KEY)
+    return value if isinstance(value, str) else None
+
+
+def _cap_as_max_tokens(payload: dict[str, Any]) -> None:
+    """The request's own cap as ``max_tokens`` too, which is the field DeepSeek reads.
+
+    Taken from the payload rather than from the model, so a cap bound for one
+    call (``llm.bind(max_tokens=…)``) reaches DeepSeek the way the model's
+    own does; ``max_completion_tokens`` beside it is ignored there.
+    """
+    cap = payload.get("max_completion_tokens")
+    if isinstance(cap, int) and not isinstance(cap, bool) and cap > 0:
+        extra = dict(payload.get("extra_body") or {})
+        extra["max_tokens"] = cap
+        payload["extra_body"] = extra
+
+
+# The llama.cpp extras that carry the output cap (``_add_llama_cpp_extras``).
+_LLAMA_CAP_KEYS = ("max_tokens", "n_predict")
+
+# One subclass per chat class seen, as for ``_TIMED_CLASSES``.
+_LLAMA_CAPPED_CLASSES: dict[type, type] = {}
+
+
+def with_per_request_llama_cap(chat_class: Any) -> Any:
+    """``chat_class`` sending each request's own cap in llama.cpp's extras.
+
+    ik_llama.cpp ignores ``max_completion_tokens``, the field the client sends
+    a cap under, and reads ``max_tokens``/``n_predict`` from ``extra_body``,
+    which the provider fills once, from the cap the model was built with. A
+    cap bound for one call (``llm.ainvoke(…, max_tokens=n)``) therefore never
+    reached the server. The subclass sends the request's own cap as both
+    extras, per request, whether or not the model was built with a cap. The
+    container builds a run's models with a cap derived from the window, so
+    their extras already held the keys and a cap copied into them reached the
+    server. A model built without a cap holds no such key, so a cap copied
+    only into keys already there never reached the server: in a run that is
+    the function summarizer's model, and outside one the provider called
+    directly (measured on ik_llama.cpp: a call held to 60 produced 3,732
+    output units). A request without a cap is sent as it was.
+
+    Applied only where the llama.cpp extras are sent (``sends_llama_cpp_extras``).
+    """
+    if not isinstance(chat_class, type) or not hasattr(chat_class, "_get_request_payload"):
+        return chat_class
+    cached = _LLAMA_CAPPED_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+
+    def _get_request_payload(self: Any, input_: Any, *, stop: Any = None, **kwargs: Any) -> Any:
+        payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
+        if not isinstance(payload, dict):
+            return payload
+        cap = payload.get("max_completion_tokens", payload.get("max_tokens"))
+        if isinstance(cap, int) and not isinstance(cap, bool) and cap > 0:
+            extra = payload.get("extra_body")
+            extra = dict(extra) if isinstance(extra, dict) else {}
+            for key in _LLAMA_CAP_KEYS:
+                extra[key] = cap
+            payload["extra_body"] = extra
+        return payload
+
+    capped = type(
+        chat_class.__name__, (chat_class,), {"_get_request_payload": _get_request_payload}
+    )
+    capped.__module__ = __name__
+    capped.__qualname__ = chat_class.__qualname__
+    _LLAMA_CAPPED_CLASSES[chat_class] = capped
+    return capped
+
+
+# One subclass per chat class, server root and key, as for ``_TIMED_CLASSES``.
+_SPECIAL_TOKEN_CLASSES: dict[tuple[type, str, str], type] = {}
+
+
+def with_special_tokens_written_out(
+    chat_class: Any, base_url: str | None, api_key: str, model: str = ""
+) -> Any:
+    """``chat_class`` sending no control token of the local server in a message's text.
+
+    A llama.cpp-style server parses special tokens in every message with no
+    per-request switch, so a tool answer carrying ``<|im_start|>system`` is a
+    new turn to it. Each request's message contents and tool-call arguments
+    have every control token written out (``malspark.llm.special_tokens``); a
+    span the server has not yet said is plain text is written out too, and a
+    server that cannot be read leaves every span shaped like a token written
+    out. Applied only where the llama.cpp extras are sent, so a hosted API's
+    request is sent as langchain built it.
+    """
+    root = _server_root(base_url)
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    if root:
+        # Read now, off the request path, so the first request finds the verdicts.
+        from malspark.llm.special_tokens import prefetch
+
+        prefetch(root, headers, model)
+    if (
+        not root
+        or not isinstance(chat_class, type)
+        or not hasattr(chat_class, "_get_request_payload")
+    ):
+        return chat_class
+    key = (chat_class, root, api_key)
+    cached = _SPECIAL_TOKEN_CLASSES.get(key)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+
+    def _get_request_payload(self: Any, input_: Any, *, stop: Any = None, **kwargs: Any) -> Any:
+        from malspark.llm.special_tokens import written_out_of_payload
+
+        payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
+        if isinstance(payload, dict):
+            written_out_of_payload(payload, root)
+        return payload
+
+    written = type(
+        chat_class.__name__, (chat_class,), {"_get_request_payload": _get_request_payload}
+    )
+    written.__module__ = __name__
+    written.__qualname__ = chat_class.__qualname__
+    _SPECIAL_TOKEN_CLASSES[key] = written
+    return written
+
+
+def _server_root(base_url: str | None) -> str:
+    """The server's root, with an OpenAI-compatible ``/v1`` suffix removed."""
+    from malspark.llm.context_window import _root_of
+
+    return _root_of(base_url)
+
+
+# One subclass per chat class seen and reasoning rule, as for ``_TIMED_CLASSES``.
+_STREAMED_LLAMA_CLASSES: dict[tuple[type, bool], type] = {}
+
+
+# The fields llama.cpp may repeat on every chunk of an answer: ik_llama.cpp
+# puts ``usage`` on each as a running total, and a server asked for
+# ``timings_per_token`` puts ``timings`` on each. Adding the chunks together
+# would count the answer many times over (and cannot add two ``timings``), so
+# the last one a stream sends is the answer's.
+_LAST_ONLY = ("token_usage", "timings")
+
+
+def _own_copy(chunk: Any) -> Any:
+    """``chunk`` with its own message, metadata and call pieces, so emptying them leaves it as sent.
+
+    The run's callbacks were handed the chunk before the join (a LangSmith
+    trace keeps it), and they keep what the server sent.
+    """
+    message = chunk.message
+    extra = dict(message.additional_kwargs)
+    if isinstance(extra.get("tool_calls"), list):
+        extra["tool_calls"] = [dict(c) if isinstance(c, dict) else c for c in extra["tool_calls"]]
+    update: dict[str, Any] = {"additional_kwargs": extra}
+    calls = getattr(message, "tool_call_chunks", None)
+    if calls:
+        update["tool_call_chunks"] = [dict(c) for c in calls]
+    return chunk.model_copy(update={"message": message.model_copy(update=update)})
+
+
+def _text_joined(content: Any, pieces: list[str]) -> Any:
+    """``content`` with the text ``pieces`` after it, joined as langchain joins message content."""
+    from langchain_core.messages.base import merge_content
+
+    return merge_content(content, "".join(pieces))
+
+
+class _Join:
+    """The streamed chunks of one answer, joined into the answer the server would have sent whole.
+
+    Joined as langchain joins a stream — each chunk's generation info in its
+    message's metadata, then the chunks added up — but as they arrive, holding
+    no chunk: the text, the reasoning and each tool call's arguments are kept
+    as pieces and joined once at the end, and the rest of each chunk, which is
+    small, is added to the join as it comes. Adding the whole chunks rebuilt
+    the joined text and reasoning on every chunk, which is the square of the
+    answer's length. With four differences from langchain's join:
+
+    * the fields llama.cpp may repeat on every chunk are the last one sent
+      (``_LAST_ONLY``, and the usage);
+    * no reasoning piece is in the answer, as ``langchain-openai`` leaves them
+      out of a whole one — unless ``keep_reasoning``: DeepSeek's reasoning is
+      kept on its answer (:func:`with_reasoning_passback`), its pieces joined
+      into the one ``reasoning_content`` a whole answer carries;
+    * the tool calls. langchain reads a streamed call's arguments with a
+      partial JSON parser, which closes a call cut off mid-string as if it had
+      ended there. A whole answer's calls are read strictly, and a cut one is
+      an invalid call; the joined answer's calls are read the same way, from
+      the same text.
+    """
+
+    def __init__(self, *, keep_reasoning: bool = False) -> None:
+        self.keep_reasoning = keep_reasoning
+        self.joined: Any = None
+        self.text: list[str] = []
+        self.reasoning: list[str] = []
+        self.arguments: dict[int, list[str]] = {}
+        self.raw_arguments: dict[int, list[str]] = {}
+        self.usage: Any = None
+        self.last: dict[str, Any] = {}
+        self.finished = False
+
+    def add(self, chunk: Any) -> None:
+        chunk = _own_copy(chunk)
+        message = chunk.message
+        if (chunk.generation_info or {}).get("finish_reason") or (
+            getattr(message, "response_metadata", None) or {}
+        ).get("finish_reason"):
+            self.finished = True
+        if getattr(message, "usage_metadata", None):
+            self.usage = message.usage_metadata
+            message.usage_metadata = None
+        info = dict(chunk.generation_info or {})
+        for key in _LAST_ONLY:
+            if key in info:
+                self.last[key] = info.pop(key)
+        chunk.generation_info = info or None
+        extra = message.additional_kwargs
+        piece = extra.pop(REASONING_CONTENT_KEY, None)
+        if self.keep_reasoning and piece is not None:
+            if isinstance(piece, str):
+                self.reasoning.append(piece)
+            else:
+                extra[REASONING_CONTENT_KEY] = piece
+        if isinstance(message.content, str):
+            if message.content:
+                self.text.append(message.content)
+                message.content = ""
+        elif self.text:
+            # Content that is not a string is added with langchain's own join,
+            # so the text before it goes in first and keeps its place.
+            self.joined.message.content = _text_joined(self.joined.message.content, self.text)
+            self.text = []
+        for call in getattr(message, "tool_call_chunks", None) or []:
+            index = call.get("index")
+            if isinstance(index, int) and isinstance(call.get("args"), str):
+                self.arguments.setdefault(index, []).append(call["args"])
+                call["args"] = None
+        for call in extra.get("tool_calls") or []:
+            function = call.get("function") if isinstance(call, dict) else None
+            index = call.get("index") if isinstance(call, dict) else None
+            if (
+                isinstance(index, int)
+                and isinstance(function, dict)
+                and isinstance(function.get("arguments"), str)
+            ):
+                self.raw_arguments.setdefault(index, []).append(function["arguments"])
+                call["function"] = {**function, "arguments": None}
+        message.response_metadata = {**info, **message.response_metadata}
+        self.joined = chunk if self.joined is None else self.joined + chunk
+
+    def result(self) -> Any:
+        from langchain_core.messages import AIMessage
+        from langchain_core.output_parsers.openai_tools import (
+            make_invalid_tool_call,
+            parse_tool_call,
+        )
+        from langchain_core.outputs import ChatGeneration, ChatResult
+
+        if self.joined is None:
+            raise ValueError("No generations found in stream.")
+        joined = self.joined
+        merged = joined.message
+        content = merged.content
+        if self.text:
+            content = _text_joined(content, self.text)
+        extra = dict(merged.additional_kwargs)
+        if self.reasoning:
+            extra[REASONING_CONTENT_KEY] = "".join(self.reasoning)
+        if self.raw_arguments and isinstance(extra.get("tool_calls"), list):
+            calls = []
+            for call in extra["tool_calls"]:
+                index = call.get("index") if isinstance(call, dict) else None
+                if isinstance(index, int) and index in self.raw_arguments:
+                    function = dict(call.get("function") or {})
+                    function["arguments"] = "".join(self.raw_arguments[index])
+                    call = {**call, "function": function}
+                calls.append(call)
+            extra["tool_calls"] = calls
+        chunks_of_calls = []
+        for piece in getattr(merged, "tool_call_chunks", None) or []:
+            index = piece.get("index")
+            if isinstance(index, int) and index in self.arguments:
+                piece = {**piece, "args": "".join(self.arguments[index])}
+            chunks_of_calls.append(piece)
+        metadata = dict(merged.response_metadata)
+        for key, value in self.last.items():
+            metadata.setdefault(key, value)
+        generation_info = joined.generation_info
+        if self.last:
+            generation_info = {**(generation_info or {}), **self.last}
+        return _strict_answer(
+            merged,
+            content,
+            extra,
+            chunks_of_calls,
+            metadata,
+            self.usage,
+            generation_info,
+            AIMessage,
+            ChatGeneration,
+            ChatResult,
+            parse_tool_call,
+            make_invalid_tool_call,
+        )
+
+
+def _complete(join: _Join, ended: list[str]) -> Any:
+    """``join``'s answer, refused when the stream stopped without saying it was done.
+
+    A stream carries its end: the last chunk names the ``finish_reason``. One
+    that stops before it was cut by the connection (a proxy, a restart, a
+    dropped link that closed cleanly) and its text is a prefix, not the answer.
+    It is raised as the dropped connection it is, which the callers that replay
+    a dropped call already read. An answer the caller's own watch ended is
+    complete by that decision and is not refused.
+    """
+    result = join.result()
+    if not join.finished and not ended:
+        import openai
+
+        raise openai.APIConnectionError(request=None)  # type: ignore[arg-type]
+    return result
+
+
+def _joined_answer(chunks: list[Any], *, keep_reasoning: bool = False) -> Any:
+    """The streamed chunks of one answer, joined (:class:`_Join`)."""
+    join = _Join(keep_reasoning=keep_reasoning)
+    for chunk in chunks:
+        join.add(chunk)
+    return join.result()
+
+
+def _strict_answer(
+    merged: Any,
+    content: Any,
+    extra: dict[str, Any],
+    chunks_of_calls: list[Any],
+    metadata: dict[str, Any],
+    usage: Any,
+    generation_info: Any,
+    AIMessage: Any,  # noqa: N803
+    ChatGeneration: Any,  # noqa: N803
+    ChatResult: Any,  # noqa: N803
+    parse_tool_call: Any,
+    make_invalid_tool_call: Any,
+) -> Any:
+    """The joined answer, its tool calls read strictly, as a whole answer's are."""
+    tool_calls: list[Any] = []
+    invalid: list[Any] = []
+    for piece in chunks_of_calls:
+        raw = {
+            "id": piece.get("id"),
+            "type": "function",
+            "function": {"name": piece.get("name") or "", "arguments": piece.get("args") or ""},
+        }
+        try:
+            parsed = parse_tool_call(raw, return_id=True)
+        except Exception as exc:  # noqa: BLE001 — exactly as a whole answer's call is read
+            invalid.append(make_invalid_tool_call(raw, str(exc)))
+            continue
+        if parsed is not None:
+            tool_calls.append(parsed)
+    message = AIMessage(
+        content=content,
+        additional_kwargs=extra,
+        response_metadata=metadata,
+        id=merged.id,
+        tool_calls=tool_calls,
+        invalid_tool_calls=invalid,
+        usage_metadata=usage,
+    )
+    return ChatResult(
+        generations=[ChatGeneration(message=message, generation_info=generation_info)]
+    )
+
+
+def _without_reasoning(chunk: Any) -> Any:
+    """``chunk`` with the reasoning piece it carried for the call's deadline taken off.
+
+    The piece is kept on the chunk only until the deadline has counted it as
+    generated (``generation_rate``'s wrapper sees each chunk first); a caller
+    of the model gets the chunk as ``langchain-openai`` builds it, without the
+    reasoning, which a whole answer does not carry either.
+    """
+    message = getattr(chunk, "message", None)
+    extra = getattr(message, "additional_kwargs", None)
+    if isinstance(extra, dict):
+        extra.pop(REASONING_CONTENT_KEY, None)
+    return chunk
+
+
+def _as_status_error(exc: Any) -> Any:
+    """A server error sent inside a stream, as the class the same error has when sent whole.
+
+    After a stream has begun, llama.cpp reports a failure as an ``error`` event
+    in it, and the OpenAI SDK raises a bare ``APIError`` for that. Sent before
+    the stream, or on a whole answer, the same failure is an HTTP status and a
+    status error (``InternalServerError`` for a 5xx), which is what the callers
+    that retry a server fault read. The status is the one the event names
+    (llama.cpp's ``code``), a server fault where it names none; langchain's
+    reading of the status error follows, as on a whole answer. Anything else is
+    returned as it is.
+    """
+    import openai
+
+    if type(exc) is not openai.APIError:
+        return exc
+    body = exc.body if isinstance(exc.body, dict) else {}
+    code = body.get("code")
+    status = code if isinstance(code, int) and 400 <= code <= 599 else 500
+    # The SDK's own response type: it runs on httpx2. Where the status error
+    # cannot be built, the server's own error is what reaches the caller.
+    try:
+        import httpx2
+
+        response = httpx2.Response(
+            status, request=getattr(exc, "request", None), json={"error": body}
+        )
+    except Exception:  # noqa: BLE001 — never replace the server's error with this one
+        return exc
+    classes: dict[int, type[Any]] = {
+        400: openai.BadRequestError,
+        401: openai.AuthenticationError,
+        403: openai.PermissionDeniedError,
+        404: openai.NotFoundError,
+        409: openai.ConflictError,
+        422: openai.UnprocessableEntityError,
+        429: openai.RateLimitError,
+    }
+    kind = classes.get(status) or (
+        openai.InternalServerError if status >= 500 else openai.APIStatusError
+    )
+    error = kind(exc.message, response=response, body=body)
+    try:
+        from langchain_openai.chat_models.base import _handle_openai_api_error
+
+        _handle_openai_api_error(error)
+    except Exception as handled:  # noqa: BLE001 — the reading langchain gives a whole answer
+        return handled
+    return error
+
+
+# The generated pieces of the streamed call being joined (``with_streamed_answers``).
+_PIECES: ContextVar[list[int] | None] = ContextVar("malspark_streamed_pieces", default=None)
+
+
+def _prompt_chars(messages: Any, kwargs: dict[str, Any]) -> int:
+    """A request's prompt as the spend admission measures it: its messages and tool definitions."""
+    total = 0
+    for message in messages or []:
+        total += len(str(getattr(message, "content", "") or ""))
+        calls = getattr(message, "tool_calls", None)
+        if calls:
+            total += len(str(calls))
+        reasoning = (getattr(message, "additional_kwargs", None) or {}).get(REASONING_CONTENT_KEY)
+        if isinstance(reasoning, str):
+            total += len(reasoning)
+    tools = kwargs.get("tools")
+    if tools:
+        try:
+            total += len(json.dumps(tools, ensure_ascii=False, default=str))
+        except (TypeError, ValueError):
+            total += len(str(tools))
+    return total
+
+
+def _estimate_usage(result: Any, messages: Any, kwargs: dict[str, Any], pieces: int) -> None:
+    """Put a stated estimate of an ended call's usage on its answer, for the spend ceiling.
+
+    The stream was closed before the provider sent the usage it reports on
+    its last chunk, so the answer reports none, and the token ledger records
+    none. The provider still bills the prompt and what it generated. The
+    estimate is the prompt as the spend admission measured it (characters over
+    ``CHARS_PER_TOKEN``), priced as uncached input, and the generated pieces
+    the stream carried, reasoning included, as output; it is labelled as an
+    estimate and kept apart from any reported figure.
+    """
+    from malspark.llm.context_window import tokens_for_chars
+    from malspark.llm.stream_watch import ESTIMATED_USAGE_KEY, ESTIMATED_USAGE_SOURCE
+
+    estimate = {
+        "input_tokens": tokens_for_chars(_prompt_chars(messages, kwargs)),
+        "output_tokens": max(0, int(pieces)),
+        "source": ESTIMATED_USAGE_SOURCE,
+    }
+    for generation in getattr(result, "generations", None) or []:
+        message = getattr(generation, "message", None)
+        if getattr(message, "usage_metadata", None):
+            continue
+        metadata = getattr(message, "response_metadata", None)
+        if isinstance(metadata, dict):
+            metadata[ESTIMATED_USAGE_KEY] = dict(estimate)
+
+
+def with_streamed_llama_answers(chat_class: Any) -> Any:
+    """``chat_class`` reading a llama.cpp answer as a stream (:func:`with_streamed_answers`)."""
+    return with_streamed_answers(chat_class)
+
+
+def with_streamed_deepseek_answers(chat_class: Any) -> Any:
+    """``chat_class`` reading a DeepSeek answer as a stream, its reasoning kept.
+
+    A hosted answer read whole is billed whole before anything of it is seen:
+    one that writes the same claims again runs to its cap, which on a hosted
+    model can be hours of output. Read as a stream, the rule its caller names
+    (``llm.stream_watch``) can end it once the rule is crossed. The reasoning
+    pieces stay on the chunks and are joined into the answer's
+    ``reasoning_content``, which ``with_reasoning_passback`` sends back on the
+    next request.
+    """
+    return with_streamed_answers(chat_class, keep_reasoning=True)
+
+
+def with_streamed_answers(chat_class: Any, *, keep_reasoning: bool = False) -> Any:
+    """``chat_class`` reading an answer as a stream, joined into the whole answer.
+
+    llama.cpp sends nothing of a non-streamed answer until it has finished,
+    the headers included, so a call on a slow model was silent for its whole
+    life and nothing but the provider's request timeout could end it. Each
+    call is read as a stream instead (``_agenerate``/``_generate`` through the
+    model's own ``_astream``/``_stream``), so its pieces arrive as they are
+    made and the call's deadline reads its pace from them
+    (``generation_rate._CallDeadline``); the chunks are then joined into the
+    answer the server would have sent whole (:func:`_joined_answer`).
+
+    Each chunk is changed only where llama.cpp's stream is not OpenAI's:
+
+    * ``timings`` is kept in the chunk's generation info, and ``usage`` also
+      as ``token_usage``, where a whole answer carries it; the join keeps the
+      last of each, since ik_llama.cpp repeats a running usage total on every
+      chunk;
+    * a reasoning piece (``reasoning_content``) is kept on its chunk until the
+      call's deadline has counted it as generated, and taken off before the
+      chunk leaves the model (:func:`_without_reasoning`), so neither a caller
+      streaming the model nor the joined answer carries it;
+    * a server error sent inside the stream is raised as the status error the
+      same error is on a whole answer (:func:`_as_status_error`).
+
+    Each answer is read under the rule its caller named for the call
+    (``llm.stream_watch.watching``): once the rule says to end it, no further
+    chunk is read, the stream is closed, which ends the request, and the
+    answer is the chunks read up to there. Without a rule every chunk is read.
+    An answer ended so says why (``stream_watch.ENDED_KEY``) and, where the
+    provider reported no usage before the end, carries a stated estimate of it
+    (:func:`_estimate_usage`).
+
+    A transport failure while the answer streams is raised as
+    ``openai.APIConnectionError`` (``generation_rate.as_connection_error``),
+    the class the SDK gives the same failure on a whole answer, so the
+    callers that replay or retry a dropped connection read it as before.
+
+    ``keep_reasoning`` leaves each reasoning piece on its chunk and in the
+    joined answer, for a dialect whose reasoning is sent back (DeepSeek's).
+
+    Anything that is not a chat model class is returned as it is.
+    """
+    if not isinstance(chat_class, type) or not hasattr(
+        chat_class, "_convert_chunk_to_generation_chunk"
+    ):
+        return chat_class
+    cached = _STREAMED_LLAMA_CLASSES.get((chat_class, keep_reasoning))
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+    from malspark.llm.generation_rate import as_connection_error, generated_piece
+    from malspark.llm.stream_watch import awatched, ends_recorded, mark_ended, watched
+
+    def _leaving(chunk: Any) -> Any:
+        counter = _PIECES.get()
+        if counter is not None and generated_piece(chunk):
+            counter[0] += 1
+        return chunk if keep_reasoning else _without_reasoning(chunk)
+
+    def _as_caller_reads(exc: Exception) -> BaseException:
+        error = _as_status_error(exc)
+        return as_connection_error(exc) if error is exc else error
+
+    def _convert_chunk_to_generation_chunk(self: Any, chunk: Any, *args: Any, **kwargs: Any) -> Any:
+        generation = base._convert_chunk_to_generation_chunk(self, chunk, *args, **kwargs)
+        if generation is None or not isinstance(chunk, dict):
+            return generation
+        message: Any = getattr(generation, "message", None)
+        choices = chunk.get("choices") or []
+        delta = (choices[0] or {}).get("delta") if choices else None
+        piece = delta.get(REASONING_CONTENT_KEY) if isinstance(delta, dict) else None
+        if isinstance(piece, str) and piece and message is not None:
+            message.additional_kwargs[REASONING_CONTENT_KEY] = piece
+        if isinstance(chunk.get("usage"), dict):
+            generation.generation_info = {
+                **(generation.generation_info or {}),
+                "token_usage": chunk["usage"],
+            }
+        timings = server_timings_of(chunk)
+        if timings is not None:
+            generation.generation_info = {**(generation.generation_info or {}), "timings": timings}
+        return generation
+
+    async def _astream(
+        self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        stream = base._astream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
+        try:
+            async for chunk in awatched(stream):
+                yield _leaving(chunk)
+        except Exception as exc:
+            error = _as_caller_reads(exc)
+            if error is exc:
+                raise
+            raise error from exc
+        finally:
+            await stream.aclose()
+
+    def _stream(
+        self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        stream = base._stream(self, messages, stop=stop, run_manager=run_manager, **kwargs)
+        try:
+            for chunk in watched(stream):
+                yield _leaving(chunk)
+        except Exception as exc:
+            error = _as_caller_reads(exc)
+            if error is exc:
+                raise
+            raise error from exc
+        finally:
+            stream.close()
+
+    async def _agenerate(
+        self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        counter = [0]
+        token = _PIECES.set(counter)
+        join = _Join(keep_reasoning=keep_reasoning)
+        try:
+            with ends_recorded() as ended:
+                async for chunk in self._astream(
+                    messages, stop=stop, run_manager=run_manager, **kwargs
+                ):
+                    join.add(chunk)
+        finally:
+            _PIECES.reset(token)
+        return _ended_answer(_complete(join, ended), ended, counter, messages, kwargs)
+
+    def _generate(
+        self: Any, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:
+        counter = [0]
+        token = _PIECES.set(counter)
+        join = _Join(keep_reasoning=keep_reasoning)
+        try:
+            with ends_recorded() as ended:
+                for chunk in self._stream(messages, stop=stop, run_manager=run_manager, **kwargs):
+                    join.add(chunk)
+        finally:
+            _PIECES.reset(token)
+        return _ended_answer(_complete(join, ended), ended, counter, messages, kwargs)
+
+    def _ended_answer(
+        result: Any, ended: list[str], counter: list[int], messages: Any, kwargs: dict[str, Any]
+    ) -> Any:
+        if ended:
+            mark_ended(result, ended[0])
+            _estimate_usage(result, messages, kwargs, counter[0])
+        return result
+
+    streamed = type(
+        chat_class.__name__,
+        (chat_class,),
+        {
+            "_convert_chunk_to_generation_chunk": _convert_chunk_to_generation_chunk,
+            "_astream": _astream,
+            "_stream": _stream,
+            "_agenerate": _agenerate,
+            "_generate": _generate,
+        },
+    )
+    streamed.__module__ = __name__
+    streamed.__qualname__ = chat_class.__qualname__
+    _STREAMED_LLAMA_CLASSES[(chat_class, keep_reasoning)] = streamed
+    return streamed
+
+
+def with_reasoning_passback(chat_class: Any) -> Any:
+    """``chat_class`` keeping DeepSeek's ``reasoning_content`` and sending it back.
+
+    DeepSeek returns a thinking model's reasoning as ``reasoning_content`` on
+    the assistant message, and on a request that carries tools it has to be
+    sent back on that assistant message in every later request: its
+    thinking-mode guide says the API answers 400 otherwise, and without it the
+    model continues without its own earlier reasoning. ``langchain-openai``
+    reads neither way — the field is not OpenAI's — so the subclass does both,
+    and nothing else:
+
+    * reading an answer, each choice's ``reasoning_content`` is kept in the
+      message's ``additional_kwargs``, exactly as returned; ``content`` is not
+      touched;
+    * building a request that carries tools, an assistant message that kept
+      one carries it again under the same key, byte for byte, so a turn sent
+      twice is the same turn and the request's front stays what the provider
+      has cached. A request without tools is sent without it: the guide says
+      it is not needed there and is ignored if sent.
+
+    And the request's cap goes out as ``max_tokens`` as well, per request, so
+    a cap bound for one call is the one DeepSeek reads (``_cap_as_max_tokens``).
+
+    A streamed answer's pieces are kept the same way; ``AIMessageChunk``
+    joins the pieces of a string field when the chunks are added.
+    """
+    if not isinstance(chat_class, type) or not hasattr(chat_class, "_create_chat_result"):
+        return chat_class
+    cached = _REASONING_CLASSES.get(chat_class)
+    if cached is not None:
+        return cached
+    base: Any = chat_class
+
+    def _create_chat_result(self: Any, response: Any, generation_info: Any = None) -> Any:
+        result = base._create_chat_result(self, response, generation_info)
+        if isinstance(response, dict):
+            raw = response
+        else:
+            try:
+                raw = response.model_dump(warnings=False)
+            except Exception:  # noqa: BLE001 — an answer is never lost to its reasoning
+                return result
+        choices = raw.get("choices") if isinstance(raw, dict) else None
+        for generation, choice in zip(result.generations, choices or [], strict=False):
+            reasoning = _reasoning_of_choice(choice)
+            message = getattr(generation, "message", None)
+            if reasoning is not None and message is not None:
+                message.additional_kwargs[REASONING_CONTENT_KEY] = reasoning
+        return result
+
+    def _convert_chunk_to_generation_chunk(self: Any, chunk: Any, *args: Any, **kwargs: Any) -> Any:
+        generation = base._convert_chunk_to_generation_chunk(self, chunk, *args, **kwargs)
+        if generation is None or not isinstance(chunk, dict):
+            return generation
+        delta = ((chunk.get("choices") or [{}])[0] or {}).get("delta") or {}
+        piece = delta.get(REASONING_CONTENT_KEY) if isinstance(delta, dict) else None
+        if isinstance(piece, str) and piece:
+            generation.message.additional_kwargs[REASONING_CONTENT_KEY] = piece
+        return generation
+
+    def _get_request_payload(self: Any, input_: Any, *, stop: Any = None, **kwargs: Any) -> Any:
+        payload = base._get_request_payload(self, input_, stop=stop, **kwargs)
+        _cap_as_max_tokens(payload)
+        sent = payload.get("messages")
+        # Sent back only with tools. The guide asks for it there; on a request
+        # without tools it says the field is not needed and is ignored if
+        # sent, so there it would be input read for nothing.
+        if not isinstance(sent, list) or not payload.get("tools"):
+            return payload
+        messages = self._convert_input(input_).to_messages()
+        if len(messages) != len(sent):
+            logger.warning(
+                "openai provider: %d message(s) became %d request message(s), so no "
+                "turn's reasoning_content could be matched to its turn and none was sent "
+                "back; DeepSeek may refuse this request.",
+                len(messages),
+                len(sent),
+            )
+            return payload
+        for message, entry in zip(messages, sent, strict=True):
+            reasoning = (getattr(message, "additional_kwargs", None) or {}).get(
+                REASONING_CONTENT_KEY
+            )
+            if (
+                isinstance(reasoning, str)
+                and isinstance(entry, dict)
+                and entry.get("role") == "assistant"
+            ):
+                entry[REASONING_CONTENT_KEY] = reasoning
+        return payload
+
+    kept = type(
+        chat_class.__name__,
+        (chat_class,),
+        {
+            "_create_chat_result": _create_chat_result,
+            "_convert_chunk_to_generation_chunk": _convert_chunk_to_generation_chunk,
+            "_get_request_payload": _get_request_payload,
+        },
+    )
+    kept.__module__ = __name__
+    _REASONING_CLASSES[chat_class] = kept
+    return kept
+
+
+def _openai_extras(
+    base: str, disable_thinking: bool, compat: str, reasoning_effort: str = ""
+) -> dict[str, Any]:
+    """The request fields beyond OpenAI's basic ones this endpoint gets in a run.
+
+    Decided by the two functions every model build uses: ``sends_llama_cpp_extras``
+    says whether this endpoint takes the llama.cpp fields at all (a hosted
+    OpenAI-compatible API answers an unknown body field with 400), and the
+    thinking switch is the dialect's own. A probe that asked a different
+    question from the run it gates let a local reasoning model spend its eight
+    tokens inside its own chain of thought and answer with an empty string.
+    """
+    extras: dict[str, Any] = {}
+    if sends_llama_cpp_extras(base, str(compat or "auto")):
+        add_thinking_switch(extras, bool(disable_thinking))
+    elif compat == "deepseek":
+        add_deepseek_thinking_switch(extras, bool(disable_thinking))
+    # The operator's effort as the run sends it: a value the endpoint does not
+    # know is refused by the probe rather than on the job's first call.
+    effort = str(reasoning_effort or "").strip()
+    if effort:
+        extras["reasoning_effort"] = effort
+    return extras
+
+
+@register_provider("openai")
+class OpenAIProvider(LLMProvider):
+    """Builds LangChain ChatOpenAI instances."""
+
+    name = "openai"
+    window_setting = "core.llm.openai.context_size"
+    settings_model = OpenAIConfig
+    choice_order = 0
+    label = "OpenAI"
+    description = "Hosted OpenAI models or any OpenAI-compatible server"
+    hosted = True
+    legacy_credential_keys = ("openai_api_key",)
+    guide_leaves = (
+        "api_key",
+        "base_url",
+        "allow_plain_http",
+        "disable_thinking",
+        "reasoning_effort",
+        "repetition_penalty",
+    )
+    guide_advanced_leaves = (
+        "allow_plain_http",
+        "disable_thinking",
+        "reasoning_effort",
+        "repetition_penalty",
+    )
+    sdk_packages = frozenset({"openai"})
+    llm_types = ("openai-chat",)
+    timeout_kwarg = "request_timeout"
+    supports_agent_base_url = True
+    base_url_leaf = "base_url"
+    default_endpoint = "https://api.openai.com/v1"
+    effort_setting = "llm.openai.reasoning_effort"
+    concurrency = "endpoint"
+    # A thinking model's reasoning a provider sends back with the turn
+    # (``with_reasoning_passback``) stays with the turn it belongs to.
+    reasoning_passback_keys = (REASONING_CONTENT_KEY,)
+
+    @classmethod
+    def supports_structured_output(cls, settings: Any) -> bool:
+        # Against api.openai.com; a deployment with its own address is a local
+        # or another vendor's server, where a structured call hung for the
+        # whole request timeout.
+        return settings is None or not cls.configured_base_url(settings)
+
+    @classmethod
+    def model_declines_structured_output(cls, llm: Any) -> bool:
+        # A per-agent endpoint survives only on the model object, as
+        # ``openai_api_base``; only a real non-empty string counts.
+        candidate = getattr(llm, "openai_api_base", None)
+        return isinstance(candidate, str) and bool(candidate.strip())
+
+    @classmethod
+    def window_probes(cls, endpoint: object, model: str) -> tuple[Any, ...]:
+        from malspark.llm import context_window as cw
+
+        root = cw._root_of(endpoint)
+        if not root:
+            return ()
+        return (
+            cw.Ask(
+                "GET",
+                f"{root}{cw.LLAMA_PROPS_PATH}",
+                None,
+                cw.window_from_llama_props,
+                "llama.cpp /props",
+            ),
+            cw.Ask(
+                "GET",
+                f"{root}{cw.MODEL_LIST_PATH}",
+                None,
+                cw.window_from_model_list,
+                "the served model list",
+            ),
+            cw.Ask(
+                "GET",
+                f"{root}{cw.TGI_INFO_PATH}",
+                None,
+                cw.window_from_tgi_info,
+                "the server description",
+            ),
+        )
+
+    @classmethod
+    def declared_window(cls, settings: Any) -> tuple[int, bool]:
+        # ``context_size`` ships at zero, so a positive value is always an
+        # operator's decision.
+        return int(getattr(cls.settings_block(settings), "context_size", 0) or 0), False
+
+    @classmethod
+    def reasoning_counts_against_cap(cls, settings: Any) -> bool:
+        # llama.cpp's ``n_predict`` counts the reasoning channel with the answer.
+        return not bool(getattr(cls.settings_block(settings), "disable_thinking", False))
+
+    @classmethod
+    def model_listing(cls, settings: Any) -> ModelListing:
+        base = cls.endpoint(None, cls.configured_base_url(settings))
+        return ModelListing(
+            url=f"{base}/models",
+            headers={"Authorization": f"Bearer {cls.api_key(settings) or 'none'}"},
+            names=lambda payload: [m.get("id", "") for m in (payload or {}).get("data", [])],
+            where=base,
+        )
+
+    @classmethod
+    def one_turn_request(
+        cls, settings: Any, endpoint: str, model: str, effort: str | None = None
+    ) -> OneTurnRequest:
+        block = cls.settings_block(settings)
+        base = str(endpoint or "").rstrip("/")
+        return OneTurnRequest(
+            f"{base or cls.default_endpoint}/chat/completions",
+            {"Authorization": f"Bearer {cls.api_key(settings) or 'none'}"},
+            {
+                "model": model,
+                "max_tokens": COMPLETION_MAX_TOKENS,
+                "messages": [{"role": "user", "content": COMPLETION_PROMPT}],
+                **_openai_extras(
+                    base,
+                    bool(getattr(block, "disable_thinking", False)),
+                    str(getattr(block, "compat", "auto") or "auto"),
+                    str(effort or ""),
+                ),
+            },
+        )
+
+    @classmethod
+    def said_something(cls, payload: Any) -> bool:
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return False
+        message = (choices[0] or {}).get("message") or {}
+        # Reasoning text counts: a local server serving a reasoning model with
+        # thinking left on puts the whole answer in ``reasoning_content``
+        # (``reasoning`` on some builds) and hands back an empty ``content``.
+        return bool(
+            _text(message.get("content"))
+            or _text(message.get(REASONING_CONTENT_KEY))
+            or _text(message.get("reasoning"))
+            or message.get("tool_calls")
+        )
+
+    def __init__(self, config: Settings) -> None:
+        self._config = config
+
+    def build_model(
+        self,
+        model: str,
+        temperature: float,
+        **kwargs: Any,
+    ) -> BaseChatModel:
+        secret = self._config.llm.openai.api_key
+        if not secret:
+            raise LLMError("OPENAI_API_KEY is not set but provider is 'openai'.")
+
+        # A per-agent endpoint (``llm.agents.<key>.base_url``) wins over the
+        # global one, so two agents can sit on two different local servers.
+        # The credential stays global: the key belongs to the provider, not to
+        # the endpoint. Every local-server branch below keys off this resolved
+        # value, so a per-agent server gets the same llama.cpp treatment.
+        base_url = kwargs.pop("base_url", None) or self._config.llm.openai.base_url
+        # An agent entry's own effort (``llm.agents.<key>.effort``) is sent in
+        # place of the global ``llm.openai.reasoning_effort``; ``_build`` only
+        # fills the global one in where none is already named.
+        own_effort = str(kwargs.pop("effort", None) or "").strip()
+        kwargs.pop("effort_setting", None)
+        if own_effort:
+            kwargs["reasoning_effort"] = own_effort
+        return self._build(model, temperature, base_url, dict(kwargs))
+
+    def _build(
+        self,
+        model: str,
+        temperature: float,
+        base_url: str | None,
+        kwargs: dict[str, Any],
+        *,
+        force_standard: bool = False,
+    ) -> BaseChatModel:
+        """One ``ChatOpenAI``, with or without the llama.cpp-only extras."""
+        from langchain_openai import ChatOpenAI
+        from pydantic import SecretStr
+
+        secret = self._config.llm.openai.api_key
+        api_key = secret if isinstance(secret, SecretStr) else SecretStr(str(secret))
+        build_kwargs: dict[str, Any] = {
+            "model": model,
+            "api_key": api_key,
+            "temperature": temperature,
+            **kwargs,
+        }
+        if base_url:
+            build_kwargs["base_url"] = base_url
+
+        # The operator's reasoning effort, on every request of every dialect:
+        # ``ChatOpenAI`` sends it as the top-level ``reasoning_effort`` field,
+        # which is where OpenAI's and DeepSeek's chat completions read it.
+        effort = reasoning_effort_of(self._config.llm.openai)
+        if effort is not None:
+            build_kwargs.setdefault("reasoning_effort", effort)
+
+        compat = str(getattr(self._config.llm.openai, "compat", "auto") or "auto")
+        local = not force_standard and sends_llama_cpp_extras(base_url, compat)
+        if local:
+            self._add_llama_cpp_extras(build_kwargs, base_url)
+            # Each answer is read as a stream (``with_streamed_llama_answers``):
+            # the usage comes on the closing chunk, and langchain's own 120 s
+            # limit between chunks is off, because before the first piece the
+            # silence is the provider's request timeout to bound.
+            build_kwargs.setdefault("stream_usage", True)
+            build_kwargs.setdefault("stream_chunk_timeout", None)
+        elif compat == "deepseek":
+            self._add_deepseek_fields(build_kwargs)
+            # Read as a stream (``with_streamed_deepseek_answers``), as the
+            # local server's answer is, and with the same two settings: the
+            # usage comes on the closing chunk, and before the first piece the
+            # silence is the provider's request timeout to bound.
+            build_kwargs.setdefault("stream_usage", True)
+            build_kwargs.setdefault("stream_chunk_timeout", None)
+
+        # Explicit ``request_timeout`` and ``max_retries`` so the openai SDK
+        # can't silently retry a stalled request three times (3 x default
+        # 600s = 30 min). Caller-supplied kwargs win.
+        # ``request_timeout`` must be >= the longest agent ``wait_for``
+        # budget; otherwise the HTTP layer truncates a still-decoding
+        # response before the outer wrapper's hard cap fires (live trace
+        # 2026-05-28 showed static analyst dropping at exactly 300s
+        # because the previous value was tighter than its 600s
+        # ReAct budget). 1800s (2026-07-13) stays >= the longest agent
+        # ``wait_for`` hard cap: the deep-analysis restore raised static's
+        # per-chunk budget to 1500s (hard cap timeout+30 = 1530s), plus decode
+        # headroom on a cold-cache local 35B. ``max_retries=0`` stops the SDK
+        # retrying underneath Malspark: its own retries would make a *stalled*
+        # request three times over its timeout, and would stack on Malspark's
+        # retry. A provider saying "not now" is asked again by the one policy
+        # (``malspark.llm.transient``), which never retries a stall.
+        from malspark.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
+
+        build_kwargs.setdefault("request_timeout", PROVIDER_REQUEST_TIMEOUT_SECONDS)
+        build_kwargs.setdefault("max_retries", 0)
+
+        # This model's own connection pool, so two models for two event loops
+        # do not share one. See ``unshared_async_client``.
+        if "http_async_client" not in build_kwargs:
+            private = unshared_async_client(base_url, build_kwargs["request_timeout"])
+            if private is not None:
+                build_kwargs["http_async_client"] = private
+
+        from malspark.llm.generation_rate import with_sized_request_timeout
+        from malspark.llm.transient import with_transient_retries
+
+        # Every request carries a timeout sized for its own output cap once the
+        # model's pace is measured; the client's stands until then.
+        chat_class = with_sized_request_timeout(with_server_timings(ChatOpenAI))
+        if compat == "deepseek":
+            # DeepSeek's reasoning is kept and sent back on its assistant turn;
+            # every other dialect's request is left as langchain builds it.
+            # Its answer is read as a stream and joined, the reasoning kept.
+            chat_class = with_streamed_deepseek_answers(with_reasoning_passback(chat_class))
+        elif local:
+            # llama.cpp reads its cap from the extras; a cap bound for one call
+            # reaches them the way the model's own does. Its answer is read
+            # as a stream and joined into the one it would have sent whole.
+            chat_class = with_streamed_llama_answers(
+                with_special_tokens_written_out(
+                    with_per_request_llama_cap(chat_class),
+                    base_url,
+                    api_key.get_secret_value(),
+                    model,
+                )
+            )
+        elif compat == "llama_cpp" or (compat != "standard" and is_local_endpoint(base_url)):
+            # A local server the self-heal found refusing the llama.cpp extras
+            # still parses special tokens in its messages.
+            chat_class = with_special_tokens_written_out(
+                chat_class, base_url, api_key.get_secret_value(), model
+            )
+        # A provider saying "not now" is asked again, a whole request at a
+        # time, as the Anthropic provider's model is (``malspark.llm.transient``).
+        chat_class = with_transient_retries(chat_class)
+        # Last, over the dialect's own changes: no request sends a tool call
+        # without its reply, whatever the history it was built from — the one
+        # rule every provider applies (``malspark.llm.tool_replies``).
+        chat_class = with_answered_tool_calls(chat_class, "openai")
+        built: BaseChatModel = chat_class(**build_kwargs)
+        if not local:
+            return built
+        # The rebuild the self-heal needs, carried on the model rather than
+        # looked up again: only the provider knows what it sent.
+        return _with_standard_retry(built, self, model, temperature, base_url, kwargs, compat)
+
+    def _add_llama_cpp_extras(self, build_kwargs: dict[str, Any], base_url: str | None) -> None:
+        """The request fields only llama.cpp and its forks read.
+
+        Degenerate-loop guard: forward a repetition penalty. The small
+        reasoning model otherwise loops catastrophically while trying to recall
+        an ATT&CK technique ID, burning the whole decode budget. llama.cpp
+        forks disagree on the key name; send both — empirically (live
+        ik_llama probe) ``repeat_penalty`` is the honored key and
+        ``repetition_penalty`` is silently ignored. The penalty damps
+        catastrophic single-token loops but does NOT by itself make the small
+        model converge on an ATT&CK ID — that is what the technique check
+        challenges, with feedback, and never substitutes.
+
+        Output cap: ``ChatOpenAI(max_tokens=N)`` does not put ``max_tokens`` on
+        the wire. ``langchain-openai`` renames it to OpenAI's newer
+        ``max_completion_tokens``, and ik_llama.cpp's endpoint does not know
+        that key — so it ignores the field and decodes without a ceiling.
+        Measured: a judge call built with ``judge_max_tokens=8192`` generated
+        30,155 tokens past a 1,403-token prompt before the client's 600 s
+        wrapper gave up, and it was still going. Four of eight fixtures in the
+        C3 study never returned a verdict for this reason.
+
+        Thinking: disable a local reasoning model's chain-of-thought (Qwen3
+        ``enable_thinking``) when configured. On a constrained host the model
+        otherwise spends its whole decode budget inside ``<think>`` — empty
+        answers and timeouts.
+
+        DRY sampler: ``llm.openai.dry_*``, each only when an operator set it
+        (``LLAMA_CPP_DRY_KEYS``); none is set by default.
+
+        All of them go through ``extra_body``: it is the only channel that
+        reaches the server verbatim, and an unknown sampler key is ignored by
+        llama.cpp rather than rejected.
+        """
+        extra = dict(build_kwargs.get("extra_body") or {})
+
+        rp = self._config.llm.openai.repetition_penalty
+        if rp and rp != 1.0:
+            extra.setdefault("repeat_penalty", rp)
+            extra.setdefault("repetition_penalty", rp)
+
+        # The DRY sampler's parameters, each only when the operator set it.
+        for key in LLAMA_CPP_DRY_KEYS:
+            value = getattr(self._config.llm.openai, key, None)
+            if value is not None:
+                extra.setdefault(key, value)
+
+        cap = build_kwargs.get("max_tokens")
+        if isinstance(cap, int) and cap > 0:
+            extra.setdefault("max_tokens", cap)
+            extra.setdefault("n_predict", cap)
+
+        add_thinking_switch(extra, self._config.llm.openai.disable_thinking)
+
+        if extra:
+            build_kwargs["extra_body"] = extra
+        logger.debug("openai provider: sending llama.cpp extras to %s.", redact_url(str(base_url)))
+
+    def _add_deepseek_fields(self, build_kwargs: dict[str, Any]) -> None:
+        """The two request fields DeepSeek reads where OpenAI's API reads others.
+
+        Output cap: ``ChatOpenAI(max_tokens=N)`` goes on the wire as
+        ``max_completion_tokens``, which DeepSeek's chat completions ignore —
+        measured, a cap of 5 came back as 88 tokens with thinking off and 138
+        with it on, both ending ``stop``. DeepSeek reads ``max_tokens``, with
+        the reasoning counted against it, so the cap is sent there as well,
+        through ``extra_body``; the ``max_completion_tokens`` beside it is
+        ignored. Not sent to OpenAI's own API, which refuses ``max_tokens``
+        beside ``max_completion_tokens`` for its reasoning models: that is why
+        this is a dialect of its own rather than a field every hosted API gets.
+
+        Thinking: ``llm.openai.disable_thinking`` as DeepSeek's own
+        ``thinking.type``, the one switch it honours.
+        """
+        extra = dict(build_kwargs.get("extra_body") or {})
+        cap = build_kwargs.get("max_tokens")
+        if isinstance(cap, int) and cap > 0:
+            extra.setdefault("max_tokens", cap)
+        add_deepseek_thinking_switch(extra, self._config.llm.openai.disable_thinking)
+        if extra:
+            build_kwargs["extra_body"] = extra
+
+
+# Called with (replaced model, healed model) whenever the self-heal swaps one
+# for the other. The container subscribes so the model it cached for a loop
+# becomes the healed one; the provider itself neither knows nor needs to know
+# who is holding a reference.
+_HEAL_LISTENERS: list[Any] = []
+
+
+def on_model_healed(callback: Any) -> None:
+    """Subscribe to self-heal swaps. Idempotent for the same callback."""
+    if callback not in _HEAL_LISTENERS:
+        _HEAL_LISTENERS.append(callback)
+
+
+def _announce_healed(replaced: Any, healed: Any) -> None:
+    """Tell every listener about one swap, never failing the call that healed."""
+    for callback in list(_HEAL_LISTENERS):
+        try:
+            callback(replaced, healed)
+        except Exception as exc:  # noqa: BLE001 — a listener never costs an answer
+            logger.debug("openai provider: a heal listener raised (%s).", exc)
+
+
+def _close_sync_client(model_obj: Any) -> None:
+    """Close the synchronous httpx client of a model that is being replaced.
+
+    Only the sync one: the healed model is built with the original's *async*
+    pool, so closing that would break the model the caller is about to use.
+    Best-effort, because the shape of these attributes belongs to the openai
+    SDK and a client that will not close is a smaller problem than a request
+    that does not happen.
+    """
+    for attribute in ("root_client", "client"):
+        client = getattr(model_obj, attribute, None)
+        close = getattr(getattr(client, "_client", client), "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception as exc:  # noqa: BLE001 — best-effort teardown
+                logger.debug("openai provider: the replaced sync client did not close (%s).", exc)
+            return
+
+
+def _with_standard_retry(
+    model_obj: BaseChatModel,
+    provider: OpenAIProvider,
+    model: str,
+    temperature: float,
+    base_url: str | None,
+    kwargs: dict[str, Any],
+    compat: str,
+) -> BaseChatModel:
+    """Wrap the model so one 400 about our own extras rebuilds it without them.
+
+    An endpoint that does not read the llama.cpp fields says so on the first
+    request and every request after it, so the whole run is lost to a setting
+    nobody knew was wrong. The rebuild happens once: the endpoint is recorded,
+    every model built for it afterwards is standard, and the operator is told
+    at warning level which setting to make explicit.
+
+    "Once" has to mean once for *this* model object too, which is what the
+    ``healed`` cell is for. Recording the endpoint only helps models built
+    afterwards, and the container caches one model per loop for the life of a
+    job — so without the cell every call on that one model raised the same 400
+    again, built another ``ChatOpenAI``, and left another connection pool
+    behind. From the first heal on, the original attempt is skipped entirely
+    and the healed model answers directly.
+    """
+    from openai import BadRequestError
+
+    healed: list[BaseChatModel] = []
+    # The sync path can be entered from more than one thread — an analyst tool
+    # loop runs ``invoke`` in a worker thread — and check-build-append is not
+    # atomic across threads. Without the lock two callers can each build a
+    # replacement, which is two pools and two swaps: the leak this cell
+    # removes, at a smaller scale.
+    heal_lock = threading.Lock()
+
+    def _heal(exc: BadRequestError) -> BaseChatModel | None:
+        # Asked before the memo, so a 400 about something else — a rejected
+        # ``temperature`` — is re-raised rather than answered with a model
+        # that was healed for an unrelated reason.
+        parameter = unsupported_parameter(str(exc))
+        if parameter is None:
+            return None
+        with heal_lock:
+            if healed:
+                return healed[0]
+            first = note_standard_only(base_url)
+            if first:
+                declared = (
+                    " The endpoint's answer overrides llm.openai.compat, which is 'llama_cpp'."
+                    if compat == "llama_cpp"
+                    else " Set llm.openai.compat to 'standard' to skip this."
+                )
+                logger.warning(
+                    "openai provider: %s rejected %r, which only llama.cpp reads; retrying "
+                    "without the llama.cpp extras and sending standard fields to it from "
+                    "now on.%s",
+                    redact_url(str(base_url)),
+                    parameter,
+                    declared,
+                )
+            # The rebuilt model inherits this one's connection pool rather than
+            # opening a second: the pool is not what the endpoint objected to,
+            # and a pool per heal is the leak this whole cell exists to stop.
+            # What the original keeps to itself is its *sync* client, which the
+            # rebuild does replace and which is closed below.
+            rebuild_kwargs = dict(kwargs)
+            pool = getattr(model_obj, "http_async_client", None)
+            if pool is not None:
+                rebuild_kwargs.setdefault("http_async_client", pool)
+            replacement = provider._build(
+                model, temperature, base_url, rebuild_kwargs, force_standard=True
+            )
+            # The meter the job attached goes with it, so the healed model's
+            # answers are measured and its requests sized like the original's.
+            from malspark.llm.generation_rate import carry_rate_meter
+
+            carry_rate_meter(model_obj, replacement)
+            # And the job's retry recorder, so the healed model's retries are
+            # rows and its failed attempts charged, as the original's were.
+            from malspark.llm.transient import carry_retry_recorder
+
+            carry_retry_recorder(model_obj, replacement)
+            # And its agent's own ceiling, where the agent sets one.
+            from malspark.llm.agent_ceiling import carry_agent_ceiling
+
+            carry_agent_ceiling(model_obj, replacement)
+            healed.append(replacement)
+        _close_sync_client(model_obj)
+        _announce_healed(model_obj, replacement)
+        return replacement
+
+    original_invoke = model_obj.invoke
+    original_ainvoke = model_obj.ainvoke
+
+    def invoke(*args: Any, **call_kwargs: Any) -> Any:
+        if healed:
+            return healed[0].invoke(*args, **call_kwargs)
+        try:
+            return original_invoke(*args, **call_kwargs)
+        except BadRequestError as exc:
+            replacement = _heal(exc)
+            if replacement is None:
+                raise
+            return replacement.invoke(*args, **call_kwargs)
+
+    async def ainvoke(*args: Any, **call_kwargs: Any) -> Any:
+        if healed:
+            return await healed[0].ainvoke(*args, **call_kwargs)
+        try:
+            return await original_ainvoke(*args, **call_kwargs)
+        except BadRequestError as exc:
+            replacement = _heal(exc)
+            if replacement is None:
+                raise
+            return await replacement.ainvoke(*args, **call_kwargs)
+
+    # Assigned on the instance, not the class: a second model built for a
+    # different endpoint must not inherit this one's retry.
+    object.__setattr__(model_obj, "invoke", invoke)
+    object.__setattr__(model_obj, "ainvoke", ainvoke)
+    return model_obj

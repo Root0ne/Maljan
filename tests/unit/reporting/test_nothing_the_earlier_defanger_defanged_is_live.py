@@ -17,8 +17,8 @@ import re
 
 import pytest
 
-from maljan.core.paths import resolve_data
-from maljan.reporting.models import (
+from malspark.core.paths import resolve_data
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     SampleIdentity,
@@ -27,8 +27,8 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 ROWS = json.loads(
     resolve_data("tests/fixtures/defang/earlier_defanger.json").read_text(encoding="utf-8")

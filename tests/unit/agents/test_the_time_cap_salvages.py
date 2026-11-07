@@ -33,9 +33,9 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import FINAL_ANSWER_NUDGE, BaseAnalyst
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.llm import context_window as cw
+from malspark.agents.base_agent import FINAL_ANSWER_NUDGE, BaseAnalyst
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.llm import context_window as cw
 
 TASK = "look at it"
 CLAIM = (
@@ -182,10 +182,10 @@ def _strings_tool() -> Any:
 @contextlib.contextmanager
 def _settings(budget: int) -> Iterator[None]:
     with (
-        patch("maljan.agents.base_agent.get_settings") as settings,
+        patch("malspark.agents.base_agent.get_settings") as settings,
         # The salvage's floor is a minute in production; the stand-in's pace
         # is a second, so its floor is scaled with it.
-        patch("maljan.agents.base_agent._SYNTHESIS_MIN_SECONDS", 1),
+        patch("malspark.agents.base_agent._SYNTHESIS_MIN_SECONDS", 1),
     ):
         cfg = settings.return_value
         cfg.react_agent_timeout = budget
@@ -287,7 +287,7 @@ class TestTheAnswerAfterTheFinalTurnGetsOnlyWhatIsLeft:
 
 class TestAModelListSwitchIsNotThePaceOfTheModelThatAnswered:
     def _list(self) -> tuple[Any, _SlowModel, _SlowModel]:
-        from maljan.llm.fallback import FallbackChatModel
+        from malspark.llm.fallback import FallbackChatModel
 
         primary = _SlowModel(calls=[], stall_from=3)
         secondary = _SlowModel(calls=[])
@@ -334,7 +334,7 @@ class TestTheReserve:
 
     @staticmethod
     def _pace(turns: list[float], rate: float | None, model: str = "slow") -> Any:
-        from maljan.agents.base_agent import TurnPace
+        from malspark.agents.base_agent import TurnPace
 
         pace = TurnPace(lambda: rate)
         pace.turns[model] = list(turns)
@@ -348,7 +348,7 @@ class TestTheReserve:
         assert pace.leaves_no_room_for(599) and not pace.leaves_no_room_for(601)
 
     def test_a_measured_rate_sizes_it_for_the_final_answer(self) -> None:
-        from maljan.agents.base_agent import FINAL_ANSWER_EXPECTED_TOKENS
+        from malspark.agents.base_agent import FINAL_ANSWER_EXPECTED_TOKENS
 
         pace = self._pace([100, 117], rate=3.8)
 
@@ -361,8 +361,8 @@ class TestTheReserve:
         assert pace.reserve() == 300 * 1.5
 
     def test_a_switch_turn_is_not_measured_and_nothing_is_decided_before_a_turn(self) -> None:
-        from maljan.agents.base_agent import TurnPace
-        from maljan.llm.fallback import FALLBACK_KEY, MODEL_KEY
+        from malspark.agents.base_agent import TurnPace
+        from malspark.llm.fallback import FALLBACK_KEY, MODEL_KEY
 
         pace = TurnPace()
         switched = AIMessage(

@@ -116,10 +116,10 @@ class ConnectionManager:
         # the client advertised it; otherwise browsers reject the handshake
         # with "Response must not include 'Sec-WebSocket-Protocol' header if
         # not present in request". Inspect the request headers and accept
-        # ``maljan.v1`` only when the client actually asked for it.
+        # ``malspark.v1`` only when the client actually asked for it.
         requested = websocket.scope.get("subprotocols") or []
-        if "maljan.v1" in requested:
-            await websocket.accept(subprotocol="maljan.v1")
+        if "malspark.v1" in requested:
+            await websocket.accept(subprotocol="malspark.v1")
         else:
             await websocket.accept()
         logger.info("WebSocket connected: job=%s", log_safe(job_id))
@@ -304,8 +304,8 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
         Pass the JWT access token as a WebSocket subprotocol, never as a
         query parameter (proxy access logs and browser Referer headers can
         leak query strings): open the socket with subprotocols
-        ``["maljan.v1", "maljan.v1.<jwt-access-token>"]``. The server
-        accepts and echoes back only ``maljan.v1``. Every rejection (missing
+        ``["malspark.v1", "malspark.v1.<jwt-access-token>"]``. The server
+        accepts and echoes back only ``malspark.v1``. Every rejection (missing
         or malformed credential, invalid job ID, unowned job, ...) is
         accepted first (with no subprotocol echoed, since nothing was
         validated) and then immediately closed with its close code via the
@@ -325,7 +325,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
     #
     # Tokens MUST be sent via the WebSocket subprotocol so they do not appear
     # in proxy access logs or browser Referer headers. The expected protocol
-    # is ``maljan.v1.<jwt-access-token>``.
+    # is ``malspark.v1.<jwt-access-token>``.
     payload: dict[str, object] = {}
     user_id: str
     if settings.auth_disabled:
@@ -335,8 +335,8 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
         requested_protocols = websocket.headers.get("sec-websocket-protocol", "")
         for raw in requested_protocols.split(","):
             candidate = raw.strip()
-            if candidate.startswith("maljan.v1."):
-                token = candidate[len("maljan.v1.") :]
+            if candidate.startswith("malspark.v1."):
+                token = candidate[len("malspark.v1.") :]
                 break
 
         if not token:
@@ -346,7 +346,7 @@ async def ws_analysis(websocket: WebSocket, job_id: str, since: int | None = Non
             await _reject(
                 websocket,
                 4401,
-                "Unauthorized: token must be sent as the maljan.v1.<jwt> subprotocol",
+                "Unauthorized: token must be sent as the malspark.v1.<jwt> subprotocol",
             )
             return
 

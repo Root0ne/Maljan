@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.providers.base import StaticJobContext
-from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.providers.base import StaticJobContext
+from malspark.providers.static.generic_mcp import GenericMCPStaticProvider
 
 
 class _T:
@@ -74,7 +74,7 @@ def test_open_is_idempotent_for_a_repeat_call_with_an_equal_job(monkeypatch):
     separate, merely-``==``-equal instances is what actually exercises the
     value comparison ``open()`` relies on.
     """
-    from maljan.agents import mcp_client
+    from malspark.agents import mcp_client
 
     constructions: list[int] = []
 
@@ -122,8 +122,8 @@ def test_a_failed_attach_raises_instead_of_silently_degrading():
 
 def test_a_failed_attach_leaves_the_analyst_running(monkeypatch):
     """End to end: the analyst survives a broken generic server without raising."""
-    from maljan.agents import mcp_client
-    from maljan.agents.static_analyst import StaticAnalyst
+    from malspark.agents import mcp_client
+    from malspark.agents.static_analyst import StaticAnalyst
 
     class _BoomToolkit:
         def __init__(self, *args, **kwargs):
@@ -151,9 +151,9 @@ def test_the_stdio_sidecar_env_carries_no_api_key(monkeypatch):
     Same guard as the Ghidra/CAPE/network/threat-intel sidecars in
     ``tests/unit/agents/test_subprocess_env.py``: a raw ``os.environ.copy()``
     would hand an LLM or threat-intel credential to any tool server a user
-    configures, including one nobody at Maljan wrote.
+    configures, including one nobody at Malspark wrote.
     """
-    from maljan.agents import mcp_client
+    from malspark.agents import mcp_client
 
     monkeypatch.setenv("OPENAI_API_KEY", "sk-not-for-the-sidecar")
     recorder = MagicMock()
@@ -170,7 +170,7 @@ def test_the_stdio_sidecar_env_carries_no_api_key(monkeypatch):
 
 
 def test_http_transport_builds_the_toolkit_with_the_configured_url(monkeypatch):
-    from maljan.agents import mcp_client
+    from malspark.agents import mcp_client
 
     factory = _toolkit_factory()
     monkeypatch.setattr(mcp_client, "MCPLangChainToolkit", factory)
@@ -198,7 +198,7 @@ def test_the_http_bearer_header_carries_the_real_token_not_its_mask(monkeypatch)
     """
     import secrets
 
-    from maljan.agents import mcp_client
+    from malspark.agents import mcp_client
 
     token = secrets.token_hex(16)
     factory = _toolkit_factory()
@@ -261,7 +261,7 @@ def _fake_toolkit_class(closed: list[int], tool_names: tuple[str, ...] = ("keep"
 
 
 def test_opening_the_same_job_twice_is_a_no_op(monkeypatch):
-    from maljan.agents import mcp_client
+    from malspark.agents import mcp_client
 
     constructions: list[int] = []
     closed: list[int] = []
@@ -298,7 +298,7 @@ def test_opening_the_same_job_twice_is_a_no_op(monkeypatch):
 def test_opening_a_different_job_closes_the_first_toolkit_before_attaching_the_new_one(
     monkeypatch,
 ):
-    from maljan.agents import mcp_client
+    from malspark.agents import mcp_client
 
     constructions: list[int] = []
     closed: list[int] = []
@@ -323,7 +323,7 @@ def test_opening_a_different_job_closes_the_first_toolkit_before_attaching_the_n
 
 
 def test_close_tears_down_the_toolkit_and_is_idempotent(monkeypatch):
-    from maljan.agents import mcp_client
+    from malspark.agents import mcp_client
 
     closed: list[int] = []
     monkeypatch.setattr(mcp_client, "MCPLangChainToolkit", _fake_toolkit_class(closed, ("keep",)))

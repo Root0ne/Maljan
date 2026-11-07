@@ -33,9 +33,9 @@ def golden_path(profile: str) -> Path:
 
 def graph_shape(parallel: bool, profile: str = "default") -> dict[str, Any]:
     """The node set, edge set, conditional path map and analyst order."""
-    from maljan.core.container import ServiceContainer
-    from maljan.core.settings_overrides import build_settings
-    from maljan.pipeline.builder import build_graph
+    from malspark.core.container import ServiceContainer
+    from malspark.core.settings_overrides import build_settings
+    from malspark.pipeline.builder import build_graph
 
     cfg = build_settings({"llm.parallel_analysts": parallel})
     cfg.agents.profile = profile

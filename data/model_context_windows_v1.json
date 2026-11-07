@@ -14,7 +14,7 @@
     "Keys match the longest leading run of the model id, lower-cased, with any",
     "vendor path segment in front of it and any tag after a colon removed.",
     "Values are tokens. A model this table does not name falls back to the",
-    "conservative window named in maljan.llm.context_window."
+    "conservative window named in malspark.llm.context_window."
   ],
   "windows": {
     "claude-3": 200000,

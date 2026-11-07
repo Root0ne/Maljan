@@ -24,11 +24,11 @@ from collections.abc import Iterator
 
 import pytest
 
-from maljan.pipeline import events as ev
-from maljan.pipeline.events import safe_finding_value, scrub, scrub_keeping_layout
-from maljan.pipeline.validation import ValidationTally, Violation
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.pipeline import events as ev
+from malspark.pipeline.events import safe_finding_value, scrub, scrub_keeping_layout
+from malspark.pipeline.validation import ValidationTally, Violation
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 from tests.credential_shapes import password, prefixed_key
 from tests.unit.pipeline.test_live_event_schema import _every_key_shape
 
@@ -150,7 +150,7 @@ class TestNoOperatorCredentialReachesARow:
 
     @staticmethod
     def _configured(url: str) -> None:
-        from maljan.core.settings_catalog import configured_secret_values
+        from malspark.core.settings_catalog import configured_secret_values
 
         _registered(*configured_secret_values({"tool_servers": [{"url": url}]}))
 
@@ -255,21 +255,21 @@ class TestAPlainUsernameIsNoSecret:
     """A configured URL's username without a password is a credential only by its shape."""
 
     URLS = (
-        "postgresql+asyncpg://administrator@db.internal/maljan",
+        "postgresql+asyncpg://administrator@db.internal/malspark",
         "redis://default@redis:6379/0",
         "http://analyst@ghidra.internal:8080",
         "ssh://git@github.com/org/repo",
     )
 
     def test_an_ordinary_username_is_not_registered(self) -> None:
-        from maljan.core.settings_catalog import configured_secret_values
+        from malspark.core.settings_catalog import configured_secret_values
 
         found = configured_secret_values({"servers": [{"url": url} for url in self.URLS]})
 
         assert not {"administrator", "default", "analyst", "git"} & found
 
     def test_events_and_rows_keep_the_words(self) -> None:
-        from maljan.core.settings_catalog import configured_secret_values
+        from malspark.core.settings_catalog import configured_secret_values
 
         _registered(*configured_secret_values({"servers": [{"url": url} for url in self.URLS]}))
 
@@ -284,7 +284,7 @@ class TestAPlainUsernameIsNoSecret:
         assert "analyst@" not in row and "***@ghidra.internal:8080/api" in row
 
     def test_a_token_in_the_username_slot_is_still_registered(self) -> None:
-        from maljan.core.settings_catalog import configured_secret_values
+        from malspark.core.settings_catalog import configured_secret_values
 
         token = prefixed_key("ghp_", 36)
         assert token in configured_secret_values({"url": f"https://{token}@mcp.example/sse"})
@@ -293,7 +293,7 @@ class TestAPlainUsernameIsNoSecret:
 def _configured_urls() -> list[str]:
     """Every userinfo shape a configured URL takes: a user, a token, short and long passwords."""
     return [
-        "postgresql+asyncpg://administrator@db.internal/maljan",
+        "postgresql+asyncpg://administrator@db.internal/malspark",
         "ssh://" + "git" + "@github.example/org/repo",
         f"https://{prefixed_key('ghp_', 36)}@mcp.example/sse",
         f"https://u:{password(3)}@sandbox.example/api",
@@ -321,7 +321,7 @@ class TestUserinfoIsRemovedWhereverAURLStands:
         for registered in (False, True):
             ev.forget_secret_values()
             if registered:
-                from maljan.core.settings_catalog import configured_secret_values
+                from malspark.core.settings_catalog import configured_secret_values
 
                 _registered(
                     *configured_secret_values({"servers": [{"url": u} for u in _configured_urls()]})
@@ -332,7 +332,7 @@ class TestUserinfoIsRemovedWhereverAURLStands:
                 assert f"{_userinfo(url)}@" not in _published(row), (registered, url)
 
     def test_a_word_standing_alone_is_kept_in_events(self) -> None:
-        from maljan.core.settings_catalog import configured_secret_values
+        from malspark.core.settings_catalog import configured_secret_values
 
         _registered(
             *configured_secret_values({"servers": [{"url": u} for u in _configured_urls()]})
@@ -351,7 +351,7 @@ class TestEveryValueDevMaskedIsStillMasked:
         return {urlsplit(url).password for url in urls if urlsplit(url).password}
 
     def test_registration_is_a_superset_of_dev_s(self) -> None:
-        from maljan.core.settings_catalog import configured_secret_values
+        from malspark.core.settings_catalog import configured_secret_values
 
         urls = _configured_urls()
         branch = configured_secret_values({"servers": [{"url": u} for u in urls]})
@@ -359,7 +359,7 @@ class TestEveryValueDevMaskedIsStillMasked:
         assert self._dev_registered(urls) <= branch
 
     def test_each_value_dev_masked_is_masked_in_events_and_rows(self) -> None:
-        from maljan.core.settings_catalog import configured_secret_values
+        from malspark.core.settings_catalog import configured_secret_values
 
         urls = _configured_urls()
         _registered(*configured_secret_values({"servers": [{"url": u} for u in urls]}))
@@ -397,7 +397,7 @@ class TestAFailedRegistrationFallsBackToTheWholeScrub:
 
         _registered(scope="process")
         with patch(
-            "maljan.core.settings_catalog.configured_secret_values",
+            "malspark.core.settings_catalog.configured_secret_values",
             side_effect=RuntimeError("unreadable"),
         ):
             analysis_worker.remember_configured_secrets(object())

@@ -19,7 +19,7 @@ import time
 
 import pytest
 
-from maljan.agents.base_agent import read_technique_line
+from malspark.agents.base_agent import read_technique_line
 
 
 @pytest.mark.parametrize(

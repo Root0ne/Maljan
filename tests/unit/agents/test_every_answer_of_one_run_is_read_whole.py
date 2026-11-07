@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from maljan.agents.base_agent import _BLOCK_SPLIT_RE, read_claim_blocks
-from maljan.agents.claim_headings import claims_headed
+from malspark.agents.base_agent import _BLOCK_SPLIT_RE, read_claim_blocks
+from malspark.agents.claim_headings import claims_headed
 
 ANSWERS: dict[str, str] = json.loads(
     (

@@ -96,7 +96,7 @@ def _store_profiles(conn: sa.engine.Connection, profiles: dict) -> None:
 def stage_form(analysts: list, *, parallel: bool, max_rounds: int, consensus: float) -> list[dict]:
     """The four stages a list of analysts has always described.
 
-    A copy of ``maljan.core.config.stages_from_analysts`` rather than a call to
+    A copy of ``malspark.core.config.stages_from_analysts`` rather than a call to
     it, for the reason every alembic revision keeps its own constants: this has
     to keep producing the document that was correct on the day it ran, and a
     shared helper would follow the model wherever it goes next.

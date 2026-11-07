@@ -20,10 +20,10 @@ from unittest.mock import patch
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-import maljan.agents.judge_agent as judge_agent
-from maljan.agents.base_agent import _SYNTHESIS_DIRECTIVE, BaseAnalyst, _citable_sentence
-from maljan.agents.judge_agent import MEDIATION_SALVAGE_QUESTION, JudgeAgent
-from maljan.core.spend import SpendCeilingStop
+import malspark.agents.judge_agent as judge_agent
+from malspark.agents.base_agent import _SYNTHESIS_DIRECTIVE, BaseAnalyst, _citable_sentence
+from malspark.agents.judge_agent import MEDIATION_SALVAGE_QUESTION, JudgeAgent
+from malspark.core.spend import SpendCeilingStop
 
 ROOM = 40_000
 DEFINITIONS = 7_000
@@ -41,7 +41,7 @@ def _less(chars: int) -> str:
 class _KeepsTurns:
     """A model whose adapter sends assistant turns as received."""
 
-    _maljan_keeps_turns = True
+    _malspark_keeps_turns = True
     model = "kept @ http://127.0.0.1:1"
 
     async def ainvoke(self, _messages: Any, **_kw: Any) -> AIMessage:
@@ -49,7 +49,7 @@ class _KeepsTurns:
 
 
 class _RebuildsTurns(_KeepsTurns):
-    _maljan_keeps_turns = False
+    _malspark_keeps_turns = False
 
 
 class _Fails(_RebuildsTurns):
@@ -69,7 +69,7 @@ def _conversation(tools: int, chars_each: int) -> list[Any]:
 
 @pytest.fixture(autouse=True)
 def _pinned_room(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("maljan.agents.base_agent.synthesis_budget", lambda *a, **k: (ROOM, HOW))
+    monkeypatch.setattr("malspark.agents.base_agent.synthesis_budget", lambda *a, **k: (ROOM, HOW))
     monkeypatch.setattr(judge_agent, "synthesis_budget", lambda *a, **k: (ROOM, HOW))
 
 
@@ -146,7 +146,7 @@ class TestTheJudgeSalvage:
     def test_a_cut_is_counted_and_said(self, caplog: pytest.LogCaptureFixture) -> None:
         msgs = _conversation(8, 9_000)
 
-        with caplog.at_level(logging.WARNING, logger="maljan.judge"):
+        with caplog.at_level(logging.WARNING, logger="malspark.judge"):
             judge, _said = _judge_salvage(_RebuildsTurns(), msgs)
 
         row = judge._salvage_row

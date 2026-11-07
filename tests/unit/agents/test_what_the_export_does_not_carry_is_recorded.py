@@ -18,10 +18,10 @@ import json
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.agents.judge_postprocess import PROPERTY_NOT_CARRIED_CODE
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.agents.judge_postprocess import PROPERTY_NOT_CARRIED_CODE
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
 
 ANSWER: dict[str, Any] = {
     "type": "bundle",
@@ -56,7 +56,7 @@ ANSWER: dict[str, Any] = {
             "revoked": False,
         },
     ],
-    "x_maljan_assessment": {
+    "x_malspark_assessment": {
         "verdict": "Malware",
         "confidence": 0.9,
         "severity": {"rating": "High", "rationale": "a reverse shell"},

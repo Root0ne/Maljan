@@ -1,10 +1,10 @@
-# ── Maljan Backend Dockerfile ────────────────────────
+# ── Malspark Backend Dockerfile ────────────────────────
 # FLOSS, the analysis server's emulating string decoder, as FLARE's pinned
 # standalone Linux build (Apache-2.0). It runs as a child process outside the
 # project's Python environment, so its dependencies never reach the lockfile.
 # The release publishes no digest; the sha256 below was computed from the asset
 # when it was pinned and is checked here before the binary is kept. Keep the
-# three values in step with src/maljan/tools/emulated_strings.py and
+# three values in step with src/malspark/tools/emulated_strings.py and
 # scripts/install_floss.sh.
 FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS floss
 ARG FLOSS_VERSION=3.1.1
@@ -76,7 +76,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # On PATH, which is where the analysis server's floss tool looks after
-# MALJAN_FLOSS_PATH and the user tools directory.
+# MALSPARK_FLOSS_PATH and the user tools directory.
 COPY --from=floss /opt/floss/floss /usr/local/bin/floss
 
 # Install uv for fast dependency management
@@ -91,7 +91,7 @@ COPY pyproject.toml uv.lock README.md ./
 COPY apps/api/pyproject.toml apps/api/pyproject.toml
 
 # Install the workspace.
-# ``--all-packages`` is what installs the maljan-api member: a plain `uv sync`
+# ``--all-packages`` is what installs the malspark-api member: a plain `uv sync`
 # at a workspace root resolves every member but installs only the root project,
 # so without it `import app` would fail exactly where PYTHONPATH used to cover.
 # 2026-07 round 2: include the ``yara`` extra so yara-python is available in the
@@ -106,7 +106,7 @@ COPY apps/api/pyproject.toml apps/api/pyproject.toml
 # of them answers that capa is not installed.
 RUN uv sync --frozen --no-dev --all-packages --extra yara --extra tools --extra capa --no-install-workspace
 
-# Sources. Both members are installed editable from here, so `maljan` and `app`
+# Sources. Both members are installed editable from here, so `malspark` and `app`
 # import with no PYTHONPATH: the ENV that used to set it is gone, and so is the
 # sys.path.insert the worker carried.
 COPY src/ src/
@@ -145,21 +145,21 @@ ENV PATH="/app/.venv/bin:${PATH}"
 # The services run as a fixed unprivileged account (AUD-32-M5). Everything
 # above stays root-owned, so the virtual environment, the sources and the
 # image's data/ are read-only to the process that opens a sample. Its home is
-# where the ATT&CK cache volume mounts (~/.cache/maljan). The home, ~/.cache
-# and ~/.cache/maljan are root-owned, sticky and open to all (1777): a
-# deployment that runs the containers under another uid (MALJAN_UID in
+# where the ATT&CK cache volume mounts (~/.cache/malspark). The home, ~/.cache
+# and ~/.cache/malspark are root-owned, sticky and open to all (1777): a
+# deployment that runs the containers under another uid (MALSPARK_UID in
 # docker/.env) still has a writable HOME, and a fresh cache volume, which takes
 # the mount point's owner, starts root-owned, so volume-init hands it to that
 # uid like any other. UV_NO_SYNC keeps `uv run` from trying to re-sync the
 # read-only environment it starts from, and its cache and the bytecode Python
 # would write are kept off it as well; the environment's own bytecode is
 # compiled at the sync above.
-RUN groupadd --system --gid 10001 maljan && \
-    useradd --system --uid 10001 --gid 10001 --home-dir /home/maljan \
-        --no-create-home --shell /usr/sbin/nologin maljan && \
-    mkdir -p /home/maljan/.cache/maljan && \
-    chmod 1777 /home/maljan /home/maljan/.cache /home/maljan/.cache/maljan
-ENV HOME=/home/maljan \
+RUN groupadd --system --gid 10001 malspark && \
+    useradd --system --uid 10001 --gid 10001 --home-dir /home/malspark \
+        --no-create-home --shell /usr/sbin/nologin malspark && \
+    mkdir -p /home/malspark/.cache/malspark && \
+    chmod 1777 /home/malspark /home/malspark/.cache /home/malspark/.cache/malspark
+ENV HOME=/home/malspark \
     UV_NO_SYNC=1 \
     UV_CACHE_DIR=/tmp/uv-cache \
     PYTHONDONTWRITEBYTECODE=1

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from maljan.agents.composition import resolve_agent
-from maljan.agents.prompt_tools import known_tool_names, names_in, warnings_for_settings
-from maljan.core.config import Settings
+from malspark.agents.composition import resolve_agent
+from malspark.agents.prompt_tools import known_tool_names, names_in, warnings_for_settings
+from malspark.core.config import Settings
 from tests.unit.agents.test_composition import _Container
 
 # A name the shipped declarations give a built-in server's tool; any other

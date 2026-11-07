@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from maljan.memory import attck_loader
+from malspark.memory import attck_loader
 
 ROOT = Path(__file__).resolve().parents[2]
 

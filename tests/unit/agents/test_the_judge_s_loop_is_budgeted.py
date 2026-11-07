@@ -31,11 +31,11 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import _message_chars
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.agents.mcp_client import MCPLangChainToolkit
-from maljan.agents.tool_answer_clearing import ToolAnswerClearing
-from maljan.llm import context_window as cw
+from malspark.agents.base_agent import _message_chars
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.agents.mcp_client import MCPLangChainToolkit
+from malspark.agents.tool_answer_clearing import ToolAnswerClearing
+from malspark.llm import context_window as cw
 
 WINDOW = 32_768
 REPLY = 8_192
@@ -95,7 +95,7 @@ class _Server(BaseChatModel):
 
 
 def _told_to_stop(sent: list[BaseMessage]) -> bool:
-    from maljan.agents.judge_agent import MEDIATION_SALVAGE_QUESTION
+    from malspark.agents.judge_agent import MEDIATION_SALVAGE_QUESTION
 
     return isinstance(sent[-1], HumanMessage) and MEDIATION_SALVAGE_QUESTION in str(
         sent[-1].content
@@ -161,8 +161,8 @@ def _judge(budget: Any, model: _Server) -> JudgeAgent:
 @contextlib.contextmanager
 def _settings(declared: int = 0) -> Iterator[None]:
     with (
-        patch("maljan.agents.judge_agent.get_settings") as settings,
-        patch("maljan.agents.base_agent.get_settings", settings),
+        patch("malspark.agents.judge_agent.get_settings") as settings,
+        patch("malspark.agents.base_agent.get_settings", settings),
     ):
         cfg = settings.return_value
         cfg.react_agent_timeout = 600
@@ -262,7 +262,7 @@ class TestAGenuineOverflowAfterGathering:
         # The salvage is on the loop's record: what it was sized to and how.
         salvage = records[-1]["salvage"]
         assert salvage["outcome"] == "answered"
-        from maljan.agents.judge_agent import MEDIATION_SALVAGE_QUESTION
+        from malspark.agents.judge_agent import MEDIATION_SALVAGE_QUESTION
 
         assert salvage["budget_chars"] == (
             (WINDOW - REPLY - WINDOW // 4) * cw.CHARS_PER_TOKEN - len(MEDIATION_SALVAGE_QUESTION)

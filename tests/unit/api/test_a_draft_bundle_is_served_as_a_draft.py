@@ -13,8 +13,8 @@ from tests.unit.reporting.test_the_export_passes_the_official_validator import _
 from app.api.v1.reports import get_stix_bundle
 from app.services.report_service import ReportService
 from app.worker.analysis_worker import _report_inputs
-from maljan.core.config import Settings
-from maljan.schemas.stix_models import UNPUBLISHED_NOTICE, UNPUBLISHED_PROPERTY
+from malspark.core.config import Settings
+from malspark.schemas.stix_models import UNPUBLISHED_NOTICE, UNPUBLISHED_PROPERTY
 
 C2 = "82.157.13.47"
 

@@ -21,8 +21,8 @@ from unittest.mock import MagicMock
 import pytest
 from openai import BadRequestError
 
-from maljan.core.config import Settings
-from maljan.llm.openai_provider import (
+from malspark.core.config import Settings
+from malspark.llm.openai_provider import (
     OpenAIProvider,
     forget_standard_only,
     is_local_endpoint,
@@ -191,8 +191,8 @@ class TestTheSelfHeal:
     def test_the_healed_model_keeps_the_job_s_retry_recorder(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.token_ledger import TokenLedger
-        from maljan.llm.transient import attach_retry_recorder, recorder_of
+        from malspark.core.token_ledger import TokenLedger
+        from malspark.llm.transient import attach_retry_recorder, recorder_of
 
         built: list[Any] = []
 
@@ -385,7 +385,7 @@ class TestTheSelfHeal:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A heal swaps the cached model, so no later caller starts from it."""
-        from maljan.core.container import PerLoopModels, _swap_healed_llm
+        from malspark.core.container import PerLoopModels, _swap_healed_llm
 
         class _Chat:
             def __init__(self, **kwargs: Any) -> None:
@@ -403,7 +403,7 @@ class TestTheSelfHeal:
 
         monkeypatch.setattr(langchain_openai, "ChatOpenAI", _Chat)
 
-        from maljan.core import container as container_module
+        from malspark.core import container as container_module
 
         provider = OpenAIProvider(_settings("https://hosted5.example.com/v1", "llama_cpp"))
         model = provider.build_model("m", 0.0, max_tokens=512)
@@ -425,7 +425,7 @@ class TestTheSelfHeal:
         holder = _Holder()
         monkeypatch.setattr(container_module, "_LIVE_CONTAINERS", [holder])
         monkeypatch.setattr(
-            "maljan.llm.openai_provider._HEAL_LISTENERS", [_swap_healed_llm], raising=False
+            "malspark.llm.openai_provider._HEAL_LISTENERS", [_swap_healed_llm], raising=False
         )
 
         assert model.invoke("hi") == "ok"
@@ -468,7 +468,7 @@ class TestTheSelfHeal:
 
     def test_the_predicate_does_not_log(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """It is asked on every model build, so a warning here repeats forever."""
-        from maljan.llm import openai_provider
+        from malspark.llm import openai_provider
 
         lines: list[str] = []
         monkeypatch.setattr(openai_provider.logger, "warning", lambda *a, **k: lines.append(str(a)))
@@ -486,7 +486,7 @@ class TestTheSelfHeal:
     def test_the_heal_says_when_it_overrides_an_explicit_setting(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.llm import openai_provider
+        from malspark.llm import openai_provider
 
         lines: list[str] = []
         monkeypatch.setattr(
@@ -540,7 +540,7 @@ class TestTheSelfHeal:
 
 class TestTheSettingIsOfferedToAnOperator:
     def test_it_is_in_the_catalog_with_its_choices(self) -> None:
-        from maljan.core.settings_catalog import core_catalog
+        from malspark.core.settings_catalog import core_catalog
 
         entry = next(f for f in core_catalog() if f.path == "llm.openai.compat")
         assert entry.choices == ["auto", "llama_cpp", "standard", "deepseek"]
@@ -550,7 +550,7 @@ class TestTheSettingIsOfferedToAnOperator:
 
 class TestStructuredOutputIsUnchanged:
     def test_any_custom_base_url_still_has_none(self) -> None:
-        from maljan.llm.registry import structured_output_supported
+        from malspark.llm.registry import structured_output_supported
 
         assert structured_output_supported(_settings("https://integrate.api.nvidia.com/v1")) is (
             False

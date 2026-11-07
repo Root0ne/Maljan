@@ -2,8 +2,8 @@
 
 import pytest
 
-from maljan.agents.registry import AgentRegistry
-from maljan.parsers.registry import ParserRegistry
+from malspark.agents.registry import AgentRegistry
+from malspark.parsers.registry import ParserRegistry
 
 
 class TestAgentRegistry:
@@ -23,7 +23,7 @@ class TestAgentRegistry:
         assert agents1 == agents2
 
     def test_get_class_returns_correct_type(self) -> None:
-        from maljan.agents.static_analyst import StaticAnalyst
+        from malspark.agents.static_analyst import StaticAnalyst
 
         registry = AgentRegistry()
         cls = registry.get_class("static")
@@ -46,7 +46,7 @@ class TestParserRegistry:
         assert "network" in parsers
 
     def test_create_returns_instance(self) -> None:
-        from maljan.parsers.static_parser import StaticParser
+        from malspark.parsers.static_parser import StaticParser
 
         registry = ParserRegistry()
         parser = registry.create("static")

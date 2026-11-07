@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`maljan.extractors.attribution`.
+"""Unit tests for :mod:`malspark.extractors.attribution`.
 
 Covers both attribution concerns the module owns: ``build_family_attribution``
 (the judge's family, or the sandbox's, flagged rather than vetoed) and
@@ -12,13 +12,13 @@ from typing import Any
 
 import pytest
 
-from maljan.extractors.attribution import (
+from malspark.extractors.attribution import (
     _build_query,
     build_family_attribution,
     populate_similar_samples,
 )
-from maljan.memory.long_term_memory import StoredCase
-from maljan.schemas.judgement import FamilyVerdict
+from malspark.memory.long_term_memory import StoredCase
+from malspark.schemas.judgement import FamilyVerdict
 
 
 class TestBuildFamilyAttribution:
@@ -165,7 +165,7 @@ class TestPopulateSimilarSamples:
         assert len(sims) == 2
         assert sims[0]["sample_id"] == "b" * 64
         assert sims[0]["malware_category"] == "STEALER"
-        assert sims[0]["source"] == "maljan-ltm"
+        assert sims[0]["source"] == "malspark-ltm"
         # Store called with top_k+1 to allow self-removal.
         assert store.calls[0][1] == 3
 
@@ -311,6 +311,6 @@ def test_handles_missing_attribution_shape(report: dict[str, Any]) -> None:
             "malware_category": "RAT",
             "technique_ids": ["T1055", "T1071"],
             "summary": "Synthetic case " + "b" * 64,
-            "source": "maljan-ltm",
+            "source": "malspark-ltm",
         }
     ]

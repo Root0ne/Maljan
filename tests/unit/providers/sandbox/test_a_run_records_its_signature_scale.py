@@ -14,16 +14,20 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.app import MaljanApp
-from maljan.core.config import Settings
-from maljan.core.report_formats import SIGNATURE_SCALE_KEY, SignatureScale, recorded_signature_scale
-from maljan.providers.base import SandboxProvider
-from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
-from maljan.providers.sandbox.mock import MockSandboxProvider
-from maljan.providers.sandbox.rest import RestSandboxProvider
-from maljan.providers.sandbox.triage import TriageSandboxProvider
-from maljan.providers.sandbox.upload import UploadSandboxProvider
-from maljan.schemas.sandbox_report import SandboxReport, SandboxRun
+from malspark.app import MalsparkApp
+from malspark.core.config import Settings
+from malspark.core.report_formats import (
+    SIGNATURE_SCALE_KEY,
+    SignatureScale,
+    recorded_signature_scale,
+)
+from malspark.providers.base import SandboxProvider
+from malspark.providers.sandbox.cape2 import CAPE2SandboxProvider
+from malspark.providers.sandbox.mock import MockSandboxProvider
+from malspark.providers.sandbox.rest import RestSandboxProvider
+from malspark.providers.sandbox.triage import TriageSandboxProvider
+from malspark.providers.sandbox.upload import UploadSandboxProvider
+from malspark.schemas.sandbox_report import SandboxReport, SandboxRun
 from tests.unit.providers._cape_fixture import first_cape_report_path
 
 CAPE_SCALE = {"name": "CAPE 1–3", "max": 3, "rungs": ["Low", "Medium", "High"]}
@@ -140,7 +144,7 @@ class _Provider(SandboxProvider):
 
 
 def _app(settings: Settings | None = None) -> Any:
-    app = object.__new__(MaljanApp)
+    app = object.__new__(MalsparkApp)
     app.config = settings or Settings.model_validate({})
     app.container = SimpleNamespace(sandbox_normalised=None, sandbox_signature_scale=None)
     return app

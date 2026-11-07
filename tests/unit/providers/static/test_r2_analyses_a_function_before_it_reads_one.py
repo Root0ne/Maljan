@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from maljan.providers.static import r2
+from malspark.providers.static import r2
 
 NO_FUNCTION = "<log>\n[ERROR] Cannot find function in 0x401a20\n</log>\n"
 NO_FUNCTION_AT = "<log>\n[ERROR] Cannot find function at 0x401a20\n</log>\n"
@@ -109,7 +109,7 @@ def test_the_function_is_analysed_and_the_call_answered() -> None:
 
 
 def test_the_entry_says_the_adapter_ran_af() -> None:
-    from maljan.schemas.evidence import build_entry
+    from malspark.schemas.evidence import build_entry
 
     server = _Server()
     tool = _wrapped(server, "decompile_function")

@@ -172,8 +172,8 @@ describe("the header", () => {
 
   it("names downloads after the sample's hash", () => {
     // Twelve characters of the hash, as the downloads were always named.
-    expect(exportBaseName(MALWARE_REPORT.identity.hashes.sha256, "j")).toBe("maljan-9f86d081884c");
-    expect(exportBaseName(null, "11111111-2222-3333")).toBe("maljan-111111112222");
+    expect(exportBaseName(MALWARE_REPORT.identity.hashes.sha256, "j")).toBe("malspark-9f86d081884c");
+    expect(exportBaseName(null, "11111111-2222-3333")).toBe("malspark-111111112222");
   });
 });
 

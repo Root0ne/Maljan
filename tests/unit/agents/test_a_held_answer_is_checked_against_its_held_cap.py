@@ -20,8 +20,8 @@ from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
-from maljan.agents.base_agent import BaseAnalyst, cap_in_force, turn_held_cap
-from maljan.llm.context_window import OutputCap, record_built_cap
+from malspark.agents.base_agent import BaseAnalyst, cap_in_force, turn_held_cap
+from malspark.llm.context_window import OutputCap, record_built_cap
 
 BUILT = 32768
 HELD = 40
@@ -139,7 +139,7 @@ class TestTheKeptTurnIsCheckedAgainstItsOwnHold:
         # question's pass is held lower, at HELD - 1, and its call fails.
         with (
             patch.object(BaseAnalyst, "_spend_admits", side_effect=[HELD, HELD - 1]),
-            patch("maljan.agents.base_agent.loop_limits", return_value=(None, None)),
+            patch("malspark.agents.base_agent.loop_limits", return_value=(None, None)),
         ):
             answer = analyst.execute_tool_loop([("system", "s"), ("human", "look")])
 
@@ -154,7 +154,7 @@ class TestTheKeptTurnIsCheckedAgainstItsOwnHold:
         analyst.tools = [_lookup()]
         with (
             patch.object(BaseAnalyst, "_spend_admits", side_effect=[HELD - 1, HELD]),
-            patch("maljan.agents.base_agent.loop_limits", return_value=(None, None)),
+            patch("malspark.agents.base_agent.loop_limits", return_value=(None, None)),
         ):
             analyst.execute_tool_loop([("system", "s"), ("human", "look")])
 
@@ -168,7 +168,7 @@ class _HeldModel(BaseChatModel):
     caps: list = []
 
     def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None, **kw: Any) -> Any:
-        from maljan.llm.generation_rate import ModelCallDeadline
+        from malspark.llm.generation_rate import ModelCallDeadline
 
         self.caps.append(kw.get("max_tokens"))
         if any(

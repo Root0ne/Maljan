@@ -12,15 +12,15 @@ whole.
 
 from __future__ import annotations
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     EvidenceIndexRow,
     EvidenceSection,
     FileHashes,
     MalwareReport,
     SampleIdentity,
 )
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.markdown import MarkdownRenderer, declares_code, holds_code
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer, declares_code, holds_code
 
 BODY = (
     "\nint FUN_00401000(int param_1)\n\n{\n"

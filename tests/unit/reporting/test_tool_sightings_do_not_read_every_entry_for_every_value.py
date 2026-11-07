@@ -6,9 +6,9 @@ from typing import Any
 
 import pytest
 
-from maljan.agents import _indicator_denylists
-from maljan.reporting.ledger_projection import tool_sightings
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.agents import _indicator_denylists
+from malspark.reporting.ledger_projection import tool_sightings
+from malspark.schemas.evidence import EvidenceCounter
 from tests.unit._ledger_helpers import entry
 
 

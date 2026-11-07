@@ -18,9 +18,9 @@ from typing import Any
 
 import pytest
 
-from maljan.agents import composition, sample_staging
-from maljan.agents.mcp_client import tool_error_marker
-from maljan.analysis.disclosure import STAGING_FAILED
+from malspark.agents import composition, sample_staging
+from malspark.agents.mcp_client import tool_error_marker
+from malspark.analysis.disclosure import STAGING_FAILED
 from tests.credential_shapes import password
 
 
@@ -159,7 +159,10 @@ def _tool_from(server: str) -> Any:
     from langchain_core.tools import StructuredTool
 
     return StructuredTool.from_function(
-        func=lambda: "x", name="identify_file", description="x", metadata={"maljan_server": server}
+        func=lambda: "x",
+        name="identify_file",
+        description="x",
+        metadata={"malspark_server": server},
     )
 
 
@@ -235,8 +238,8 @@ class TestTheWaitIsDerivedAndItsEndRecorded:
     def test_a_stopped_staging_keeps_what_was_staged_and_fails_only_the_unfinished(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
-        from maljan.analysis.disclosure import STAGING_ATTEMPTED, STAGING_DONE
+        from malspark.agents import base_agent
+        from malspark.analysis.disclosure import STAGING_ATTEMPTED, STAGING_DONE
 
         server = _Server({"put_sample": {"path": "/r"}})
         server.guard = _Guard(5.0)
@@ -262,8 +265,8 @@ class TestTheWaitIsDerivedAndItsEndRecorded:
     def test_a_stopped_staging_names_the_unfinished_upload_by_its_kind(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
-        from maljan.analysis.disclosure import STAGING_ATTEMPTED
+        from malspark.agents import base_agent
+        from malspark.analysis.disclosure import STAGING_ATTEMPTED
 
         server = _Server({"put_sample": {"path": "/r"}})
         server.guard = _Guard(5.0)
@@ -282,8 +285,8 @@ class TestTheWaitIsDerivedAndItsEndRecorded:
     def test_a_staged_upload_whose_path_cannot_be_read_back_is_said_so(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
-        from maljan.analysis.disclosure import STAGING_DONE
+        from malspark.agents import base_agent
+        from malspark.analysis.disclosure import STAGING_DONE
 
         server = _Server({"put_sample": {"path": "/r"}})
         server.guard = _Guard(5.0)
@@ -303,7 +306,7 @@ class TestTheWaitIsDerivedAndItsEndRecorded:
 
 class TestAFailedRecordStaysFailed:
     def test_a_late_done_does_not_undo_a_failure(self) -> None:
-        from maljan.analysis.disclosure import STAGING_ATTEMPTED
+        from malspark.analysis.disclosure import STAGING_ATTEMPTED
 
         record = {"server": "remote", "state": STAGING_ATTEMPTED}
         assert sample_staging.mark_unfinished_failed([record], 0) == {"remote"}

@@ -1,9 +1,9 @@
 """Evidence entries name the nulls a call left out.
 
 ``evidence_entries`` gains ``args_nulls_dropped`` and ``args_nulls_withheld``,
-the two fields ``maljan.schemas.evidence.LedgerEntry`` carries for a call with
+the two fields ``malspark.schemas.evidence.LedgerEntry`` carries for a call with
 a ``null`` the tool boundary read as the argument left out
-(``maljan.agents.null_arguments``): the fields whose ``null`` the schema did
+(``malspark.agents.null_arguments``): the fields whose ``null`` the schema did
 not allow and was dropped so the field took its declared default, and the
 top-level ones it admitted that the transport did not send. Each is a JSON list
 of paths, a path a list of segments.

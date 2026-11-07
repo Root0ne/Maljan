@@ -16,15 +16,15 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis.run_summary import (
+from malspark.analysis.run_summary import (
     ISOLATED_MEMORY_KEY,
     RunSummaryBuilder,
     with_isolated_memory,
 )
-from maljan.memory import embeddings
-from maljan.memory.function_hash_store import FunctionHashStore
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import (
+from malspark.memory import embeddings
+from malspark.memory.function_hash_store import FunctionHashStore
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.memory.long_term_memory import (
     StoredCase,
     earlier_case,
     match_functions,
@@ -49,8 +49,8 @@ def _case(sample: str, techniques: list[str]) -> StoredCase:
 
 
 def _container(store: Any, job: str, *, isolated: bool) -> Any:
-    from maljan.core.config import Settings
-    from maljan.core.container import ServiceContainer
+    from malspark.core.config import Settings
+    from malspark.core.container import ServiceContainer
 
     container = ServiceContainer(
         Settings(_env_file=None),
@@ -122,7 +122,7 @@ class TestAnIsolatedJobFilesItsOwnCaseUnderItself:
         if backend == "qdrant":
             import qdrant_client
 
-            from maljan.memory.qdrant_store import QdrantStore
+            from malspark.memory.qdrant_store import QdrantStore
             from tests.unit.memory.test_memory_is_one_owner_s_and_one_space import _Model
 
             # A durable store keeps the model's embedding space alone.
@@ -172,7 +172,7 @@ class TestTheRunSummary:
 
     @pytest.mark.parametrize("isolated", [True, False])
     def test_a_run_stopped_before_its_judge_says_so_too(self, isolated: bool) -> None:
-        from maljan.pipeline.stopped_run import stopped_run_summary
+        from malspark.pipeline.stopped_run import stopped_run_summary
 
         state = {"file_hash": X, "evidence_ledger": [], "degradation_reasons": []}
         container = _container(InMemoryStore(), JOB_B, isolated=isolated)
@@ -185,19 +185,19 @@ class TestTheRunSummary:
             assert ISOLATED_MEMORY_KEY not in summary
 
     def test_the_app_hands_the_switch_to_its_container(self) -> None:
-        from maljan.app import MaljanApp
+        from malspark.app import MalsparkApp
 
-        assert MaljanApp(mock=True).container.isolated_memory is False
-        assert MaljanApp(mock=True).container.memory_owner is None
+        assert MalsparkApp(mock=True).container.isolated_memory is False
+        assert MalsparkApp(mock=True).container.memory_owner is None
         owner = memory_owner_for(ALICE, JOB_B, True)
-        isolated = MaljanApp(mock=True, memory_owner=owner, isolated_memory=True).container
+        isolated = MalsparkApp(mock=True, memory_owner=owner, isolated_memory=True).container
         assert isolated.isolated_memory is True
         assert isolated.memory_owner == owner
 
     def test_without_an_owner_the_switch_is_not_claimed(self) -> None:
-        from maljan.app import MaljanApp
+        from malspark.app import MalsparkApp
 
         # The job reads the whole unscoped memory: its summary must not say isolated.
-        container = MaljanApp(mock=True, isolated_memory=True).container
+        container = MalsparkApp(mock=True, isolated_memory=True).container
         assert container.memory_owner is None
         assert container.isolated_memory is False

@@ -10,10 +10,10 @@ import pytest
 
 from app.services import settings_probes
 from app.worker import analysis_worker, sample_files
-from maljan.core.config import MCPServerConfig
-from maljan.core.settings_overrides import build_settings
-from maljan.providers import server_probe
-from maljan.providers.registry import static_provider_class
+from malspark.core.config import MCPServerConfig
+from malspark.core.settings_overrides import build_settings
+from malspark.providers import server_probe
+from malspark.providers.registry import static_provider_class
 
 SHA = "d" * 64
 JOB_A = "11111111-1111-4111-8111-111111111111"
@@ -35,7 +35,7 @@ class _Container:
 def samples(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(sample_files.settings, "samples_dir", str(tmp_path / "samples"))
     monkeypatch.setattr(sample_files.settings, "upload_temp_dir", str(tmp_path / "uploads"))
-    monkeypatch.setattr("maljan.tools.roots.add_sample_root", lambda _p: None)
+    monkeypatch.setattr("malspark.tools.roots.add_sample_root", lambda _p: None)
     return tmp_path / "samples"
 
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.core.settings_overrides import build_settings, unknown_reference_refusals
+from malspark.core.settings_overrides import build_settings, unknown_reference_refusals
 
 ENTRY = {"provider": "openai", "model": "m"}
 

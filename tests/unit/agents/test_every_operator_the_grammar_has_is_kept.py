@@ -24,23 +24,23 @@ import pytest
 from stix2patterns.validator import run_validator
 from stix2validator import ValidationOptions, validate_instance
 
-from maljan.agents.judge_postprocess import enforce_bundle_integrity
-from maljan.pipeline.validation import (
+from malspark.agents.judge_postprocess import enforce_bundle_integrity
+from malspark.pipeline.validation import (
     PATTERN_REFUSED_CODE,
     SHAPE_NAMES_A_VALUE_CODE,
     STRAY_BACKSLASH_CODE,
     validate_verdict_bundle,
 )
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_PATTERN_CODE,
     UNPUBLISHED_VALUE_CODE,
     ExtendedSTIXRenderer,
     exported_indicator_values,
     pattern_values,
 )
-from maljan.schemas.stix_models import Bundle
-from maljan.schemas.stix_pattern import (
+from malspark.schemas.stix_models import Bundle
+from malspark.schemas.stix_pattern import (
     like_fixed_text,
     pattern_refusal,
     reads_whole,
@@ -129,11 +129,13 @@ class TestTheValidatorDecides:
         assert pattern_refusal(pattern) == ""
 
     def test_its_answer_stands_over_the_grammar_s(self) -> None:
-        with patch("maljan.schemas.stix_pattern._grammar_refusal", return_value="grammar says no"):
+        with patch(
+            "malspark.schemas.stix_pattern._grammar_refusal", return_value="grammar says no"
+        ):
             assert reads_whole("[file:name = 'x']")
 
     def test_the_grammar_answers_only_where_it_cannot_be_imported(self) -> None:
-        with patch("maljan.schemas.stix_pattern._validator_verdict", return_value=None):
+        with patch("malspark.schemas.stix_pattern._validator_verdict", return_value=None):
             assert pattern_refusal("[file:name]")
             assert pattern_refusal("[file:name == 'x']") == ""
 
@@ -158,7 +160,7 @@ class TestWellFormedness:
     @pytest.mark.parametrize("pattern", ACCEPTED + REFUSED)
     def test_the_grammar_alone_answers_as_the_validator_does(self, pattern: str) -> None:
         """Where ``stix2-patterns`` is not installed — the image installs no dev group."""
-        with patch("maljan.schemas.stix_pattern._validator_verdict", return_value=None):
+        with patch("malspark.schemas.stix_pattern._validator_verdict", return_value=None):
             assert reads_whole(pattern) is not _refused(pattern)
 
     @pytest.mark.parametrize("pattern", REFUSED)
@@ -250,7 +252,7 @@ class TestAShapeOfAValueIsAskedAbout:
 
     def test_the_suggested_form_written_by_the_judge_is_published_through_the_rule(self) -> None:
         """The reference case: the host the rule publishes is published once written as asked."""
-        from maljan.reporting.models import NetworkDomain, NetworkIOCs
+        from malspark.reporting.models import NetworkDomain, NetworkIOCs
 
         (message,) = self._asked(
             "[url:value LIKE '%gate9.example.org%']", {"decoded: gate9.example.org"}

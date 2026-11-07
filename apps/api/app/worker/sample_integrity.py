@@ -6,7 +6,7 @@ store, each mirror written for a server's mount, and a download another job
 on the same sample already holds were taken as those bytes. :class:`SampleIntegrity`
 reads every copy once after the copies are made and before the pipeline
 starts, and once more when the run ends, before the store and the teardown
-(``maljan.analysis.sample_integrity`` holds the record and its sentences).
+(``malspark.analysis.sample_integrity`` holds the record and its sentences).
 
 A changed copy is logged and recorded; the run goes on, and the report says
 what changed and when it was seen. A detonating sandbox whose report names
@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from maljan.analysis.sample_integrity import (
+from malspark.analysis.sample_integrity import (
     AT_END,
     AT_START,
     DOWNLOAD,
@@ -145,7 +145,7 @@ def sandbox_target_of(container: Any) -> dict[str, Any] | None:
     ran nothing during the run and keeps no claim. A report that names no
     target hash, or the sample's, is no record. Never raises.
     """
-    from maljan.analysis.sample_integrity import sandbox_target_record
+    from malspark.analysis.sample_integrity import sandbox_target_record
 
     claim = getattr(container, "sandbox_target_claim", None) or getattr(
         container, "attached_target_claim", None
@@ -186,7 +186,7 @@ def with_record(
     """
     if not record:
         return
-    from maljan.analysis.sample_integrity import RECORD_KEY, with_integrity
+    from malspark.analysis.sample_integrity import RECORD_KEY, with_integrity
 
     key = key or RECORD_KEY
     run_summary[key] = dict(record)

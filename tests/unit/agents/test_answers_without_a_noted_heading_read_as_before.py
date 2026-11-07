@@ -18,9 +18,9 @@ from typing import Any
 
 import pytest
 
-from maljan.agents import claim_headings
-from maljan.agents.base_agent import read_claim_blocks
-from maljan.agents.claim_headings import LINE_PREFIX
+from malspark.agents import claim_headings
+from malspark.agents.base_agent import read_claim_blocks
+from malspark.agents.claim_headings import LINE_PREFIX
 from tests.claim_block_counts import begun_and_distinct
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "claims"

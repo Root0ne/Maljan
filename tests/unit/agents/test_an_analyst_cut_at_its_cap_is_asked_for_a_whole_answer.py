@@ -23,9 +23,9 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import BaseAnalyst, answer_cut_at_cap
-from maljan.pipeline.validation import ANALYST_CUT_CODE, analyst_cut_violation
-from maljan.schemas.isr_models import AgentISR
+from malspark.agents.base_agent import BaseAnalyst, answer_cut_at_cap
+from malspark.pipeline.validation import ANALYST_CUT_CODE, analyst_cut_violation
+from malspark.schemas.isr_models import AgentISR
 
 CAP = 4096
 
@@ -77,8 +77,8 @@ def _check(analyst: _Analyst, first: str = FIRST, *, fits: bool = True) -> Agent
     """The loop's own answer, cut at the cap, through the validation turn."""
     isr = analyst._text_to_isr(first, 0)
     with (
-        patch("maljan.agents.base_agent.analyst_output_cap", return_value=CAP),
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.analyst_output_cap", return_value=CAP),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=fits),
     ):
         analyst._record_usage(_message(first, CAP))
@@ -147,8 +147,8 @@ class TestTheValidationTurn:
         analyst = _Analyst([])
         isr = analyst._text_to_isr(WHOLE, 0)
         with (
-            patch("maljan.agents.base_agent.analyst_output_cap", return_value=CAP),
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.analyst_output_cap", return_value=CAP),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         ):
             analyst._record_usage(_message(WHOLE, 300))
             analyst._validate_isr(isr, "evidence")
@@ -168,8 +168,8 @@ class TestTheWindowIsMeasuredWithTheQuestions:
 
         isr = analyst._text_to_isr(FIRST, 0)
         with (
-            patch("maljan.agents.base_agent.analyst_output_cap", return_value=CAP),
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.analyst_output_cap", return_value=CAP),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", _fits),
         ):
             analyst._record_usage(_message(FIRST, CAP))
@@ -195,8 +195,8 @@ class TestATechniqueCardNeverCostsAQuestion:
 
         isr = analyst._text_to_isr(first, 0)
         with (
-            patch("maljan.agents.base_agent.analyst_output_cap", return_value=CAP),
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.analyst_output_cap", return_value=CAP),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", _fits),
         ):
             analyst._record_usage(_message(first, CAP))
@@ -226,8 +226,8 @@ class TestTheCardsAreMeasuredOnThePlainRetry:
 
         isr = analyst._text_to_isr(answer, 0)
         with (
-            patch("maljan.agents.base_agent.analyst_output_cap", return_value=CAP),
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.analyst_output_cap", return_value=CAP),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", _fits),
         ):
             analyst._record_usage(_message(answer, 300))
@@ -270,7 +270,7 @@ BUILT = 32768
 
 def _local_settings() -> Any:
     """Settings whose derivation, with no window learned, is the documented 8,192."""
-    from maljan.core.config import LLMConfig, Settings
+    from malspark.core.config import LLMConfig, Settings
 
     settings = Settings(llm=LLMConfig(provider="openai"))
     settings.llm.openai.context_size = 0
@@ -282,7 +282,7 @@ def _local_settings() -> Any:
 
 def _built_analyst(replies: list[tuple[str, int]]) -> _Analyst:
     """An analyst whose model carries the cap the container built it with."""
-    from maljan.llm.context_window import OutputCap, record_built_cap
+    from malspark.llm.context_window import OutputCap, record_built_cap
 
     analyst = _Analyst(replies)
     record_built_cap(analyst.llm, OutputCap(BUILT, "a quarter of 131072 (probed)"))
@@ -293,16 +293,16 @@ class TestTheCheckReadsTheCapTheCallWasBuiltWith:
     """Not patched, and with the window cache expired: derived again it would say 8,192."""
 
     def _expired(self) -> Any:
-        from maljan.llm.context_window import DEFAULT_REPLY_TOKENS, forget_learned_windows
+        from malspark.llm.context_window import DEFAULT_REPLY_TOKENS, forget_learned_windows
 
         forget_learned_windows()
         settings = _local_settings()
-        from maljan.llm.context_window import output_cap_for
+        from malspark.llm.context_window import output_cap_for
 
         assert output_cap_for(settings, "expert_max_tokens", "static").tokens == (
             DEFAULT_REPLY_TOKENS
         )
-        return patch("maljan.agents.base_agent.get_settings", return_value=settings)
+        return patch("malspark.agents.base_agent.get_settings", return_value=settings)
 
     def test_an_answer_under_the_built_cap_is_not_cut(self) -> None:
         analyst = _built_analyst([])
@@ -316,7 +316,7 @@ class TestTheCheckReadsTheCapTheCallWasBuiltWith:
         isr = analyst._text_to_isr(FIRST, 0)
         with (
             self._expired(),
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         ):
             analyst._record_usage(_message(FIRST, BUILT))
@@ -335,8 +335,8 @@ class TestTheCheckReadsTheCapTheCallWasBuiltWith:
         assert meter.admit.call_args.kwargs["cap_tokens"] == BUILT
 
     def test_the_judge_reads_the_cap_its_model_was_built_with(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
-        from maljan.llm.context_window import OutputCap, record_built_cap
+        from malspark.agents.judge_agent import JudgeAgent
+        from malspark.llm.context_window import OutputCap, record_built_cap
 
         judge = JudgeAgent(llm=MagicMock())
         record_built_cap(judge.llm, OutputCap(BUILT, "built"))
@@ -349,7 +349,7 @@ class TestACutInAChunkIsNamed:
         analyst = _Analyst([])
         isr = analyst._text_to_isr(WHOLE, 0)
         with (
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=False),
         ):
             analyst._last_answer_cut = (CAP, FIRST)
@@ -388,7 +388,7 @@ class TestACutChunkIsAnsweredInsideItsChunk:
     SECOND = _claims("second-chunk", 6)
 
     def _run(self, retry: tuple[str, int]) -> tuple[_Chunked, AgentISR]:
-        from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
+        from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
 
         analyst = _Chunked([retry], [(self.CUT, CAP), (self.SECOND, 900)])
         chunks = [
@@ -404,10 +404,10 @@ class TestACutChunkIsAnsweredInsideItsChunk:
             for i in range(2)
         ]
         with (
-            patch("maljan.agents.base_agent.analyst_output_cap", return_value=CAP),
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.analyst_output_cap", return_value=CAP),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
-            patch("maljan.tools.knowledge.resolve_technique", return_value={"candidates": []}),
+            patch("malspark.tools.knowledge.resolve_technique", return_value={"candidates": []}),
         ):
             return analyst, analyst.safe_analyze_isr_chunked(chunks)
 

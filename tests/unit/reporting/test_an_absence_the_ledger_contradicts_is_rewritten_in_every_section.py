@@ -30,12 +30,12 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
-from maljan.agents.tool_fence import quoted_value
-from maljan.core.config import Settings, get_settings, install_settings
-from maljan.pipeline.nodes import evidence_summary
-from maljan.pipeline.triage_pack import PIPELINE
-from maljan.pipeline.validation import EntryTexts
-from maljan.reporting.models import (
+from malspark.agents.tool_fence import quoted_value
+from malspark.core.config import Settings, get_settings, install_settings
+from malspark.pipeline.nodes import evidence_summary
+from malspark.pipeline.triage_pack import PIPELINE
+from malspark.pipeline.validation import EntryTexts
+from malspark.reporting.models import (
     FileHashes,
     KeyFinding,
     MalwareReport,
@@ -43,10 +43,10 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.redone_calls import redone_failures
-from maljan.reporting.renderers import MarkdownRenderer
-from maljan.reporting.renderers.layout import ANALYST
-from maljan.reporting.section_agreement import (
+from malspark.reporting.redone_calls import redone_failures
+from malspark.reporting.renderers import MarkdownRenderer
+from malspark.reporting.renderers.layout import ANALYST
+from malspark.reporting.section_agreement import (
     CLAIM_LED,
     DEBATE,
     HELD_KEPT_CODE,
@@ -66,7 +66,7 @@ from maljan.reporting.section_agreement import (
     unread_listed_sentences,
     whole_code_absences,
 )
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 from tests.unit.reporting._report_inventory import stored_runs
 
 BASE = 0x2470000
@@ -424,7 +424,7 @@ def test_a_run_whose_every_failure_was_redone_says_no_partial_evidence() -> None
 
 
 def _stored(name: str) -> tuple[MalwareReport, list[Any]]:
-    from maljan.reporting.follow_up import stored_ledger
+    from malspark.reporting.follow_up import stored_ledger
 
     root = stored_runs()
     if root is None or not (root / name / "report.json").is_file():

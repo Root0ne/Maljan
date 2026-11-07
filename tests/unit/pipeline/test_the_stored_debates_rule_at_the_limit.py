@@ -28,10 +28,10 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.judge_agent import final_contradictions
-from maljan.pipeline.debate_facts import read_marks
-from maljan.pipeline.limit_rulings import Ruling, mark_claims
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.judge_agent import final_contradictions
+from malspark.pipeline.debate_facts import read_marks
+from malspark.pipeline.limit_rulings import Ruling, mark_claims
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
 
 MARKED = {

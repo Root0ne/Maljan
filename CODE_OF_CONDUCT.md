@@ -61,7 +61,7 @@ representative at an online or offline event.
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the community leaders responsible for enforcement through the
 repository's private reporting form:
-<https://github.com/Root0ne/Maljan/security/advisories/new>. Start the title
+<https://github.com/Root0ne/Malspark/security/advisories/new>. Start the title
 with "Conduct report"; the form is visible only to the maintainers, and nothing
 in it is published. The maintainer can also be reached by direct message on X
 (Twitter) at [@Root0ne](https://x.com/Root0ne).

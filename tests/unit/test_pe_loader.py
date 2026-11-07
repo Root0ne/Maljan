@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from maljan.loaders.pe_loader import PELoader, _detect_file_type
+from malspark.loaders.pe_loader import PELoader, _detect_file_type
 
 
 class TestDetectFileType:

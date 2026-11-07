@@ -27,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     _REVISION_ISR_FORMAT_WITHOUT_TECHNIQUES,
     _TIER_SPECS_WITHOUT_TECHNIQUES,
     _VIEW_SYSTEM_WITHOUT_TECHNIQUES,
@@ -43,19 +43,19 @@ from maljan.agents.base_agent import (
     claims_unread_sentence,
     earlier_chunks_block,
 )
-from maljan.agents.configurable_analyst import _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES
-from maljan.agents.delegation import (
+from malspark.agents.configurable_analyst import _ISR_FORMAT_INSTRUCTION_WITHOUT_TECHNIQUES
+from malspark.agents.delegation import (
     SPEND_CEILING_REFUSAL,
     WAITING_ON_EACH_OTHER_REFUSAL,
     _what_an_ask_gets_sentence,
 )
-from maljan.agents.dynamic_analyst import sandbox_server_label
-from maljan.agents.evidence_recorder import (
+from malspark.agents.dynamic_analyst import sandbox_server_label
+from malspark.agents.evidence_recorder import (
     EARLIER_ROUND,
     earlier_chunk_answer,
     same_function_notice,
 )
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     CONTRADICTION_DEFINITION,
     CONTRADICTIONS_BLOCK_QUESTION,
@@ -80,14 +80,14 @@ from maljan.agents.judge_agent import (
     technique_question_text,
     verdict_cut_violation,
 )
-from maljan.agents.judge_agent import QUESTION_ROOTS_LABEL as _ROOTS_LABEL
-from maljan.agents.network_analyst import (
+from malspark.agents.judge_agent import QUESTION_ROOTS_LABEL as _ROOTS_LABEL
+from malspark.agents.network_analyst import (
     NO_PACKET_TOOL_LINE,
     UNDECLARED_TOOLS_LINE,
     _flows_label,
     primary_evidence_line,
 )
-from maljan.agents.prompt_fragments import (
+from malspark.agents.prompt_fragments import (
     CLAIM_FORMAT_FRAGMENT,
     CLAIM_FORMAT_WITHOUT_TECHNIQUE_FRAGMENT,
     ENDPOINTS_ROW_SHAPE,
@@ -97,54 +97,54 @@ from maljan.agents.prompt_fragments import (
     tools_statement,
     undeclared_server_text,
 )
-from maljan.agents.prompts import (
+from malspark.agents.prompts import (
     ANDROID_STATIC_PROMPT,
     LEAD_PROMPT,
     REVERSER_PROMPT,
     TRIAGE_PROMPT,
 )
-from maljan.agents.static_analyst import (
+from malspark.agents.static_analyst import (
     _extract_load_hint,
     _reframe_static_raw_data,
     _tool_use_line,
 )
-from maljan.agents.tool_answer_clearing import (
+from malspark.agents.tool_answer_clearing import (
     READ_EVIDENCE_DESCRIPTION,
     UNKNOWN_EVIDENCE_REMEDIATION,
     cleared_reference,
     read_again_note,
     unknown_evidence_message,
 )
-from maljan.agents.tool_fence import FENCE_STATEMENT as _FENCE_STATEMENT
-from maljan.agents.tool_fence import fenced as _fenced
-from maljan.agents.tool_pinning import (
+from malspark.agents.tool_fence import FENCE_STATEMENT as _FENCE_STATEMENT
+from malspark.agents.tool_fence import fenced as _fenced
+from malspark.agents.tool_pinning import (
     UNREADABLE_FILLED_CAPTURE,
     UNREADABLE_FILLED_CAPTURE_REMEDIATION,
 )
-from maljan.analysis import evidence_roots as _roots
-from maljan.analysis import sandbox_sections
-from maljan.analysis.evidence_roots import layers_and_roots as _layers_and_roots
-from maljan.analysis.evidence_roots import roots_phrase as _roots_phrase
-from maljan.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
-from maljan.analysis.function_summarizer import SUMMARY_CUT_NOTE, SUMMARY_FENCE_STATEMENT
-from maljan.analysis.pcap_summary import CaptureRead
-from maljan.analysis.run_summary import unknown_window_split_sentence
-from maljan.core.config import SampleOpenConfig
-from maljan.core.container import unknown_window_split_line
-from maljan.core.pack_steps import CALLED_API_CATALOGUE, shipped_label
-from maljan.core.reputation import read_answer
-from maljan.extractors.capability_matrix import (
+from malspark.analysis import evidence_roots as _roots
+from malspark.analysis import sandbox_sections
+from malspark.analysis.evidence_roots import layers_and_roots as _layers_and_roots
+from malspark.analysis.evidence_roots import roots_phrase as _roots_phrase
+from malspark.analysis.function_summarizer import SHORTENED_NOTE as SUMMARISER_SHORTENED_NOTE
+from malspark.analysis.function_summarizer import SUMMARY_CUT_NOTE, SUMMARY_FENCE_STATEMENT
+from malspark.analysis.pcap_summary import CaptureRead
+from malspark.analysis.run_summary import unknown_window_split_sentence
+from malspark.core.config import SampleOpenConfig
+from malspark.core.container import unknown_window_split_line
+from malspark.core.pack_steps import CALLED_API_CATALOGUE, shipped_label
+from malspark.core.reputation import read_answer
+from malspark.extractors.capability_matrix import (
     NOT_ASKED_UNKNOWN_ID,
     TechniqueQuestion,
     not_asked_unknown_id,
     unknown_id_reason,
 )
-from maljan.llm.context_window import no_room_sentence, unknown_window_remedy
-from maljan.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
-from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
-from maljan.memory.technique_cards import card_lines, load_cards
-from maljan.pipeline import function_claims, nodes, triage_pack
-from maljan.pipeline.debate_facts import (
+from malspark.llm.context_window import no_room_sentence, unknown_window_remedy
+from malspark.llm.tool_replies import NO_REPLY_RECORDED, NOT_RUN_REPLY
+from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
+from malspark.memory.technique_cards import card_lines, load_cards
+from malspark.pipeline import function_claims, nodes, triage_pack
+from malspark.pipeline.debate_facts import (
     ANALYSTS_FIELD_MISSING_NOTE,
     BLOCK_NOT_READ_NOTE,
     analysts_field_unknown_note,
@@ -155,14 +155,14 @@ from maljan.pipeline.debate_facts import (
     with_ledger_stated,
     with_place_facts,
 )
-from maljan.pipeline.evidence_summary import summarise
-from maljan.pipeline.mediation_models import (
+from malspark.pipeline.evidence_summary import summarise
+from malspark.pipeline.mediation_models import (
     CONTRADICTIONS_BLOCK_MISSING_NOTE,
     CONTRADICTIONS_BLOCK_MIXED_NOTE,
     MediatorVerdict,
     mediator_no_answer_note,
 )
-from maljan.pipeline.nodes import (
+from malspark.pipeline.nodes import (
     NO_LOOKUP_DECLARED,
     NO_LOOKUP_ENABLED,
     NO_SANDBOX_DATA_REASON,
@@ -173,10 +173,10 @@ from maljan.pipeline.nodes import (
     run_quality_note,
     skipped_analysts_reason,
 )
-from maljan.pipeline.routing import NO_CONTESTED_POINT, NOT_REVISED, POINTS_UNCHANGED
-from maljan.pipeline.run_state import LOOKUP_UNREAD, NO_LIMIT, SHA256_GIVEN, budget_line
-from maljan.pipeline.sycophancy_detector import convergence_sentence
-from maljan.pipeline.validation import (
+from malspark.pipeline.routing import NO_CONTESTED_POINT, NOT_REVISED, POINTS_UNCHANGED
+from malspark.pipeline.run_state import LOOKUP_UNREAD, NO_LIMIT, SHA256_GIVEN, budget_line
+from malspark.pipeline.sycophancy_detector import convergence_sentence
+from malspark.pipeline.validation import (
     _UNPARSED_ANSWER_MESSAGE,
     _UNPARSED_ANSWER_MESSAGE_WITHOUT_TECHNIQUES,
     ANALYST_FEEDBACK_CLOSING,
@@ -232,28 +232,28 @@ from maljan.pipeline.validation import (
     validate_verdict_bundle,
     whole_answer_after_retry_question,
 )
-from maljan.providers.base import (
+from malspark.providers.base import (
     CLAIM_CITATION,
     STATIC_EVIDENCE_LEAD,
     VERIFICATION_DISCIPLINE,
     absent_provider_fragment,
 )
-from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
-from maljan.providers.sandbox.mock import MockSandboxProvider
-from maljan.providers.static import capa_child as _capa_child
-from maljan.providers.static import r2 as _r2
-from maljan.providers.static.ghidra import (
+from malspark.providers.sandbox.cape2 import CAPE2SandboxProvider
+from malspark.providers.sandbox.mock import MockSandboxProvider
+from malspark.providers.static import capa_child as _capa_child
+from malspark.providers.static import r2 as _r2
+from malspark.providers.static.ghidra import (
     GHIDRA_GUIDANCE,
     GHIDRA_WORKFLOW,
     ghidra_not_answering,
     ghidra_resting,
     sample_not_opened,
 )
-from maljan.providers.static.ghidra.http_client import no_program_as_error
-from maljan.providers.static.null import NullStaticProvider
-from maljan.providers.static.r2 import r2_error_reply
-from maljan.reporting import composer_pro
-from maljan.reporting.composer import (
+from malspark.providers.static.ghidra.http_client import no_program_as_error
+from malspark.providers.static.null import NullStaticProvider
+from malspark.providers.static.r2 import r2_error_reply
+from malspark.reporting import composer_pro
+from malspark.reporting.composer import (
     _EXAMPLES,
     _INSTRUCTIONS,
     _PROSE_SECTIONS,
@@ -267,13 +267,13 @@ from maljan.reporting.composer import (
     WHERE_QUOTED_LEAD,
     section_contract,
 )
-from maljan.reporting.evidence_bundles import sample_flow_fact
-from maljan.reporting.ledger_report import (
+from malspark.reporting.evidence_bundles import sample_flow_fact
+from malspark.reporting.ledger_report import (
     CAPABILITIES_TITLE,
     FUNCTION_NOT_SHOWN,
     RULE_MATCHES_TITLE,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkDomain,
@@ -282,7 +282,7 @@ from maljan.reporting.models import (
     SampleIdentity,
     TTPMapping,
 )
-from maljan.reporting.narrative_agent import (
+from malspark.reporting.narrative_agent import (
     _SYSTEM_PROMPT,
     CLAIMS_IN_FORCE_HEADING,
     EXAMPLE_OBJECT,
@@ -290,8 +290,8 @@ from maljan.reporting.narrative_agent import (
     build_prompt_text,
     support_note,
 )
-from maljan.reporting.renderers.markdown import analyst_list_note
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers.markdown import analyst_list_note
+from malspark.reporting.renderers.stix_renderer import (
     BENIGN_NAME_IN_A_URL,
     BENIGN_NAME_RESOLVED,
     CAPTURE_TLS_NAME,
@@ -316,8 +316,8 @@ from maljan.reporting.renderers.stix_renderer import (
     seen_in_reason,
     yes_because,
 )
-from maljan.schemas.evidence import LedgerEntry, build_entry, not_shown_record
-from maljan.schemas.isr_models import (
+from malspark.schemas.evidence import LedgerEntry, build_entry, not_shown_record
+from malspark.schemas.isr_models import (
     ABSENCE_TECHNIQUE_MARKER,
     FAILED_CALLS_MARKER,
     JUDGE_ONLY_TECHNIQUE_MARKER,
@@ -330,11 +330,11 @@ from maljan.schemas.isr_models import (
     judge_kept_note,
     retry_added_marker,
 )
-from maljan.schemas.sandbox_report import SECTION_IDS
-from maljan.schemas.stix_models import Bundle
-from maljan.tools import api_hashes, artefact_index, binary, knowledge, string_blobs
-from maljan.tools import rules as _capa_rules
-from maljan.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
+from malspark.schemas.sandbox_report import SECTION_IDS
+from malspark.schemas.stix_models import Bundle
+from malspark.tools import api_hashes, artefact_index, binary, knowledge, string_blobs
+from malspark.tools import rules as _capa_rules
+from malspark.tools.errors import CAPTURES_REMEDIATION, NO_CAPTURE_REMEDIATION
 
 # Every no: sentence a root reading writes, and the names of the roots.
 _ROOT_SENTENCES = [
@@ -491,7 +491,7 @@ def _function_map_text() -> str:
     """The map block as a model reads it, head, coverage and both kinds of line."""
     from types import SimpleNamespace
 
-    from maljan.agents.function_map import (
+    from malspark.agents.function_map import (
         build_function_map,
         function_artefacts,
         function_map_block,
@@ -520,13 +520,13 @@ def _function_index_text() -> str:
     """The index as the pack shows it, whole and cut, its run-state line and the map's coverage."""
     import tempfile
 
-    from maljan.agents.function_map import (
+    from malspark.agents.function_map import (
         build_function_map,
         function_artefacts,
         function_map_block,
     )
-    from maljan.pipeline.run_state import index_sentence
-    from maljan.tools import artefact_index
+    from malspark.pipeline.run_state import index_sentence
+    from malspark.tools import artefact_index
     from tests.unit.tools.synthetic_pe import SyntheticPE
 
     def cells(key: str, values: list[str], source: str) -> list[dict[str, Any]]:
@@ -683,13 +683,13 @@ class _StampedTool:
 
     def __init__(self, name: str, server: str = "") -> None:
         self.name = name
-        self.metadata = {"maljan_server": server} if server else {}
+        self.metadata = {"malspark_server": server} if server else {}
 
 
 # The prompts the example team document ships for an operator to import.
 def _spend_sentences() -> str:
     """The spend ceiling's degradation reason and one refusal, as the run states them."""
-    from maljan.core.spend import SpendCeilingStop, SpendMeter
+    from malspark.core.spend import SpendCeilingStop, SpendMeter
 
     meter = SpendMeter(
         0.01, {"m": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 1.0}}, table={}
@@ -729,9 +729,9 @@ def _analysis_tool_descriptions(*names: str) -> str:
 
 def _deobfuscation_sentences() -> str:
     """Every sentence the deobfuscation passes put in front of a model, filled in."""
-    from maljan.analysis import anti_analysis
-    from maljan.providers.static.ghidra import passes as ghidra_passes
-    from maljan.tools import crypto_constants
+    from malspark.analysis import anti_analysis
+    from malspark.providers.static.ghidra import passes as ghidra_passes
+    from malspark.tools import crypto_constants
 
     return " ".join(
         [
@@ -751,8 +751,8 @@ def _deobfuscation_sentences() -> str:
 
 def _priority_hints() -> str:
     """The sink pre-pass's hint, with Ghidra's closing sentence and with the neutral one."""
-    from maljan.analysis.sink_reachability import FOLLOW_UP, CallGraph, build_priority_hint
-    from maljan.providers.static.ghidra.call_graph import PRIORITY_FOLLOW_UP
+    from malspark.analysis.sink_reachability import FOLLOW_UP, CallGraph, build_priority_hint
+    from malspark.providers.static.ghidra.call_graph import PRIORITY_FOLLOW_UP
 
     graph = CallGraph.of_edges([("f", "CreateRemoteThread")], {"f": "0x1"})
     return " ".join(
@@ -765,7 +765,7 @@ def _priority_hints() -> str:
 
 def _reputation_lines() -> str:
     """The pack's reputation lines from a declared lookup's read record, and why none was made."""
-    from maljan.core.tool_declarations import ToolFacts
+    from malspark.core.tool_declarations import ToolFacts
 
     facts = ToolFacts.model_validate(
         {
@@ -820,8 +820,8 @@ def _reputation_lines() -> str:
 
 def _deobfuscation_lines() -> str:
     """The two pass lines with and without a finding, and the lines of a pass not run."""
-    from maljan.analysis.anti_analysis import SCAN_TOOL as ANTI_ANALYSIS_TOOL
-    from maljan.tools import crypto_constants
+    from malspark.analysis.anti_analysis import SCAN_TOOL as ANTI_ANALYSIS_TOOL
+    from malspark.tools import crypto_constants
 
     place = {"offset": "0x1", "rva": "0x2", "function": "0x0"}
     value_row = {"value": "0x1", "places": [place]}
@@ -878,7 +878,7 @@ def _ghidra_pass_failures() -> str:
     """What each way a Ghidra pass can stop says, from the passes' own code."""
     import httpx
 
-    from maljan.providers.static.ghidra.passes import GhidraPasses, GhidraPassFailed
+    from malspark.providers.static.ghidra.passes import GhidraPasses, GhidraPassFailed
 
     def ghidra(answers: dict[str, Any]) -> GhidraPasses:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -923,7 +923,7 @@ def _ghidra_pass_failures() -> str:
 
 def _constant_set_names() -> str:
     """Each catalogue set as the constants line names it: algorithm, what it is, a value."""
-    from maljan.tools import crypto_constants
+    from malspark.tools import crypto_constants
 
     place = {"offset": "0x1"}
     rows = [
@@ -952,7 +952,7 @@ def _transform_sentences() -> str:
     import tempfile
     import zlib
 
-    from maljan.tools import transforms
+    from malspark.tools import transforms
     from tests.unit.tools.synthetic_pe import SyntheticPE
 
     calls: list[tuple[str, dict[str, Any]]] = [
@@ -1028,8 +1028,8 @@ def _upx_sentences() -> str:
     """What UPX unpacking tells a model: the tool, every no: sentence and error, the pack line."""
     import tempfile
 
-    from maljan.schemas.evidence import LedgerEntry
-    from maljan.tools import upx
+    from malspark.schemas.evidence import LedgerEntry
+    from malspark.tools import upx
     from tests.unit.tools import synthetic_upx as su
     from tests.unit.tools.synthetic_pe import SyntheticPE
 
@@ -1099,13 +1099,13 @@ _SECTIONS_ENTRY = (
 
 def _sandbox_sections_sentences() -> str:
     """What the sandbox sections tell a model: the index, the tool, its answers, the questions."""
-    from maljan.analysis import sandbox_sections as ss
-    from maljan.core.report_formats import UNREAD_RUN_REASON
-    from maljan.core.safe_json import CYCLE_MARK, DEEPER_MARK, SHARED_MARK
-    from maljan.providers import sandbox_tools as st
-    from maljan.providers.sandbox.readers import TriageReportReader, report_reader
-    from maljan.schemas.evidence import LedgerEntry
-    from maljan.schemas.sandbox_document import DNS_AS_WRITTEN_KEY, sandbox_document
+    from malspark.analysis import sandbox_sections as ss
+    from malspark.core.report_formats import UNREAD_RUN_REASON
+    from malspark.core.safe_json import CYCLE_MARK, DEEPER_MARK, SHARED_MARK
+    from malspark.providers import sandbox_tools as st
+    from malspark.providers.sandbox.readers import TriageReportReader, report_reader
+    from malspark.schemas.evidence import LedgerEntry
+    from malspark.schemas.sandbox_document import DNS_AS_WRITTEN_KEY, sandbox_document
 
     # A report accepted unread: its blocks as raw channels, every section unavailable.
     unread = sandbox_document(
@@ -1221,7 +1221,7 @@ def _message_of(violation: Violation | None) -> str:
 
 def _network_reputation_paragraph() -> str:
     """The network analyst's flows text, with the paragraph on reputation records."""
-    from maljan.parsers.network_parser import REPUTATION_HEADING, NetworkParser
+    from malspark.parsers.network_parser import REPUTATION_HEADING, NetworkParser
 
     text = NetworkParser().parse({"dns": [], "http": [], "tcp": [], "udp": [], "hosts": []})
     assert REPUTATION_HEADING in text
@@ -1230,7 +1230,7 @@ def _network_reputation_paragraph() -> str:
 
 def _unsupported_malware_question() -> str:
     """The judge's question for a Malware verdict over a run no analyst examined."""
-    from maljan.pipeline.validation import UNSUPPORTED_MALWARE_QUESTION
+    from malspark.pipeline.validation import UNSUPPORTED_MALWARE_QUESTION
 
     return UNSUPPORTED_MALWARE_QUESTION.format(listed="ev_0001, ev_0002")
 
@@ -1241,13 +1241,13 @@ def _function_claim_question(several: bool = False) -> str:
     With ``several``, the claim cites two listings: one function whose row is
     long enough to be counted, and one that holds no artefact of its own.
     """
-    from maljan.agents.function_map import function_artefacts
-    from maljan.pipeline.function_claims import (
+    from malspark.agents.function_map import function_artefacts
+    from malspark.pipeline.function_claims import (
         check_function_claims,
         function_facts,
         listed_functions,
     )
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.schemas.evidence import LedgerEntry
 
     data = {
         "tool": "function_index",
@@ -2871,7 +2871,7 @@ _OPERATION_ID = re.compile(r'``([a-z0-9]+)``|`([a-z0-9]+)`|"op": "([a-z0-9]+)"')
 
 def _without_named_operations(text: str) -> str:
     """``text`` with each transform operation written as an identifier taken out."""
-    from maljan.tools.transforms import OPERATIONS
+    from malspark.tools.transforms import OPERATIONS
 
     return _OPERATION_ID.sub(
         lambda match: (
@@ -2896,8 +2896,8 @@ _REPORT_NAME_ID = re.compile(
 
 
 def _report_names() -> frozenset[str]:
-    from maljan.analysis import sandbox_sections as ss
-    from maljan.schemas.sandbox_document import place_path
+    from malspark.analysis import sandbox_sections as ss
+    from malspark.schemas.sandbox_document import place_path
 
     paths = {place_path(name) for names in ss._SUMMARY_LISTS.values() for name in names}
     keys = {path.rsplit(".", 1)[-1] for path in paths}
@@ -2952,7 +2952,7 @@ def _scanned(name: str) -> str:
 
 
 def test_the_operation_allowance_is_the_tool_s_list_and_only_as_identifiers() -> None:
-    from maljan.tools.transforms import OPERATIONS
+    from malspark.tools.transforms import OPERATIONS
 
     assert TRANSFORM_OPERATIONS_NAMED <= set(PROMPTS)
     assert all(re.fullmatch(r"[a-z0-9]+", name) for name in OPERATIONS)
@@ -3137,10 +3137,10 @@ DEV_STATIC_PROMPT_TERMS: dict[str, frozenset[str]] = {
 def test_a_non_ghidra_static_prompt_carries_no_key_term_dev_s_did_not(
     provider_id: str, expected: bool
 ) -> None:
-    from maljan.agents.prompt_fragments import format_fragment
-    from maljan.agents.static_analyst import assemble_static_prompt
-    from maljan.core.config import Settings
-    from maljan.providers.registry import get_static_provider
+    from malspark.agents.prompt_fragments import format_fragment
+    from malspark.agents.static_analyst import assemble_static_prompt
+    from malspark.core.config import Settings
+    from malspark.providers.registry import get_static_provider
 
     settings = Settings(_env_file=None)
     settings.static.provider = provider_id

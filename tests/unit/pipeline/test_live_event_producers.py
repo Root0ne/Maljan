@@ -12,9 +12,9 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
-from maljan.pipeline.validation import Violation, retry_with_feedback, retry_with_feedback_sync
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
+from malspark.pipeline.validation import Violation, retry_with_feedback, retry_with_feedback_sync
+from malspark.schemas.evidence import EvidenceCounter
 
 
 class _Sink:
@@ -70,15 +70,15 @@ class TestTheRecorderFeedsTheConversation:
         sink = _Sink()
         recorder = _recorder(sink)
 
-        def broken(path: str = "/etc/maljan/secrets.env") -> str:
+        def broken(path: str = "/etc/malspark/secrets.env") -> str:
             """Fail the way an unreachable sidecar fails."""
-            raise RuntimeError("cannot read /etc/maljan/secrets.env")
+            raise RuntimeError("cannot read /etc/malspark/secrets.env")
 
         record_tools([_tool(broken, "broken")], recorder)[0].invoke({"path": "/x"})
 
         finished = sink.of("tool_call_finished")[0]
         assert finished["ok"] is False
-        assert "/etc/maljan" not in finished["summary"]
+        assert "/etc/malspark" not in finished["summary"]
         assert "RuntimeError" not in finished["summary"]
 
     def test_a_refused_repeat_is_announced_as_a_repeat(self) -> None:
@@ -316,7 +316,7 @@ class TestTheJudgeAsks:
     def test_only_a_turn_that_ends_in_a_question_is_published(self) -> None:
         from langchain_core.messages import AIMessage
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         sink = _Sink()
         judge = JudgeAgent.__new__(JudgeAgent)
@@ -340,7 +340,7 @@ class TestTheJudgeAsks:
     def test_a_question_is_published_once_however_often_the_hook_runs(self) -> None:
         from langchain_core.messages import AIMessage
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         sink = _Sink()
         judge = JudgeAgent.__new__(JudgeAgent)
@@ -363,7 +363,7 @@ class TestTheJudgeAsks:
         """
         from langchain_core.messages import AIMessage
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         sink = _Sink()
         judge = JudgeAgent.__new__(JudgeAgent)
@@ -389,7 +389,7 @@ class TestTheJudgeAsks:
     def test_a_question_that_delegates_names_the_agent_it_asks(self) -> None:
         from langchain_core.messages import AIMessage
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         sink = _Sink()
         judge = JudgeAgent.__new__(JudgeAgent)

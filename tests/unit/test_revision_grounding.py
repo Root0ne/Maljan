@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from maljan.core.config import ChunkingConfig
-from maljan.loaders.binary_chunker import SOURCE_SEPARATOR, ChunkStrategy, TextChunk
-from maljan.pipeline.nodes import _build_revision_context
+from malspark.core.config import ChunkingConfig
+from malspark.loaders.binary_chunker import SOURCE_SEPARATOR, ChunkStrategy, TextChunk
+from malspark.pipeline.nodes import _build_revision_context
 
 # ---------------------------------------------------------------------------
 # Helpers

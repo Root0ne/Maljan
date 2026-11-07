@@ -28,21 +28,21 @@ from tests.integration._session_probe import SessionFactory, fake_job, fake_samp
 from app.worker import analysis_worker
 from app.worker.analysis_worker import _report_inputs, keep_the_stopped_run
 from app.worker.sample_integrity import sandbox_target_of
-from maljan.analysis.disclosure import disclosure_record
-from maljan.analysis.sample_integrity import (
+from malspark.analysis.disclosure import disclosure_record
+from malspark.analysis.sample_integrity import (
     SANDBOX_KEY,
     sandbox_target_lines,
     sandbox_target_record,
 )
-from maljan.app import SANDBOX_FAILURE_CHARS
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.providers.base import SandboxCapabilities
-from maljan.providers.sandbox.readers import required_reader
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers import MarkdownRenderer
-from maljan.schemas.sandbox_report import SandboxRun
-from maljan.utils.marked_cut import CUT_MARK
+from malspark.app import SANDBOX_FAILURE_CHARS
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.providers.base import SandboxCapabilities
+from malspark.providers.sandbox.readers import required_reader
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers import MarkdownRenderer
+from malspark.schemas.sandbox_report import SandboxRun
+from malspark.utils.marked_cut import CUT_MARK
 
 BYTES = b"MZ synthetic sample bytes, never run\x00" * 64
 INTAKE = hashlib.sha256(BYTES).hexdigest()
@@ -181,11 +181,11 @@ class _Uploaded(_Provider):
 
 
 def _container_after(provider: Any, tmp_path: Path, *, used: bool = True) -> Any:
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
     sample = tmp_path / "s.exe"
     sample.write_bytes(BYTES)
-    app = MaljanApp(mock=True)
+    app = MalsparkApp(mock=True)
     app.container.mock = False
     app.container._sandbox_provider_cache = provider
     report = asyncio.run(app._submit_to_sandbox(str(sample)))

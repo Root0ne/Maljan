@@ -19,11 +19,11 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.core.config import Settings
-from maljan.core.spend import SpendMeter
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.generation_rate import model_name_of
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.core.config import Settings
+from malspark.core.spend import SpendMeter
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.generation_rate import model_name_of
 
 USAGE = {"input_tokens": 10_000, "output_tokens": 1_000, "total_tokens": 11_000}
 
@@ -79,8 +79,8 @@ def _run(model: _Judge, ledger: TokenLedger | None = None) -> tuple[JudgeAgent, 
     judge.token_ledger = ledger
     cfg = Settings(_env_file=None)
     with (
-        patch("maljan.agents.base_agent.get_settings", lambda: cfg),
-        patch("maljan.agents.judge_agent.get_settings", lambda: cfg),
+        patch("malspark.agents.base_agent.get_settings", lambda: cfg),
+        patch("malspark.agents.judge_agent.get_settings", lambda: cfg),
     ):
         answer = asyncio.run(judge.execute_tool_loop([("system", "s"), ("human", "mediate")]))
     return judge, answer

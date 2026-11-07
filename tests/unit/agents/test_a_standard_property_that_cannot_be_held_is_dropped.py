@@ -12,16 +12,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.agents.judge_postprocess import PROPERTY_NOT_CARRIED_CODE, lift_misplaced_extensions
-from maljan.reporting.models import (
+from malspark.agents.judge_postprocess import PROPERTY_NOT_CARRIED_CODE, lift_misplaced_extensions
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkIOCs,
     NetworkIP,
     SampleIdentity,
 )
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-from maljan.schemas.stix_models import Bundle
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.schemas.stix_models import Bundle
 
 CONTACT = "185.199.111.20"
 PHASE = {"kill_chain_name": "lockheed-martin-cyber-kill-chain", "phase_name": "delivery"}

@@ -19,7 +19,7 @@ network rows give CI a registry and a network answer to compare. Anywhere else
 (CI included), a case whose raw source is missing is skipped by name rather
 than failed, with the reason ``tests.golden_fixtures`` counts at the end of the
 session, so a run that compared only the tracked sources says how many it did
-not compare. ``MALJAN_TEST_NO_CAPE_REPORTS=1`` takes that path on a machine
+not compare. ``MALSPARK_TEST_NO_CAPE_REPORTS=1`` takes that path on a machine
 that has the corpus.
 """
 
@@ -31,7 +31,7 @@ from typing import Any
 
 import pytest
 
-from maljan.providers.sandbox_tools import (
+from malspark.providers.sandbox_tools import (
     sandbox_api_calls,
     sandbox_dropped_files,
     sandbox_mutexes,

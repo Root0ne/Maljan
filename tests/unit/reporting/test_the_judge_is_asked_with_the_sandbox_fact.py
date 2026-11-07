@@ -15,16 +15,16 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     UNATTRIBUTED_INDICATOR_CODE,
     Violation,
     kept_after_the_sandbox_fact,
     unattributed_indicator_violations,
 )
-from maljan.reporting.builder import build_consolidated_iocs
-from maljan.reporting.defang import defang
-from maljan.reporting.detection_signatures import build_detection_rules
-from maljan.reporting.models import (
+from malspark.reporting.builder import build_consolidated_iocs
+from malspark.reporting.defang import defang
+from malspark.reporting.detection_signatures import build_detection_rules
+from malspark.reporting.models import (
     FileHashes,
     JudgeIndicator,
     MalwareReport,
@@ -33,7 +33,7 @@ from maljan.reporting.models import (
     NetworkIP,
     SampleIdentity,
 )
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers.stix_renderer import (
     JUDGE_KEPT_WHEN_TOLD,
     JUDGE_NOT_ASKED_IN_TIME,
     JUDGE_QUESTION_NOT_RECORDED,
@@ -45,7 +45,7 @@ from maljan.reporting.renderers.stix_renderer import (
     sandbox_facts_for_the_judge,
     sandbox_row_kwargs,
 )
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.stix_models import Bundle
 from tests.unit.reporting._sandbox_fact import answered_the_sandbox_fact
 
 GUEST = "198.51.100.7"
@@ -293,7 +293,7 @@ class TestTheVerdictAsksOnce:
                 "type": "bundle",
                 "id": "bundle--0f1e2d3c-4b5a-4968-8776-655443332200",
                 "objects": objects,
-                "x_maljan_assessment": {
+                "x_malspark_assessment": {
                     "verdict": "Malware",
                     "severity": {"rating": "High", "rationale": "it does harm"},
                     "malware_category": "loader",
@@ -307,7 +307,7 @@ class TestTheVerdictAsksOnce:
     ) -> tuple[Any, list[list[Any]]]:
         from unittest.mock import MagicMock
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         sent: list[list[Any]] = []
         queue = list(answers)
@@ -374,8 +374,8 @@ class TestThePipelineReadsTheFacts:
     def test_the_verdict_node_reads_the_sandbox_record_the_report_reads(self) -> None:
         import json
 
-        from maljan.pipeline.nodes import judge_sandbox_facts
-        from maljan.schemas.evidence import build_entry
+        from malspark.pipeline.nodes import judge_sandbox_facts
+        from malspark.schemas.evidence import build_entry
 
         entry = build_entry(
             entry_id="ev_0001",
@@ -394,7 +394,7 @@ class TestThePipelineReadsTheFacts:
         assert facts("domain", NAME) == ""
 
     def test_no_network_record_asks_nothing(self) -> None:
-        from maljan.pipeline.nodes import judge_sandbox_facts
+        from malspark.pipeline.nodes import judge_sandbox_facts
 
         assert judge_sandbox_facts([], None, None) is None
 
@@ -447,7 +447,7 @@ class TestAURLOnAnAddressSaysItsAddressWasKept:
     URL = f"http://{ADDRESS}/in"
 
     def _report(self, told: bool, indicator: JudgeIndicator | None = None) -> MalwareReport:
-        from maljan.reporting.models import NetworkURL
+        from malspark.reporting.models import NetworkURL
 
         return MalwareReport(
             identity=SampleIdentity(hashes=FileHashes(sha256=SHA256)),
@@ -530,7 +530,7 @@ class TestAHostRowIsAskedAsAFlowIs:
     PARTIAL = "abcdef0123"
 
     def _dynamic(self) -> Any:
-        from maljan.reporting.models import DynamicBehavior, ProcessNode
+        from malspark.reporting.models import DynamicBehavior, ProcessNode
 
         return DynamicBehavior(
             process_tree=[ProcessNode(pid=100, name="sample.exe")],
@@ -575,7 +575,7 @@ class TestAHostRowIsAskedAsAFlowIs:
         assert self._asked(f"[file:hashes.'SHA-256' = '{self.PARTIAL}']") == []
 
     def test_the_answer_to_the_question_is_the_keep_the_row_reads(self) -> None:
-        from maljan.reporting.renderers.stix_renderer import sandbox_host_kwargs
+        from malspark.reporting.renderers.stix_renderer import sandbox_host_kwargs
 
         (found,) = self._asked(f"[mutex:name = '{self.MUTEX}']")
         report = MalwareReport(
@@ -595,8 +595,8 @@ class TestAHostRowIsAskedAsAFlowIs:
     def test_the_verdict_node_reads_the_host_record_the_report_reads(self) -> None:
         import json
 
-        from maljan.pipeline.nodes import judge_sandbox_facts
-        from maljan.schemas.evidence import build_entry
+        from malspark.pipeline.nodes import judge_sandbox_facts
+        from malspark.schemas.evidence import build_entry
 
         entry = build_entry(
             entry_id="ev_0001",
@@ -677,7 +677,7 @@ class TestAPidTheSandboxKeptDecidesTheQuestion:
         return ledger_from_sandbox(self._report())
 
     def test_each_tool_answer_carries_the_pid_the_report_kept(self) -> None:
-        from maljan.providers import sandbox_tools
+        from malspark.providers import sandbox_tools
 
         report = self._report()
         dropped = sandbox_tools.sandbox_dropped_files(report)["dropped"]
@@ -694,7 +694,7 @@ class TestAPidTheSandboxKeptDecidesTheQuestion:
         assert mutexes["pids"] == {self.OWN_MUTEX: ["1234"]}
 
     def test_a_row_whose_pid_is_the_sample_s_is_not_asked_about(self) -> None:
-        from maljan.pipeline.nodes import judge_sandbox_facts
+        from malspark.pipeline.nodes import judge_sandbox_facts
 
         facts = judge_sandbox_facts(self._ledger(), None, None, sample=self.SAMPLE)
 
@@ -705,7 +705,7 @@ class TestAPidTheSandboxKeptDecidesTheQuestion:
         assert facts("hash", "c" * 64) == ""
 
     def test_a_row_with_no_pid_gets_the_honest_question(self) -> None:
-        from maljan.pipeline.nodes import judge_sandbox_facts
+        from malspark.pipeline.nodes import judge_sandbox_facts
 
         facts = judge_sandbox_facts(self._ledger(), None, None, sample=self.SAMPLE)
         bundle = Bundle.model_validate(
@@ -728,7 +728,7 @@ class TestAPidTheSandboxKeptDecidesTheQuestion:
         assert all("names no process of the sample's tree" in v.message for v in found)
 
     def test_a_run_key_a_persistence_mechanism_names_is_not_asked_about(self) -> None:
-        from maljan.pipeline.nodes import judge_sandbox_facts
+        from malspark.pipeline.nodes import judge_sandbox_facts
 
         facts = judge_sandbox_facts(self._ledger(), None, None, sample=self.SAMPLE)
 
@@ -739,7 +739,7 @@ class TestAPidTheSandboxKeptDecidesTheQuestion:
         assert facts("registry", self.RUN_KEY.lower() + " ") == ""
 
     def test_a_report_with_no_pid_reads_as_it_did(self) -> None:
-        from maljan.reporting.ledger_projection import dynamic_from_ledger
+        from malspark.reporting.ledger_projection import dynamic_from_ledger
 
         dynamic = dynamic_from_ledger(self._ledger())
 
@@ -756,8 +756,8 @@ class TestTheFactsAreReadOnce:
     def test_the_lookups_are_built_once_for_any_number_of_values(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.reporting.models import DynamicBehavior, ProcessNode
-        from maljan.reporting.renderers import stix_renderer
+        from malspark.reporting.models import DynamicBehavior, ProcessNode
+        from malspark.reporting.renderers import stix_renderer
 
         count = 3000
         reads = {"ips": 0, "tree": 0}
@@ -815,7 +815,7 @@ class TestOnlyACreationNamesAMutexMaker:
     def test_no_pid_is_kept_for_a_mutex_the_process_did_not_create(
         self, call: dict[str, Any]
     ) -> None:
-        from maljan.providers import sandbox_tools
+        from malspark.providers import sandbox_tools
 
         report = {"behavior": {"processes": [{"pid": 7, "calls": [call]}]}}
 
@@ -825,7 +825,7 @@ class TestOnlyACreationNamesAMutexMaker:
         assert "pids" not in answer
 
     def test_a_creation_keeps_its_pid(self) -> None:
-        from maljan.providers import sandbox_tools
+        from malspark.providers import sandbox_tools
 
         call = _mutex_call("NtCreateMutant", "Global\\Z", status=True, **{"return": "0x00000000"})
         report = {"behavior": {"processes": [{"pid": 7, "calls": [call]}]}}
@@ -840,7 +840,7 @@ class TestTheSampleSTreeIsItsLineage:
 
     @staticmethod
     def _facts(processes: list[Any], pids: list[str]) -> Any:
-        from maljan.reporting.models import DynamicBehavior, RegistryMod
+        from malspark.reporting.models import DynamicBehavior, RegistryMod
 
         dynamic = DynamicBehavior(
             process_tree=processes,
@@ -854,7 +854,7 @@ class TestTheSampleSTreeIsItsLineage:
 
     @staticmethod
     def _node(pid: int, name: str, ppid: int = 0, **more: Any) -> Any:
-        from maljan.reporting.models import ProcessNode
+        from malspark.reporting.models import ProcessNode
 
         return ProcessNode(pid=pid, ppid=ppid, name=name, **more)
 
@@ -881,7 +881,7 @@ class TestTheSampleSTreeIsItsLineage:
         assert self._facts(processes, ["2200"])("registry", self.KEY)
 
     def test_with_no_identity_no_listed_process_is_the_sample_s(self) -> None:
-        from maljan.reporting.models import DynamicBehavior, RegistryMod
+        from malspark.reporting.models import DynamicBehavior, RegistryMod
 
         dynamic = DynamicBehavior(
             process_tree=[self._node(10, "invoice.exe", 1)],
@@ -975,8 +975,11 @@ class TestFromTheSandboxToTheExport:
         }
 
     def _report(self, *, told: bool = False) -> tuple[MalwareReport, Any]:
-        from maljan.pipeline.nodes import judge_sandbox_facts
-        from maljan.reporting.ledger_projection import dynamic_from_ledger, persistence_from_ledger
+        from malspark.pipeline.nodes import judge_sandbox_facts
+        from malspark.reporting.ledger_projection import (
+            dynamic_from_ledger,
+            persistence_from_ledger,
+        )
         from tests.unit._ledger_helpers import ledger_from_sandbox
 
         ledger = ledger_from_sandbox(self._raw())
@@ -1049,7 +1052,7 @@ class TestADeepLineageIsReadInLinearTime:
 
     @staticmethod
     def _chain(depth: int) -> list[Any]:
-        from maljan.reporting.models import ProcessNode
+        from malspark.reporting.models import ProcessNode
 
         return [ProcessNode(pid=1, ppid=0, name="invoice.exe")] + [
             ProcessNode(pid=n, ppid=n - 1, name="cmd.exe") for n in range(2, depth + 1)
@@ -1057,7 +1060,7 @@ class TestADeepLineageIsReadInLinearTime:
 
     @staticmethod
     def _tree_of(processes: list[Any]) -> Any:
-        from maljan.schemas.sandbox_report import sample_process_tree
+        from malspark.schemas.sandbox_report import sample_process_tree
 
         return sample_process_tree(processes, "invoice.exe", SHA256)
 
@@ -1083,14 +1086,14 @@ class TestADeepLineageIsReadInLinearTime:
 
 class TestTheVerdictNodeFindsTheTreeByTheReportSIdentity:
     def test_the_sample_s_path_names_it_when_it_arrived_with_no_name(self) -> None:
-        from maljan.pipeline.nodes import judge_facts_identity
+        from malspark.pipeline.nodes import judge_facts_identity
 
         state = {"file_name": None, "sample_path": "/jobs/7/invoice.exe", "file_hash": SHA256}
 
         assert judge_facts_identity(state) == {"file_name": "invoice.exe", "sha256": SHA256}
 
     def test_the_name_it_arrived_with_comes_first(self) -> None:
-        from maljan.pipeline.nodes import judge_facts_identity
+        from malspark.pipeline.nodes import judge_facts_identity
 
         state = {"file_name": "a.exe", "sample_path": "/jobs/7/b.bin", "file_hash": SHA256}
 

@@ -16,8 +16,8 @@ import re
 
 import pytest
 
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 from tests.unit.reporting._report_shapes import hostile_report, rich_report
 from tests.unit.reporting.test_a_table_row_is_never_assembled_by_hand import (
     RENDERER,
@@ -213,7 +213,7 @@ class TestTheRendererCannotWriteACodeSpanByHand:
     ],
 )
 def test_a_quote_mark_after_list_markers_is_escaped(text: str, written: str) -> None:
-    from maljan.reporting.renderers.markdown import _item, _step, _unquoted
+    from malspark.reporting.renderers.markdown import _item, _step, _unquoted
 
     assert _unquoted(text) == written
     assert _item(text) == f"- {written}"
@@ -221,6 +221,6 @@ def test_a_quote_mark_after_list_markers_is_escaped(text: str, written: str) -> 
 
 
 def test_a_step_is_one_line() -> None:
-    from maljan.reporting.renderers.markdown import _step
+    from malspark.reporting.renderers.markdown import _step
 
     assert _step(2, "a\n## b") == "2. a ## b"

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.agents.base_agent import slowest_call
-from maljan.analysis.run_summary import RunSummaryBuilder, tool_latency_lines
+from malspark.agents.base_agent import slowest_call
+from malspark.analysis.run_summary import RunSummaryBuilder, tool_latency_lines
 
 
 def _entry(agent: str, tool: str, ms: int, entry_id: str = "ev_0001") -> dict[str, Any]:
@@ -101,7 +101,7 @@ class TestTheSpreadOfAnAgentsCalls:
     def test_selection_agrees_with_a_sort_on_many_lists(self) -> None:
         import random
 
-        from maljan.analysis.run_summary import nearest_rank
+        from malspark.analysis.run_summary import nearest_rank
 
         rng = random.Random(7)
         for _ in range(200):
@@ -159,7 +159,7 @@ def test_the_pipeline_hands_the_summary_the_ledger_it_measures() -> None:
     import inspect
     import re
 
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     source = inspect.getsource(nodes)
     assert re.search(r"set_tool_latency\(\s*state\.get\(\"evidence_ledger\"\)", source)

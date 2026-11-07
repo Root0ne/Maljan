@@ -5,7 +5,7 @@ values, the user name and password of a URL, a credential a server's
 arguments carry, and an open mapping's credential-named entry
 (``sandbox.cape2.submit_options``, ``sandbox.rest.submit.*_fields``) in clear.
 They are masked now by the one masking the snapshot uses
-(``maljan.core.settings_masking`` through ``settings_service.shown_setting``),
+(``malspark.core.settings_masking`` through ``settings_service.shown_setting``),
 and a value sent back as it was shown keeps what is stored
 (``settings_service.unmasked_changes``); a mask with nothing behind it is
 refused, named, never stored as the literal mask.

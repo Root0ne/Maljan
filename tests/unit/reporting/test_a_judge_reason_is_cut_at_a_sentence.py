@@ -10,12 +10,12 @@ prints its last sentence. The record keeps the reason whole.
 
 from __future__ import annotations
 
-from maljan.reporting.judge_reasons import (
+from malspark.reporting.judge_reasons import (
     JUDGE_REASON_WIDTH,
     judge_reason_shown,
     judge_reasons_shown,
 )
-from maljan.utils.marked_cut import CUT_MARK
+from malspark.utils.marked_cut import CUT_MARK
 
 FIRST = "The evidence shows the routine decoding its strings."
 SECOND = "This matches the technique named."
@@ -94,13 +94,13 @@ def test_a_text_with_no_judge_reason_is_unchanged() -> None:
 
 
 def test_the_attck_table_prints_the_reason_by_the_rule() -> None:
-    from maljan.reporting.models import (
+    from malspark.reporting.models import (
         CapabilityCell,
         FileHashes,
         MalwareReport,
         SampleIdentity,
     )
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     working = "Wait, looking at the check list again, the id is not on it."
     report = MalwareReport(
@@ -135,8 +135,8 @@ def test_the_attck_table_prints_the_reason_by_the_rule() -> None:
 
 
 def test_the_list_of_claims_not_published_prints_by_the_same_rule_defanged() -> None:
-    from maljan.reporting.models import CapabilityCell, FileHashes, MalwareReport, SampleIdentity
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.models import CapabilityCell, FileHashes, MalwareReport, SampleIdentity
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     report = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),

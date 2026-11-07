@@ -18,13 +18,13 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.callees_question import CalleesFound
-from maljan.agents.function_map import function_artefacts
-from maljan.pipeline.function_claims import FUNCTION_CLAIM_UNHELD_CODE
-from maljan.pipeline.validation import FUNCTION_CHECK_HEAD, technique_check_note
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.callees_question import CalleesFound
+from malspark.agents.function_map import function_artefacts
+from malspark.pipeline.function_claims import FUNCTION_CLAIM_UNHELD_CODE
+from malspark.pipeline.validation import FUNCTION_CHECK_HEAD, technique_check_note
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR
 
 BASE = 0x140000000
 MAIN = 0x2340
@@ -128,11 +128,11 @@ class _Analyst(BaseAnalyst):
 def _check(analyst: _Analyst, first: str = GUARD + WRONG) -> AgentISR:
     isr = analyst._text_to_isr(first, 0)
     with (
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         # The listing's helper is a callee no listing holds: the question
         # about it (T-558) is tested apart, and here only this check asks.
-        patch("maljan.agents.base_agent.callees_to_read", return_value=CalleesFound()),
+        patch("malspark.agents.base_agent.callees_to_read", return_value=CalleesFound()),
     ):
         return analyst._validate_isr(isr, "evidence")
 
@@ -148,12 +148,12 @@ class TestTheTurn:
         # The listing's helper is unread (T-558): both questions go in one
         # turn, the retry is merged by claim number, and the unread-functions
         # question ends answered, not unresolved.
-        from maljan.agents.callees_question import UNREAD_CALLEES_CODE
+        from malspark.agents.callees_question import UNREAD_CALLEES_CODE
 
         analyst = _Analyst([FIXED])
         isr = analyst._text_to_isr(GUARD + WRONG, 0)
         with (
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
             patch.object(BaseAnalyst, "_turns_carry_tools", return_value=True),
             patch.object(
@@ -266,7 +266,7 @@ class TestWhatTheRunShows:
         assert "TECHNIQUE CHECK" not in note
 
     def test_the_run_summary_keeps_each_loop_s_record(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         builder = RunSummaryBuilder(start_time=0.0).set_budget(
             {
@@ -281,7 +281,7 @@ class TestWhatTheRunShows:
         assert builder._budget["reverser"]["function_claims"] == [{"checked": 2, "asked": 1}]
 
     def test_a_loop_with_no_function_claims_adds_nothing_to_the_summary(self) -> None:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         builder = RunSummaryBuilder(start_time=0.0).set_budget({"static": [{"steps_used": 1}]})
 
@@ -357,7 +357,7 @@ class TestAFailureIsRecorded:
     def test_facts_that_cannot_be_read_ask_nothing_and_say_why(self) -> None:
         analyst = _Analyst([])
         with patch(
-            "maljan.agents.base_agent.function_facts", side_effect=RuntimeError("unreadable")
+            "malspark.agents.base_agent.function_facts", side_effect=RuntimeError("unreadable")
         ):
             _check(analyst)
 
@@ -370,7 +370,7 @@ class TestAFailureIsRecorded:
 
     def test_a_check_that_fails_asks_nothing_and_says_why(self) -> None:
         analyst = _Analyst([])
-        with patch("maljan.agents.base_agent.check_function_claims", side_effect=KeyError("x")):
+        with patch("malspark.agents.base_agent.check_function_claims", side_effect=KeyError("x")):
             _check(analyst)
 
         assert analyst.seen_turns == []
@@ -381,7 +381,7 @@ class TestAFailureIsRecorded:
 
 class TestTheJudgeSeesFactsOnly:
     def test_a_kept_finding_carries_no_sentence_addressed_to_the_analyst(self) -> None:
-        from maljan.pipeline.validation import FUNCTION_QUESTION_ASK
+        from malspark.pipeline.validation import FUNCTION_QUESTION_ASK
 
         analyst = _Analyst([GUARD + WRONG])
         _check(analyst)
@@ -394,7 +394,7 @@ class TestTheJudgeSeesFactsOnly:
         assert '"SleepEx"' in note
 
     def test_a_finding_never_asked_stands_under_its_own_heading(self) -> None:
-        from maljan.pipeline.validation import FUNCTION_CHECK_NOT_ASKED_HEAD
+        from malspark.pipeline.validation import FUNCTION_CHECK_NOT_ASKED_HEAD
 
         analyst = _Analyst([])
         with (

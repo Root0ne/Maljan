@@ -9,7 +9,7 @@ import pytest
 def test_api_key_is_forwarded_to_the_client(monkeypatch, module, cls):
     import importlib
 
-    mod = importlib.import_module(f"maljan.memory.{module}")
+    mod = importlib.import_module(f"malspark.memory.{module}")
     fake = MagicMock()
     monkeypatch.setattr("qdrant_client.QdrantClient", fake)
     getattr(mod, cls)(url="http://q:6333", api_key="k")

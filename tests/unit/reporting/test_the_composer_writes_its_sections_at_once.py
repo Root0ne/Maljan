@@ -21,8 +21,8 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_openai.chat_models.base import _convert_message_to_dict
 
-from maljan.reporting.composer import COMPOSED_SECTIONS, ReportComposer
-from maljan.reporting.models import (
+from malspark.reporting.composer import COMPOSED_SECTIONS, ReportComposer
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkDomain,
@@ -30,9 +30,9 @@ from maljan.reporting.models import (
     SampleIdentity,
     TTPMapping,
 )
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 _LEAD = "The evidence for the "
 
@@ -176,7 +176,9 @@ def _compose(
 ) -> tuple[ReportComposer, MalwareReport]:
     report = _report()
     composer = ReportComposer(llm=llm, per_section_timeout=timeout)
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
+    ):
         asyncio.run(composer.compose(report, _isr(), concurrent=concurrent))
     return composer, report
 
@@ -271,7 +273,7 @@ class TestTheWaitFollowsThePace:
         composer.per_section_timeout = 0.1  # type: ignore[assignment]
         composer.output_cap = 100
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(composer.compose(report, _isr(), concurrent=True))
         assert not any("did not answer within" in reason for reason in composer.degradations)
@@ -294,7 +296,7 @@ class TestTheCachedHeadIsWrittenFirst:
         assert llm.most_in_flight == len(COMPOSED_SECTIONS) - 1
 
     def test_the_first_piece_of_the_lead_answer_releases_the_rest(self) -> None:
-        from maljan.reporting.composer import _FirstPiece, _on_first_piece
+        from malspark.reporting.composer import _FirstPiece, _on_first_piece
 
         async def _run() -> bool:
             released = asyncio.Event()
@@ -315,7 +317,7 @@ class TestTheCachedHeadIsWrittenFirst:
 @pytest.mark.parametrize("concurrent", [False, True])
 def test_the_head_note_rides_on_the_section_request(concurrent: bool) -> None:
     """On a caching model's manual path every section shares the head, noted on its request."""
-    from maljan.llm.anthropic_history import SHARED_HEAD
+    from malspark.llm.anthropic_history import SHARED_HEAD
 
     seen: list[BaseMessage] = []
 
@@ -328,13 +330,15 @@ def test_the_head_note_rides_on_the_section_request(concurrent: bool) -> None:
 
     report = _report()
     composer = ReportComposer(llm=_Keeps(), per_section_timeout=30)
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
+    ):
         asyncio.run(
             composer.compose(
                 report, _isr(), facts_block="FACTS", run_state="", concurrent=concurrent
             )
         )
-    from maljan.reporting.composer import _published_techniques
+    from malspark.reporting.composer import _published_techniques
 
     heads = {str(m.content)[: m.response_metadata[SHARED_HEAD]] for m in seen}
     # The head: the facts, then the techniques the report publishes.
@@ -398,7 +402,7 @@ class TestTheLeadReleasesItsGroup:
             def callbacks(self) -> None:
                 return None
 
-        with caplog.at_level(logging.INFO, logger="maljan"):
+        with caplog.at_level(logging.INFO, logger="malspark"):
             _compose(_Closed(), concurrent=True)
         assert any("no listener" in r.getMessage() for r in caplog.records)
 
@@ -417,7 +421,7 @@ def test_a_cancelled_job_leaves_no_section_running() -> None:
     async def _run() -> list[asyncio.Task[Any]]:
         composer = ReportComposer(llm=_Closing(delay=5.0), per_section_timeout=30)
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             job = asyncio.create_task(composer.compose(_report(), _isr(), concurrent=True))
             await asyncio.sleep(0.1)
@@ -455,7 +459,7 @@ class TestAStoppedComposeKeepsWhatItWrote:
         async def _run() -> None:
             composer = ReportComposer(llm=self._Mixed(fast), per_section_timeout=30)
             with patch(
-                "maljan.reporting.composer.structured_output_supported_for_llm",
+                "malspark.reporting.composer.structured_output_supported_for_llm",
                 return_value=False,
             ):
                 job = asyncio.create_task(composer.compose(report, _isr(), concurrent=concurrent))
@@ -485,7 +489,7 @@ class TestAStoppedComposeKeepsWhatItWrote:
 
 
 def test_a_job_cancelled_inside_one_section_ends_every_other_before_compose_returns() -> None:
-    from maljan.core.cancellation import JobCancelled
+    from malspark.core.cancellation import JobCancelled
 
     class _CancelledInOne(_Recorder):
         async def ainvoke(self, messages: list[BaseMessage], **kwargs: Any) -> AIMessage:
@@ -501,7 +505,7 @@ def test_a_job_cancelled_inside_one_section_ends_every_other_before_compose_retu
     async def _run() -> list[asyncio.Task[Any]]:
         composer = ReportComposer(llm=_CancelledInOne(delay=5.0), per_section_timeout=30)
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             with pytest.raises(JobCancelled):
                 await composer.compose(_report(), _isr(), concurrent=True)
@@ -537,7 +541,10 @@ class TestAgainstTheSequentialBase:
     more; the retries and the findings are the base's, the technique named.
     The request bodies were re-pinned when rule 2 of the system text came to
     ask for what a fact shows in the sample's terms instead of a named and
-    refuted claim (T-560): that sentence is the only change.
+    refuted claim (T-560): that sentence is the only change. The HTML digest
+    was recaptured when the product took its new name (T-576): the HTML's
+    generator line is the only change; the report digest stays as the test
+    computes it.
     """
 
     def test_the_requests_and_the_report_are_those_of_the_base(self) -> None:
@@ -550,7 +557,7 @@ class TestAgainstTheSequentialBase:
         report = _report()
         composer = ReportComposer(llm=llm, per_section_timeout=60)
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(
                 composer.compose(
@@ -584,7 +591,7 @@ class TestEachSectionKeepsItsOwnTurnDeadline:
     def _list() -> Any:
         from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 
-        from maljan.llm.fallback import FallbackChatModel
+        from malspark.llm.fallback import FallbackChatModel
 
         models = [FakeMessagesListChatModel(responses=[AIMessage(content="{}")]) for _ in range(2)]
         return FallbackChatModel(models=models, labels=["first", "second"], agent="reporter")
@@ -632,14 +639,14 @@ class TestEachSectionKeepsItsOwnTurnDeadline:
 
         composer = ReportComposer(llm=_Listed(), per_section_timeout=30, turn_share=0.5)
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(composer.compose(_report(), _isr(), concurrent=True))
         assert entered and {kind for kind, _seconds in entered} == {"own"}
 
 
 def test_a_model_that_does_not_cache_is_sent_no_head_note() -> None:
-    from maljan.llm.anthropic_history import SHARED_HEAD
+    from malspark.llm.anthropic_history import SHARED_HEAD
 
     seen: list[BaseMessage] = []
 
@@ -649,7 +656,9 @@ def test_a_model_that_does_not_cache_is_sent_no_head_note() -> None:
             return await super().ainvoke(messages, **kwargs)
 
     composer = ReportComposer(llm=_Keeps(), per_section_timeout=30)
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
+    ):
         asyncio.run(composer.compose(_report(), _isr(), facts_block="FACTS", concurrent=True))
     assert seen and not any(SHARED_HEAD in m.response_metadata for m in seen)
 
@@ -674,8 +683,8 @@ def _compose_under_a_ceiling(concurrent: bool) -> tuple[_Priced, ReportComposer,
     """Compose under a spend ceiling on a thread of its own; whether it finished in time."""
     import threading
 
-    from maljan.core.spend import SpendMeter
-    from maljan.core.token_ledger import TokenLedger
+    from malspark.core.spend import SpendMeter
+    from malspark.core.token_ledger import TokenLedger
 
     meter = SpendMeter(
         0.05,
@@ -693,7 +702,7 @@ def _compose_under_a_ceiling(concurrent: bool) -> tuple[_Priced, ReportComposer,
 
     def _run() -> None:
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(composer.compose(_report(), _isr(), concurrent=concurrent))
 
@@ -741,7 +750,7 @@ class TestALocalServerIsGivenWhatItServes:
         report = _report()
         composer = ReportComposer(llm=llm, per_section_timeout=0.35)  # type: ignore[arg-type]
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(composer.compose(report, _isr(), concurrent=True, at_once=slots))
         assert not [r for r in composer.degradations if "did not answer within" in r]
@@ -753,7 +762,7 @@ class TestALocalServerIsGivenWhatItServes:
         llm = _Slots(2, delay=0.1)
         composer = ReportComposer(llm=llm, per_section_timeout=0.35)  # type: ignore[arg-type]
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(composer.compose(_report(), _isr(), concurrent=True))
         assert [r for r in composer.degradations if "did not answer within" in r]

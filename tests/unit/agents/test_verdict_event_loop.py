@@ -25,7 +25,7 @@ from unittest.mock import MagicMock
 import pytest
 from openai import APIConnectionError
 
-from maljan.agents.base_agent import cause_chain, retry_on_connection_error
+from malspark.agents.base_agent import cause_chain, retry_on_connection_error
 
 
 class TestTheCauseChainIsLogged:
@@ -79,7 +79,7 @@ class TestTheVerdictRunsOnTheAgentLoop:
     @pytest.mark.asyncio
     async def test_the_model_is_awaited_on_the_shared_loop(self) -> None:
         """The client sees the agent loop, not the loop give_verdict was called on."""
-        from maljan.agents import base_agent, judge_agent
+        from malspark.agents import base_agent, judge_agent
 
         agent_loop = base_agent._get_agent_loop()
         assert asyncio.get_running_loop() is not agent_loop

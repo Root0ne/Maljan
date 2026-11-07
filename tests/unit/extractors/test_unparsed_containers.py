@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.extractors.sample_identity import unparsed_container_reason
+from malspark.extractors.sample_identity import unparsed_container_reason
 
 
 def _write(tmp_path: Path, name: str, magic: bytes = b"\x00\x01\x02\x03") -> Path:
@@ -205,9 +205,9 @@ def test_the_container_reason_and_the_pack_route_to_the_same_tool() -> None:
     calls. A format added to one and forgotten in the other makes the report
     state something about the run that did not happen.
     """
-    from maljan.core.pack_steps import default_steps
-    from maljan.extractors.sample_identity import _FORMAT_TOOL_FOR
-    from maljan.pipeline.triage_pack import _FORMAT_CALLS
+    from malspark.core.pack_steps import default_steps
+    from malspark.extractors.sample_identity import _FORMAT_TOOL_FOR
+    from malspark.pipeline.triage_pack import _FORMAT_CALLS
 
     routed = {
         file_type: step.called

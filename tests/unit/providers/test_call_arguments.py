@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from maljan.providers.call_arguments import argument_table, pick_argument
+from malspark.providers.call_arguments import argument_table, pick_argument
 
 NAMES = ("FullName", "SubKey", "Registry")
 

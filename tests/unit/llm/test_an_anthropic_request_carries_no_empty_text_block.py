@@ -20,10 +20,10 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.core.config import Settings
-from maljan.llm.anthropic_history import Memory, prepared
-from maljan.llm.anthropic_provider import AnthropicProvider
-from maljan.pipeline.validation import Violation, _with_feedback
+from malspark.core.config import Settings
+from malspark.llm.anthropic_history import Memory, prepared
+from malspark.llm.anthropic_provider import AnthropicProvider
+from malspark.pipeline.validation import Violation, _with_feedback
 
 from .anthropic_wire import Wire, install, message
 

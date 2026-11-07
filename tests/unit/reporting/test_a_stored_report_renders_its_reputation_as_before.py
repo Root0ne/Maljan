@@ -16,7 +16,7 @@ import re
 
 import pytest
 
-from maljan.reporting.models import MalwareReport
+from malspark.reporting.models import MalwareReport
 from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import _benchmark
 
 # ``(markdown, html with the nonce "fixed", normalised STIX)`` as dev 2c2522b2 renders them.
@@ -58,16 +58,20 @@ from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before impor
 # table, which has no row left and is not printed; nothing else changed (nor the STIX).
 # The STIX re-pinned when a process the sample's lineage rule leaves out of its
 # tree came to say so (T-511): each desktop process carries
-# ``x_maljan_sample_process_tree: false`` (run4 six: svchost.exe and
+# ``x_malspark_sample_process_tree: false`` (run4 six: svchost.exe and
 # SecurityHealthHost.exe, each in the three readings the stored tree lists;
 # run5 and run7 one; local8 five), and nothing else changed; the Markdown and
 # HTML did not change. The readings of a pid of the sample's tree that record
 # no lineage of their own (run4's pid 83 and 89 rows) carry nothing.
+# Re-pinned when the product took its new name (T-576): the HTML's generator
+# line, and the export's producer name and ``x_malspark_*`` properties; with
+# the previous name each digest is the one pinned before, and the Markdown did
+# not change.
 STORED_RENDERS = {
-    "run7": ("87ad1594f3cbc6ea", "125193da10162be9", "d7d34f660c1bb621"),
-    "run5": ("4fbb0b856aea7f8e", "60e2582c1e229b35", "9641d065877c52f9"),
-    "run4": ("581eb11ec3924a68", "75af799857a50862", "bb10807f7a9e1244"),
-    "local8": ("058e0d21f925bb0e", "8148921046a3b91c", "b28907fee7bb4cca"),
+    "run7": ("87ad1594f3cbc6ea", "f8c2570b24983f04", "b23832cca0c12242"),
+    "run5": ("4fbb0b856aea7f8e", "827d5f7ebdee3768", "eef2b4ff2b507c84"),
+    "run4": ("581eb11ec3924a68", "0d81125d321278da", "f18d8e14c64c335e"),
+    "local8": ("058e0d21f925bb0e", "6016e1c49686fbb1", "cafa41d179455da0"),
 }
 
 _UUID = re.compile(r"--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -80,8 +84,8 @@ def _digest(text: str) -> str:
 
 @pytest.mark.parametrize("run", sorted(STORED_RENDERS))
 def test_a_stored_run_renders_as_dev_rendered_it(run: str) -> None:
-    from maljan.reporting.renderers import HtmlRenderer, MarkdownRenderer
-    from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+    from malspark.reporting.renderers import HtmlRenderer, MarkdownRenderer
+    from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
 
     root = _benchmark()
     if root is None or not (root / run / "report.json").is_file():

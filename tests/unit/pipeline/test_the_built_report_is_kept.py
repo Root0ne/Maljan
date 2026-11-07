@@ -2,7 +2,7 @@
 
 The graph has no checkpointer, and an ``ainvoke`` that raises returns nothing:
 a run that failed after its report was built used to lose the report with
-everything else. ``MaljanApp`` runs the graph as a stream now, keeps what the
+everything else. ``MalsparkApp`` runs the graph as a stream now, keeps what the
 report node returned the moment it returns, and says where the graph failed.
 On a run that completes, the final state is the one ``ainvoke`` returns.
 """
@@ -16,9 +16,9 @@ import pytest
 from langgraph.errors import InvalidUpdateError
 from langgraph.graph import END, START, StateGraph
 
-from maljan.app import MaljanApp
-from maljan.pipeline.builder import _node
-from maljan.pipeline.state import AnalysisState
+from malspark.app import MalsparkApp
+from malspark.pipeline.builder import _node
+from malspark.pipeline.state import AnalysisState
 
 REPORT = {"verdict": "Malware", "degradation_reasons": []}
 
@@ -48,8 +48,8 @@ async def _quiet(state: Any) -> dict[str, Any]:
     return {}
 
 
-def _app(graph: Any) -> MaljanApp:
-    app = MaljanApp.__new__(MaljanApp)
+def _app(graph: Any) -> MalsparkApp:
+    app = MalsparkApp.__new__(MalsparkApp)
     app.graph = graph
     app.built_report = None
     app.failed_step = None

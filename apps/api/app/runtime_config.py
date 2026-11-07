@@ -24,7 +24,7 @@ from app.services.settings_catalog_api import API_DEFAULTS, API_EDITABLE
 from app.services.settings_service import SettingsService, core_settings_cache
 
 if TYPE_CHECKING:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +143,7 @@ class RuntimeConfig:
         reason every read here does: a settings read must not take a request
         down.
         """
-        from maljan.core.settings_overrides import StoredValueRefused, build_settings
+        from malspark.core.settings_overrides import StoredValueRefused, build_settings
 
         try:
             async with self._factory() as db:

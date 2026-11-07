@@ -20,8 +20,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.report_service import ioc_feed_rows
-from maljan.reporting.builder import build_consolidated_iocs
-from maljan.reporting.models import (
+from malspark.reporting.builder import build_consolidated_iocs
+from malspark.reporting.models import (
     EvidenceIndexRow,
     EvidenceSection,
     FileHashes,
@@ -31,7 +31,7 @@ from maljan.reporting.models import (
     NetworkIOCs,
     SampleIdentity,
 )
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers.stix_renderer import (
     RECOVERED_BY_EMULATION,
     ExtendedSTIXRenderer,
     emulation_from_ledger,
@@ -40,8 +40,8 @@ from maljan.reporting.renderers.stix_renderer import (
     indicator_publish_reason,
     publishes,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.stix_models import Bundle
 
 C2 = "relay7.example.net"
 C2_URL = f"https://{C2}/gate/"
@@ -297,14 +297,14 @@ class TestAReportStoredBeforeTheRecord:
 
 class TestAPublicSuffixName:
     def test_a_benign_name_under_a_country_second_level_is_known(self) -> None:
-        from maljan.extractors import network_extractor
+        from malspark.extractors import network_extractor
 
         name = next(iter(network_extractor._BENIGN_DOMAINS))
         assert network_extractor.is_well_known_benign_host(f"cdn.{name}")
         assert not network_extractor.is_well_known_benign_host("example.co.uk")
 
     def test_a_list_name_under_a_country_second_level_is_its_registered_name(self) -> None:
-        from maljan.extractors import network_extractor
+        from malspark.extractors import network_extractor
 
         assert not network_extractor.is_well_known_benign_host("microsoft.com.example.co.uk")
         assert network_extractor.is_well_known_benign_host("8.8.8.8")

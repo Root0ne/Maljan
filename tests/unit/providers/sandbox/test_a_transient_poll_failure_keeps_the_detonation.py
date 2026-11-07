@@ -16,10 +16,10 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from maljan.core.config import Settings
-from maljan.providers.errors import ProviderError
-from maljan.providers.sandbox.rest import RestSandboxProvider
-from maljan.providers.sandbox.triage import TriageSandboxProvider
+from malspark.core.config import Settings
+from malspark.providers.errors import ProviderError
+from malspark.providers.sandbox.rest import RestSandboxProvider
+from malspark.providers.sandbox.triage import TriageSandboxProvider
 
 
 def _triage(handler: Callable[[httpx.Request], httpx.Response]) -> Any:
@@ -119,8 +119,8 @@ def test_a_request_the_server_can_never_serve_fails_at_once(build: Any, status: 
 def test_cape_fails_at_once_on_a_request_it_can_never_serve(status: int) -> None:
     from unittest.mock import patch
 
-    from maljan.loaders.cape2_client import CAPEv2Client
-    from maljan.loaders.sandbox_client import SandboxError
+    from malspark.loaders.cape2_client import CAPEv2Client
+    from malspark.loaders.sandbox_client import SandboxError
 
     with patch("httpx.Client"):
         client = CAPEv2Client(base_url="http://cape.invalid:8000")

@@ -20,7 +20,8 @@ import io
 import os
 from typing import Any
 
-from maljan.schemas.evidence_spill import EvidenceSpill, SpillRefused
+from malspark.core.previous_name import PREVIOUS_NAME
+from malspark.schemas.evidence_spill import EvidenceSpill, SpillRefused
 from pydantic import SecretStr
 
 from app.config import settings
@@ -60,6 +61,49 @@ def deny_anonymous_policy(bucket: str) -> str:
     )
 
 
+# The bucket a deployment started before the product's rename (T-576) kept
+# everything in, and the one this process settled on, by configured name.
+PREVIOUS_BUCKET = f"{PREVIOUS_NAME}-samples"
+_SETTLED: dict[str, str] = {}
+
+
+def bucket(store: Any | None = None) -> str:
+    """The bucket every read and write uses.
+
+    The configured one, except where nothing configured it (``MINIO_BUCKET``
+    unset), the default bucket is missing and the bucket of a deployment
+    started before the rename is there: that one is used, and the log names
+    ``MINIO_BUCKET``. An empty twin is never created beside it, so the
+    samples, the spilled parts and the anchored audit heads (under their object
+    lock) stay where they are. Settled once per configured name; a store that
+    cannot answer leaves the configured name, asked again next time.
+    """
+    name: str = settings.minio_bucket
+    if name in _SETTLED:
+        return _SETTLED[name]
+    from app.config import get_settings
+
+    if name == PREVIOUS_BUCKET or "minio_bucket" in get_settings().model_fields_set:
+        _SETTLED[name] = name
+        return name
+    try:
+        held = store if store is not None else client()
+        if held.bucket_exists(name) or not held.bucket_exists(PREVIOUS_BUCKET):
+            _SETTLED[name] = name
+            return name
+    except Exception:  # noqa: BLE001 — the caller's own call says what is wrong with the store
+        return name
+    logger.warning(
+        "MinIO bucket %s is absent and %s, the bucket before the product's rename, holds the "
+        "data; it is used. Set MINIO_BUCKET=%s to keep this.",
+        name,
+        PREVIOUS_BUCKET,
+        PREVIOUS_BUCKET,
+    )
+    _SETTLED[name] = PREVIOUS_BUCKET
+    return PREVIOUS_BUCKET
+
+
 def ensure_bucket(store: Any) -> None:
     """Create the bucket when it is missing, with the anonymous-deny policy.
 
@@ -70,14 +114,14 @@ def ensure_bucket(store: Any) -> None:
     at the ``s3:GetObject`` level; the API still works because it uses the
     configured access key.
     """
-    bucket = settings.minio_bucket
-    if store.bucket_exists(bucket):
+    name = bucket(store)
+    if store.bucket_exists(name):
         return
-    store.make_bucket(bucket)
-    logger.info("MinIO bucket created: %s", bucket)
+    store.make_bucket(name)
+    logger.info("MinIO bucket created: %s", name)
     try:
-        store.set_bucket_policy(bucket, deny_anonymous_policy(bucket))
-        logger.info("MinIO bucket policy set (anonymous-deny): %s", bucket)
+        store.set_bucket_policy(name, deny_anonymous_policy(name))
+        logger.info("MinIO bucket policy set (anonymous-deny): %s", name)
     except Exception as policy_exc:
         # Failure to set the policy is non-fatal but loud: operators must
         # verify bucket privacy out-of-band.
@@ -92,20 +136,20 @@ def ensure_bucket(store: Any) -> None:
 def put_file(store: Any, path: str, source: str, *, content_type: str) -> None:
     """Write the file at ``source`` to ``path``, creating the bucket first when missing."""
     ensure_bucket(store)
-    store.fput_object(settings.minio_bucket, path, source, content_type=content_type)
+    store.fput_object(bucket(store), path, source, content_type=content_type)
 
 
 def put_bytes(store: Any, path: str, blob: bytes, *, content_type: str) -> None:
     """Write ``blob`` to ``path``, creating the bucket first when missing."""
     ensure_bucket(store)
     store.put_object(
-        settings.minio_bucket, path, io.BytesIO(blob), length=len(blob), content_type=content_type
+        bucket(store), path, io.BytesIO(blob), length=len(blob), content_type=content_type
     )
 
 
 def read_bytes(store: Any, path: str) -> bytes:
     """The object at ``path``, read whole."""
-    response = store.get_object(settings.minio_bucket, path)
+    response = store.get_object(bucket(store), path)
     try:
         return bytes(response.read())
     finally:
@@ -119,21 +163,21 @@ EVIDENCE_CHUNK_BYTES = 1024 * 1024
 
 def open_object(store: Any, path: str) -> Any:
     """The object at ``path`` as a response to stream; the caller closes and releases it."""
-    return store.get_object(settings.minio_bucket, path)
+    return store.get_object(bucket(store), path)
 
 
 def download(store: Any, path: str, destination: str) -> None:
     """Copy the object at ``path`` to ``destination``, readable by this user only (0600)."""
-    store.fget_object(settings.minio_bucket, path, destination)
+    store.fget_object(bucket(store), path, destination)
     os.chmod(destination, 0o600)
 
 
 def remove(store: Any, path: str) -> None:
     """Delete the object at ``path``."""
-    store.remove_object(settings.minio_bucket, path)
+    store.remove_object(bucket(store), path)
 
 
-# A job's whole answers (``maljan.schemas.evidence_spill``): every object a
+# A job's whole answers (``malspark.schemas.evidence_spill``): every object a
 # job's ledger references lives under its own prefix, named by the SHA-256 of
 # its bytes, so a job's objects are found and removed by the job id alone and
 # the same bytes are kept once per job.
@@ -315,7 +359,7 @@ class JobEvidenceSpill(EvidenceSpill):
                 return None
         try:
             response = self._client().get_object(
-                settings.minio_bucket, key, offset=max(0, int(offset)), length=int(length or 0)
+                bucket(self._client()), key, offset=max(0, int(offset)), length=int(length or 0)
             )
             try:
                 return bytes(response.read())
@@ -344,7 +388,7 @@ class JobEvidenceSpill(EvidenceSpill):
                 ensure_bucket(store)
                 self._bucket_ready = True
             store.put_object(
-                settings.minio_bucket,
+                bucket(store),
                 key,
                 io.BytesIO(blob),
                 length=len(blob),
@@ -454,7 +498,7 @@ async def evidence_bound() -> int:
 
     The setting's own default stands when it cannot be read, and that is logged.
     """
-    from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+    from malspark.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 
     from app.runtime_config import runtime_config
 
@@ -473,12 +517,14 @@ async def evidence_bound() -> int:
 def remove_prefix(store: Any, prefix: str) -> int:
     """Delete every object under ``prefix``; returns how many were removed."""
     removed = 0
-    for item in store.list_objects(settings.minio_bucket, prefix=prefix, recursive=True):
-        store.remove_object(settings.minio_bucket, item.object_name)
+    name = bucket(store)
+    for item in store.list_objects(name, prefix=prefix, recursive=True):
+        store.remove_object(name, item.object_name)
         removed += 1
     return removed
 
 
 def probe() -> None:
     """Raise when the store cannot be reached; the health check's question."""
-    client().bucket_exists(settings.minio_bucket)
+    store = client()
+    store.bucket_exists(bucket(store))

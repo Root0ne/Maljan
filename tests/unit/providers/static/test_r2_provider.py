@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maljan.core.config import Settings
-from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
-from maljan.providers.static.r2 import R2StaticProvider
+from malspark.core.config import Settings
+from malspark.providers.static.generic_mcp import GenericMCPStaticProvider
+from malspark.providers.static.r2 import R2StaticProvider
 
 
 def _cfg():
@@ -61,8 +61,8 @@ def test_opening_never_writes_the_resolved_command_back_into_the_config(monkeypa
     user-editable ``Settings`` leaf ``settings_snapshot()`` later persists into
     the job's run summary, so a write here would show the operator a
     ``command`` they never set."""
-    from maljan.agents import mcp_client
-    from maljan.providers.base import StaticJobContext
+    from malspark.agents import mcp_client
+    from malspark.providers.base import StaticJobContext
 
     recorded: dict[str, object] = {}
 
@@ -77,7 +77,7 @@ def test_opening_never_writes_the_resolved_command_back_into_the_config(monkeypa
             return []
 
     monkeypatch.setattr(mcp_client, "MCPLangChainToolkit", _FakeToolkit)
-    from maljan.providers.static import r2
+    from malspark.providers.static import r2
 
     monkeypatch.setattr(
         r2, "resolve_r2_binary", lambda configured, env=None: r2.R2Binary(configured, ())
@@ -129,7 +129,7 @@ def test_a_hidden_work_directory_is_rejected_at_settings_validation() -> None:
     import pytest
     from pydantic import ValidationError
 
-    from maljan.core.config import StaticR2Config
+    from malspark.core.config import StaticR2Config
 
     with pytest.raises(ValidationError) as excinfo:
         StaticR2Config(work_dir=".hidden")
@@ -139,7 +139,7 @@ def test_a_hidden_work_directory_is_rejected_at_settings_validation() -> None:
 
 
 def test_an_ordinary_work_directory_is_accepted() -> None:
-    from maljan.core.config import StaticR2Config
+    from malspark.core.config import StaticR2Config
 
     assert StaticR2Config(work_dir="r2-work").work_dir == "r2-work"
 
@@ -150,7 +150,7 @@ def test_a_work_directory_that_is_a_path_is_rejected() -> None:
     import pytest
     from pydantic import ValidationError
 
-    from maljan.core.config import StaticR2Config
+    from malspark.core.config import StaticR2Config
 
     for bad in ("data/samples/..", "..", ".", "data/samples/r2-work"):
         with pytest.raises(ValidationError):
@@ -171,7 +171,7 @@ def test_a_block_naming_no_directory_is_still_mirrored_somewhere_r2_can_open() -
 
 
 def test_a_stored_mirror_dir_is_read_as_the_work_dir() -> None:
-    from maljan.core.config import StaticR2Config
+    from malspark.core.config import StaticR2Config
 
     block = StaticR2Config(mirror_dir="data/samples/r2-elsewhere")
     assert block.work_dir == "r2-elsewhere"
@@ -181,14 +181,14 @@ def test_a_stored_mirror_dir_is_read_as_the_work_dir() -> None:
 
 
 def test_a_stored_work_dir_wins_over_a_stored_mirror_dir() -> None:
-    from maljan.core.config import StaticR2Config
+    from malspark.core.config import StaticR2Config
 
     block = StaticR2Config(mirror_dir="data/samples/old", work_dir="new")
     assert block.work_dir == "new"
 
 
 def test_a_stored_mirror_dir_reaches_the_mirror_spec_through_the_settings() -> None:
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     cfg = build_settings(
         {
@@ -205,7 +205,7 @@ def test_a_stored_mirror_dir_that_was_never_valid_is_still_refused() -> None:
     import pytest
     from pydantic import ValidationError
 
-    from maljan.core.config import StaticR2Config
+    from malspark.core.config import StaticR2Config
 
     for bad in ("data/samples/..", "..", "", ".", "data/samples/.hidden"):
         with pytest.raises(ValidationError):

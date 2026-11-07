@@ -20,9 +20,9 @@ import pytest
 
 from app.services import settings_service as svc
 from app.services.server_map import validate_server_map
-from maljan.core import builtin_declarations, tool_declarations
-from maljan.core import settings_overrides as so
-from maljan.core.tool_declarations import stored_changes, with_mark, without_mark
+from malspark.core import builtin_declarations, tool_declarations
+from malspark.core import settings_overrides as so
+from malspark.core.tool_declarations import stored_changes, with_mark, without_mark
 
 # The mechanism is read against a block that ships a table of its tools.
 pytestmark = pytest.mark.usefixtures("a_built_in_server_ships_a_tool_table")
@@ -92,7 +92,7 @@ def test_a_partial_change_of_a_tool_the_release_stops_shipping_never_fails_the_b
     # A later release no longer ships the tool: the partial change alone is
     # now the tool's whole declaration, and it does not validate.
     _ship(release, "scan", None)
-    with caplog.at_level(logging.WARNING, logger="maljan"):
+    with caplog.at_level(logging.WARNING, logger="malspark"):
         built = so.build_settings({"mcp.servers": stored})
     assert "scan" not in built.mcp.servers[SERVER].tool_facts
     assert set(built.mcp.servers[SERVER].tool_facts) == set(so.shipped_tool_facts(BLOCK))
@@ -138,7 +138,7 @@ def test_no_stored_change_of_an_invented_block_fails_the_build(stored: dict[str,
 
 def test_the_warning_is_sanitised(caplog: pytest.LogCaptureFixture) -> None:
     forged = "gone\nWARNING forged line\x1b[31m"
-    with caplog.at_level(logging.WARNING, logger="maljan"):
+    with caplog.at_level(logging.WARNING, logger="malspark"):
         so.build_settings(
             {
                 "sandbox.cape2.mcp.tool_facts": {

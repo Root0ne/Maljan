@@ -17,13 +17,13 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline.outcome import (
+from malspark.pipeline.outcome import (
     INCONCLUSIVE_REASON,
     absent_analysis_message,
     nothing_was_analysed,
     verdict_for_run,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _isr(claims: int = 1) -> AgentISR:
@@ -160,22 +160,22 @@ class TestTheEvidenceTheVerdictStageCouldNotSee:
     """
 
     def test_a_run_that_did_record_evidence_gets_the_narrower_sentence(self) -> None:
-        from maljan.pipeline.outcome import NO_CLAIMS_REASON, corrected_reasons
+        from malspark.pipeline.outcome import NO_CLAIMS_REASON, corrected_reasons
 
         corrected = corrected_reasons([INCONCLUSIVE_REASON, "analyst failures: static"], [object()])
 
         assert corrected == [NO_CLAIMS_REASON, "analyst failures: static"]
 
     def test_a_run_with_no_evidence_keeps_the_sentence_it_had(self) -> None:
-        from maljan.pipeline.outcome import corrected_reasons
+        from malspark.pipeline.outcome import corrected_reasons
 
         assert corrected_reasons([INCONCLUSIVE_REASON], []) == [INCONCLUSIVE_REASON]
 
     def test_the_report_reads_either_sentence_as_inconclusive(self) -> None:
-        from maljan.pipeline.outcome import NO_CLAIMS_REASON
-        from maljan.reporting.builder import MalwareReportBuilder
-        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.pipeline.outcome import NO_CLAIMS_REASON
+        from malspark.reporting.builder import MalwareReportBuilder
+        from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         report = MalwareReportBuilder.apply_fallback_narrative(
             MalwareReport(
@@ -355,7 +355,7 @@ class TestWhatAStatedFailureMaySay:
     def test_a_path_is_not_an_authored_sentence(self) -> None:
         from app.worker.analysis_worker import StatedFailure, failure_reason
 
-        stated = StatedFailure("the sample at /srv/maljan/data/samples/aa/sample.exe was refused")
+        stated = StatedFailure("the sample at /srv/malspark/data/samples/aa/sample.exe was refused")
         assert stated.publishable is False
         assert failure_reason(stated, "abc") == "StatedFailure (error id abc)"
 
@@ -372,10 +372,10 @@ class TestWhatAStatedFailureMaySay:
         """``StatedFailure(str(exc))`` is the shape the contract exists against."""
         from app.worker.analysis_worker import StatedFailure, failure_reason
 
-        driver_error = OSError("could not open /etc/maljan/credentials.toml")
+        driver_error = OSError("could not open /etc/malspark/credentials.toml")
         stated = StatedFailure(str(driver_error))
         assert stated.publishable is False
-        assert "/etc/maljan" not in failure_reason(stated, "abc")
+        assert "/etc/malspark" not in failure_reason(stated, "abc")
 
     def test_the_sentence_still_reaches_the_log_under_the_error_id(
         self, caplog: pytest.LogCaptureFixture
@@ -384,13 +384,13 @@ class TestWhatAStatedFailureMaySay:
 
         from app.worker.analysis_worker import StatedFailure, failure_reason
 
-        stated = StatedFailure("the sample at /srv/maljan/data/samples/aa/sample.exe was refused")
+        stated = StatedFailure("the sample at /srv/malspark/data/samples/aa/sample.exe was refused")
         with caplog.at_level(logging.ERROR):
             failure_reason(stated, "abc123")
 
         said = " ".join(record.getMessage() for record in caplog.records)
         assert "abc123" in said
-        assert "/srv/maljan" in said, "the operator's own log keeps what the API may not"
+        assert "/srv/malspark" in said, "the operator's own log keeps what the API may not"
 
     def test_the_sentences_this_module_raises_are_accepted(self) -> None:
         from app.worker.analysis_worker import AbsentAnalysisError, StatedFailure
@@ -458,7 +458,7 @@ class TestWhatAStatedFailureMaySay:
 
 class TestWhatTheReaderIsTold:
     def _inconclusive_report(self) -> Any:
-        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
 
         return MalwareReport(
             identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64), file_type="pe"),
@@ -469,8 +469,8 @@ class TestWhatTheReaderIsTold:
         )
 
     def test_the_key_findings_say_inconclusive_rather_than_classified(self) -> None:
-        from maljan.reporting.builder import MalwareReportBuilder
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.builder import MalwareReportBuilder
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         report = MalwareReportBuilder.apply_fallback_narrative(self._inconclusive_report())
         findings = (
@@ -482,9 +482,9 @@ class TestWhatTheReaderIsTold:
         assert report.executive_summary == ""
 
     def test_an_ordinary_run_says_no_summary_was_written(self) -> None:
-        from maljan.reporting.builder import MalwareReportBuilder
-        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.builder import MalwareReportBuilder
+        from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         report = MalwareReportBuilder.apply_fallback_narrative(
             MalwareReport(
@@ -500,14 +500,14 @@ class TestWhatTheReaderIsTold:
 
     def test_the_header_carries_the_reason(self) -> None:
         """The degraded banner is where a reader meets it, not a JSON field."""
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         markdown = MarkdownRenderer().render(self._inconclusive_report())
 
         assert INCONCLUSIVE_REASON in markdown
 
     def test_the_judge_is_told_that_an_empty_run_is_not_benign(self) -> None:
-        from maljan.agents.judge_agent import JUDGE_VERDICT_SYSTEM
+        from malspark.agents.judge_agent import JUDGE_VERDICT_SYSTEM
 
         assert "Benign is a finding, not a default" in JUDGE_VERDICT_SYSTEM
         assert "an empty report is not a clean sample" in JUDGE_VERDICT_SYSTEM

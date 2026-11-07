@@ -194,7 +194,7 @@ export default function ImportDialog({ onClose }: { onClose: () => void }) {
         </div>
 
         <p className="text-xs text-text-secondary mt-2">
-          Choose a <code>maljan-settings.json</code> file exported from this or another instance.
+          Choose a <code>malspark-settings.json</code> file exported from this or another instance.
           Only the keys that actually differ from the settings in effect now are sent.
         </p>
 

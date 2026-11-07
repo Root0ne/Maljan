@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.core.config import RestMappingConfig
-from maljan.providers.sandbox.rest_mapping import apply_mapping, compile_mapping
-from maljan.schemas.sandbox_document import sandbox_document
-from maljan.schemas.sandbox_report import SandboxReport, cape_report_to_sandbox_report
+from malspark.core.config import RestMappingConfig
+from malspark.providers.sandbox.rest_mapping import apply_mapping, compile_mapping
+from malspark.schemas.sandbox_document import sandbox_document
+from malspark.schemas.sandbox_report import SandboxReport, cape_report_to_sandbox_report
 
 
 def _cape(**blocks: Any) -> dict[str, Any]:

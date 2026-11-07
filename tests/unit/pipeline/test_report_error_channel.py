@@ -42,7 +42,7 @@ def fake_container() -> Any:
 
 
 def _initial_state() -> dict[str, Any]:
-    """A full ``AnalysisState`` literal, mirroring ``MaljanApp.arun``."""
+    """A full ``AnalysisState`` literal, mirroring ``MalsparkApp.arun``."""
     return {
         "file_hash": "deadbeef",
         "file_name": "sample.exe",
@@ -80,12 +80,12 @@ def _initial_state() -> dict[str, Any]:
 @pytest.mark.asyncio
 async def test_report_error_reaches_final_state(fake_container: Any) -> None:
     """A ``report_node`` failure must survive as ``report_error`` in the final state."""
-    from maljan.pipeline.builder import build_graph
+    from malspark.pipeline.builder import build_graph
 
     graph = build_graph(fake_container)
 
     with patch(
-        "maljan.reporting.builder.MalwareReportBuilder.build_deterministic",
+        "malspark.reporting.builder.MalwareReportBuilder.build_deterministic",
         side_effect=RuntimeError("boom"),
     ):
         result = await graph.ainvoke(_initial_state())
@@ -103,7 +103,7 @@ async def _report_only(container: Any, state: dict[str, Any]) -> dict[str, Any]:
     overwrite the bundle these tests are about; the node is the unit under test
     either way.
     """
-    from maljan.pipeline.nodes import make_report_node
+    from malspark.pipeline.nodes import make_report_node
 
     container.is_mock = False
     container.get_narrative_agent.return_value = None
@@ -116,7 +116,7 @@ async def _report_only(container: Any, state: dict[str, Any]) -> dict[str, Any]:
 async def test_the_judges_assessment_reaches_the_report(fake_container: Any) -> None:
     """Severity, category and family are read off the bundle, not computed.
 
-    The judge writes them into ``x_maljan_assessment`` on the STIX bundle it
+    The judge writes them into ``x_malspark_assessment`` on the STIX bundle it
     returns, and the report node has to carry them across because nothing
     downstream recomputes them any more. A break here does not raise — the
     report simply prints "not assessed" and an unattributed family, which is
@@ -126,7 +126,7 @@ async def test_the_judges_assessment_reaches_the_report(fake_container: Any) -> 
     state["stix_output"] = {
         "type": "bundle",
         "objects": [],
-        "x_maljan_assessment": {
+        "x_malspark_assessment": {
             "severity": {"rating": "High", "rationale": "it encrypts every file"},
             "malware_category": "ransomware",
             "family": {"name": "LockBit", "confidence": 0.66, "evidence_ids": ["ev_0003"]},
@@ -152,7 +152,7 @@ async def test_a_family_the_judge_could_not_cite_is_kept_and_flagged(
     state["stix_output"] = {
         "type": "bundle",
         "objects": [],
-        "x_maljan_assessment": {"family": {"name": "LockBit", "confidence": 0.4}},
+        "x_malspark_assessment": {"family": {"name": "LockBit", "confidence": 0.4}},
     }
 
     report = (await _report_only(fake_container, state)).get("malware_report") or {}
@@ -173,7 +173,7 @@ async def test_an_unassessed_run_says_so_rather_than_inventing_a_severity(
 
 
 def _pack_row(tool: str, seq: int, ok: bool = True) -> Any:
-    from maljan.schemas.evidence import build_entry, format_entry_id
+    from malspark.schemas.evidence import build_entry, format_entry_id
 
     return build_entry(
         entry_id=format_entry_id(seq),
@@ -194,7 +194,7 @@ class TestTheProviderIsNotRunTwice:
     the report node must not pay capa's budget again or record the pair twice."""
 
     async def _run(self, container: Any, ledger: list) -> Any:
-        from maljan.pipeline.nodes import make_report_node
+        from malspark.pipeline.nodes import make_report_node
 
         container.is_mock = False
         container.get_narrative_agent.return_value = None
@@ -229,7 +229,7 @@ CAPA_WHY = "no rule was loaded from data/capa-rules, which is missing or holds n
 
 async def _with_bundle(container: Any, bundle: Any) -> dict[str, Any]:
     """The report node over a run whose evidence-only provider answers ``bundle``."""
-    from maljan.pipeline.nodes import make_report_node
+    from malspark.pipeline.nodes import make_report_node
 
     container.is_mock = False
     container.get_narrative_agent.return_value = None
@@ -249,11 +249,11 @@ class TestAPassTheProviderDidNotMakeDegradesTheRun:
 
     @pytest.mark.asyncio
     async def test_the_state_the_report_and_the_scope_say_it(self, fake_container: Any) -> None:
-        from maljan.pipeline.operator_choice import provider_pass_reason
-        from maljan.providers.base import StaticEvidenceBundle
-        from maljan.reporting.models import MalwareReport
-        from maljan.reporting.renderers import MarkdownRenderer
-        from maljan.reporting.renderers.layout import ANALYST
+        from malspark.pipeline.operator_choice import provider_pass_reason
+        from malspark.providers.base import StaticEvidenceBundle
+        from malspark.reporting.models import MalwareReport
+        from malspark.reporting.renderers import MarkdownRenderer
+        from malspark.reporting.renderers.layout import ANALYST
 
         reason = provider_pass_reason("capa_yara", "capa", CAPA_WHY, "put the rules in place")
 
@@ -277,9 +277,9 @@ class TestAPassTheProviderDidNotMakeDegradesTheRun:
         self, fake_container: Any
     ) -> None:
         """Mock mode, or a judge that skipped the builder: the state's reasons are kept."""
-        from maljan.pipeline.nodes import make_report_node
-        from maljan.pipeline.operator_choice import provider_pass_reason
-        from maljan.providers.base import StaticEvidenceBundle
+        from malspark.pipeline.nodes import make_report_node
+        from malspark.pipeline.operator_choice import provider_pass_reason
+        from malspark.providers.base import StaticEvidenceBundle
 
         reason = provider_pass_reason("capa_yara", "capa", "why", "fix")
         container = fake_container
@@ -309,7 +309,7 @@ class TestAPassTheProviderDidNotMakeDegradesTheRun:
 
     @pytest.mark.asyncio
     async def test_a_whole_pass_changes_nothing(self, fake_container: Any) -> None:
-        from maljan.providers.base import StaticEvidenceBundle
+        from malspark.providers.base import StaticEvidenceBundle
 
         result = await _with_bundle(fake_container, StaticEvidenceBundle())
 

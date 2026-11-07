@@ -18,8 +18,8 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.mcp_client import StructuredAnswer
-from maljan.core.declaration_proposals import ProbeCall, propose, propose_tool
+from malspark.agents.mcp_client import StructuredAnswer
+from malspark.core.declaration_proposals import ProbeCall, propose, propose_tool
 
 ROOT = Path(__file__).resolve().parents[3]
 REP_STUB = ROOT / "tests" / "fixtures" / "validation" / "rep_stub.py"

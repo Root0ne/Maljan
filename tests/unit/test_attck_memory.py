@@ -7,11 +7,11 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.memory.attck_index import ATTCKIndex, SearchResult, _cosine_similarity
-from maljan.memory.attck_loader import ATTCKTechnique, _parse_bundle
-from maljan.memory.attck_validator import ATTCKValidator
-from maljan.memory.hybrid_attck_index import HybridATTCKIndex
-from maljan.memory.semantic_attck_index import SemanticATTCKIndex
+from malspark.memory.attck_index import ATTCKIndex, SearchResult, _cosine_similarity
+from malspark.memory.attck_loader import ATTCKTechnique, _parse_bundle
+from malspark.memory.attck_validator import ATTCKValidator
+from malspark.memory.hybrid_attck_index import HybridATTCKIndex
+from malspark.memory.semantic_attck_index import SemanticATTCKIndex
 
 # ---------------------------------------------------------------------------
 # Fixtures

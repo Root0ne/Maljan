@@ -7,17 +7,17 @@ from pathlib import Path
 
 import pytest
 
-from maljan.core.config import RestMappingConfig
-from maljan.providers.errors import ProviderConfigurationError
-from maljan.providers.sandbox.rest_mapping import (
+from malspark.core.config import RestMappingConfig
+from malspark.providers.errors import ProviderConfigurationError
+from malspark.providers.sandbox.rest_mapping import (
     CHANNELS,
     apply_mapping,
     compile_mapping,
     node_count,
 )
-from maljan.reporting.ledger_projection import network_from_sandbox_report
-from maljan.schemas.sandbox_document import sandbox_document
-from maljan.schemas.sandbox_report import section_id
+from malspark.reporting.ledger_projection import network_from_sandbox_report
+from malspark.schemas.sandbox_document import sandbox_document
+from malspark.schemas.sandbox_report import section_id
 from tests.unit._ledger_helpers import sandbox_view
 
 GOLDEN = Path(__file__).resolve().parents[3] / "fixtures" / "golden" / "rest_mapping"
@@ -151,7 +151,7 @@ def test_select_returns_rows_alongside_stats_without_smuggling_them_in():
     ``object.__setattr__(stats, "_rows", kept)`` on a ``frozen=True``
     dataclass -- an undeclared field a stats-only rebuild elsewhere could
     silently drop. It returns ``(stats, rows)`` instead."""
-    from maljan.providers.sandbox.rest_mapping import ChannelStats, _select
+    from malspark.providers.sandbox.rest_mapping import ChannelStats, _select
 
     compiled = compile_mapping(RestMappingConfig(processes="$.p[*]"))
     payload = {"p": [{"pid": 1}, {"pid": 2}]}
@@ -279,8 +279,8 @@ def test_the_xyz_golden_renders_through_the_tools_an_agent_calls():
 
 def test_an_accepted_format_s_mapping_reads_every_row_as_a_built_in_does():
     """An upload read through a declared format's own mapping keeps every process and DNS row."""
-    from maljan.core.report_formats import ReportFormat
-    from maljan.providers.sandbox.readers import format_mapping, report_reader
+    from malspark.core.report_formats import ReportFormat
+    from malspark.providers.sandbox.readers import format_mapping, report_reader
 
     fmt = ReportFormat.model_validate(
         {

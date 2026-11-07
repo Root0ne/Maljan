@@ -16,10 +16,10 @@ import struct
 import zlib
 from pathlib import Path
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.agents.judge_agent import PACK_ROW_SHOWN_BELOW, pack_rows_shown_below
-from maljan.pipeline import triage_pack
-from maljan.pipeline.triage_pack import (
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.agents.judge_agent import PACK_ROW_SHOWN_BELOW, pack_rows_shown_below
+from malspark.pipeline import triage_pack
+from malspark.pipeline.triage_pack import (
     PACK_HEADING,
     PIPELINE,
     CapaSettings,
@@ -29,7 +29,7 @@ from maljan.pipeline.triage_pack import (
     pack_row_heads,
     run_pack,
 )
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.schemas.evidence import EvidenceCounter
 
 from ..tools.synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
 

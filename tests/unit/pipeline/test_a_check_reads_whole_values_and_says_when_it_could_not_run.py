@@ -20,8 +20,8 @@ from typing import Any
 
 import pytest
 
-from maljan.agents._indicator_denylists import whole_value_in, whole_value_starts
-from maljan.pipeline.validation import (
+from malspark.agents._indicator_denylists import whole_value_in, whole_value_starts
+from malspark.pipeline.validation import (
     CHECK_FAILED_CODE,
     ENTRY_CONTENTS_MISSTATED_CODE,
     KEPT_WITH_A_FINDING,
@@ -39,17 +39,17 @@ from maljan.pipeline.validation import (
     ungrounded_capabilities,
     validation_metrics,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     CapabilityCell,
     EvidenceSection,
     FileHashes,
     MalwareReport,
     SampleIdentity,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.judgement import JudgeAssessment
-from maljan.schemas.stix_models import (
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.judgement import JudgeAssessment
+from malspark.schemas.stix_models import (
     AttackPattern,
     Bundle,
     ConfidenceAnnotatedRelationship,
@@ -145,13 +145,13 @@ def _credit(tid: str, agents: list[str]) -> Bundle:
         relationship_type="uses",
         source_ref=malware.id,
         target_ref=pattern.id,
-        x_maljan_confidence=0.9,
-        x_maljan_evidence_basis="static",
-        x_maljan_contributing_agents=agents,
+        x_malspark_confidence=0.9,
+        x_malspark_evidence_basis="static",
+        x_malspark_contributing_agents=agents,
     )
     return Bundle(
         objects=[malware, pattern, edge],
-        x_maljan_assessment=JudgeAssessment(verdict="Malware", confidence=0.9),
+        x_malspark_assessment=JudgeAssessment(verdict="Malware", confidence=0.9),
     )
 
 

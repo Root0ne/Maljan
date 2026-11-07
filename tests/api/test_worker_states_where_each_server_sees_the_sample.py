@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.worker import analysis_worker
-from maljan.core.settings_overrides import build_settings
+from malspark.core.settings_overrides import build_settings
 
 
 class _Stop(Exception):
@@ -57,7 +57,7 @@ def test_no_line_names_a_samples_path_variable() -> None:
 
 def test_a_retired_variable_still_set_is_named_with_the_setting_that_holds_it() -> None:
     lines = analysis_worker.retired_environment_lines(
-        {"GHIDRA_CONTAINER_SAMPLES_PATH": "/srv/maljan/data/samples"}
+        {"GHIDRA_CONTAINER_SAMPLES_PATH": "/srv/malspark/data/samples"}
     )
     assert lines == [
         "GHIDRA_CONTAINER_SAMPLES_PATH is set and no longer read; the setting "
@@ -65,13 +65,13 @@ def test_a_retired_variable_still_set_is_named_with_the_setting_that_holds_it() 
         "copied the variable there once, only if the setting accepts its value, it differs "
         "from the shipped one and the store held none)."
     ]
-    assert "/srv/maljan" not in lines[0]
+    assert "/srv/malspark" not in lines[0]
 
 
 def test_the_retired_attck_age_variable_names_the_refresh_setting() -> None:
-    (line,) = analysis_worker.retired_environment_lines({"MALJAN_ATTCK_MAX_AGE_DAYS": "30"})
+    (line,) = analysis_worker.retired_environment_lines({"MALSPARK_ATTCK_MAX_AGE_DAYS": "30"})
     assert line.startswith(
-        "MALJAN_ATTCK_MAX_AGE_DAYS is set and no longer read; the setting "
+        "MALSPARK_ATTCK_MAX_AGE_DAYS is set and no longer read; the setting "
         "core.validation.attck_refresh_days holds the value now"
     )
     assert "30" not in line

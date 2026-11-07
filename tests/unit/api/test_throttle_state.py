@@ -36,7 +36,7 @@ def _reset(monkeypatch):
 async def test_refresh_consume_fails_closed_when_redis_is_down(monkeypatch, caplog):
     flaky = _Flaky()
     monkeypatch.setattr(throttle.aioredis, "from_url", lambda *a, **k: flaky)
-    with caplog.at_level("WARNING", logger="maljan.auth.throttle"):
+    with caplog.at_level("WARNING", logger="malspark.auth.throttle"):
         assert await throttle.refresh_token_consume("u1", "j1") is False
     state = throttle.throttle_state()
     assert state["available"] is False
@@ -56,7 +56,7 @@ async def test_redis_is_retried_after_the_interval_and_recovery_logs_once(monkey
     now[0] += 5
     assert await throttle.refresh_token_consume("u1", "j1") is False
     now[0] += throttle.RETRY_AFTER_S
-    with caplog.at_level("WARNING", logger="maljan.auth.throttle"):
+    with caplog.at_level("WARNING", logger="malspark.auth.throttle"):
         assert await throttle.refresh_token_consume("u1", "j1") is True
     assert throttle.throttle_state()["available"] is True
     assert flaky.deleted == ["auth:refresh:u1:j1"]
@@ -94,7 +94,7 @@ async def test_debug_logs_never_carry_the_exception_text(monkeypatch, caplog):
     monkeypatch.setattr(
         throttle.aioredis, "from_url", lambda *a, **k: _LeakyOnCommand(leaky_message)
     )
-    with caplog.at_level("DEBUG", logger="maljan.auth.throttle"):
+    with caplog.at_level("DEBUG", logger="malspark.auth.throttle"):
         assert await throttle.refresh_token_consume("u1", "j1") is False
     assert "pw@" not in caplog.text
     assert leaky_message not in caplog.text

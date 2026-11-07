@@ -6,8 +6,8 @@ from typing import Any
 
 from typer.testing import CliRunner
 
-from maljan import cli
-from maljan.core.config import Settings
+from malspark import cli
+from malspark.core.config import Settings
 
 
 def _run(monkeypatch, args: list[str]) -> Settings:
@@ -22,7 +22,7 @@ def _run(monkeypatch, args: list[str]) -> Settings:
             raise RuntimeError("stop")
 
     monkeypatch.setattr(cli, "_settings", lambda: cfg)
-    monkeypatch.setattr(cli, "MaljanApp", _App)
+    monkeypatch.setattr(cli, "MalsparkApp", _App)
     monkeypatch.setattr(cli, "_release", lambda app: None)
     CliRunner().invoke(cli.app, ["analyze", "abc", *args])
     return seen["config"]

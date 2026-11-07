@@ -23,10 +23,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from tests.integration._session_probe import SessionFactory, fake_job, fake_sample, rows_for
 
 from app.worker.analysis_worker import _report_inputs, judge_bundle_record, keep_the_stopped_run
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.pipeline.stopped_run import partial_report
-from maljan.reporting.models import MalwareReport
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.pipeline.stopped_run import partial_report
+from malspark.reporting.models import MalwareReport
 
 NOTE = "Stopped by the job timeout (60 s, core.job_timeout) 61 s into the run, node report."
 
@@ -35,7 +35,7 @@ STAMP = datetime(2026, 9, 22, 23, 30, tzinfo=UTC)
 
 def _judge_bundle() -> dict[str, Any]:
     """The judge's bundle as the judge node keeps it: ``Bundle.model_dump()``."""
-    from maljan.schemas.stix_models import Bundle
+    from malspark.schemas.stix_models import Bundle
 
     return Bundle.model_validate(
         {
@@ -208,8 +208,8 @@ class TestTheStoredBundle:
         record = judge_bundle_record(_judged_state())
         assert record is not None
         # The judge's draft, labelled as unpublished and otherwise as recorded.
-        assert stix_bundle.pop("x_maljan_published") is False
-        assert "unpublished draft" in stix_bundle.pop("x_maljan_notice")
+        assert stix_bundle.pop("x_malspark_published") is False
+        assert "unpublished draft" in stix_bundle.pop("x_malspark_notice")
         assert stix_bundle == record["bundle"]
         (malware,) = stix_bundle["objects"]
         assert malware["created"].startswith("2026-09-22T23:30:00")
@@ -224,4 +224,4 @@ class TestTheStoredBundle:
             hash_mismatch_reason=None,
         )
         assert stix_bundle == {**export, "spec_version": "2.1"}
-        assert "x_maljan_published" not in stix_bundle
+        assert "x_malspark_published" not in stix_bundle

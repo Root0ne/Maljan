@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from maljan.core.declaration_proposals import SHARED_OPEN_NOTE, propose
+from malspark.core.declaration_proposals import SHARED_OPEN_NOTE, propose
 
 _DEFINITIONS = [
     {

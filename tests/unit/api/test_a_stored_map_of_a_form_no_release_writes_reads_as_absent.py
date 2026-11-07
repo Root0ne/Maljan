@@ -26,10 +26,10 @@ from fastapi.testclient import TestClient
 from app.models import RuntimeSetting
 from app.services import settings_service as svc
 from app.services.server_map import validate_server_map
-from maljan.core import settings_overrides as so
-from maljan.core import tool_declarations
-from maljan.core.settings_overrides import build_settings, refused_tool_changes
-from maljan.core.tool_declarations import CHANGES_FORM, CHANGES_MARK, with_mark
+from malspark.core import settings_overrides as so
+from malspark.core import tool_declarations
+from malspark.core.settings_overrides import build_settings, refused_tool_changes
+from malspark.core.tool_declarations import CHANGES_FORM, CHANGES_MARK, with_mark
 
 LEAF = "core.static.ghidra.tool_facts"
 BLOCK = "static.ghidra"

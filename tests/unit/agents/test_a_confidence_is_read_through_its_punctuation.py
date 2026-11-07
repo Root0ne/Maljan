@@ -18,9 +18,9 @@ from pathlib import Path
 
 import pytest
 
-from maljan.agents.base_agent import ClaimRead, claims_unread_sentence, read_claim_blocks
-from maljan.pipeline.validation import CLAIM_WITHOUT_CONFIDENCE_CODE, parse_violations
-from maljan.schemas.isr_models import AgentISR
+from malspark.agents.base_agent import ClaimRead, claims_unread_sentence, read_claim_blocks
+from malspark.pipeline.validation import CLAIM_WITHOUT_CONFIDENCE_CODE, parse_violations
+from malspark.schemas.isr_models import AgentISR
 
 ANSWER = (
     Path(__file__).resolve().parents[2]

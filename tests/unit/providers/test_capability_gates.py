@@ -7,9 +7,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ALLOWED = {
-    "src/maljan/core/config.py",  # the read-only compatibility view on MCPConfig
-    "src/maljan/providers/static/ghidra/provider.py",
-    "src/maljan/providers/sandbox/cape2.py",
+    "src/malspark/core/config.py",  # the read-only compatibility view on MCPConfig
+    "src/malspark/providers/static/ghidra/provider.py",
+    "src/malspark/providers/sandbox/cape2.py",
     # A released migration carries its own frozen copy of the 2026-09-03 renames.
     "apps/api/alembic/versions/20260903000000_rename_provider_setting_keys.py",
 }
@@ -27,7 +27,7 @@ def test_no_module_outside_the_providers_reads_the_legacy_mcp_paths():
 
 
 def test_the_function_hash_gate_is_a_capability_read():
-    source = (ROOT / "src" / "maljan" / "pipeline" / "nodes.py").read_text(encoding="utf-8")
+    source = (ROOT / "src" / "malspark" / "pipeline" / "nodes.py").read_text(encoding="utf-8")
     assert "provides_function_hashes" in source
     assert 'transport == "http"' not in source
 

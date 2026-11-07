@@ -47,7 +47,7 @@ from tests.integration._session_probe import (
 def _isolated_runtime_settings(monkeypatch: pytest.MonkeyPatch):
     """Keep these tests off the real runtime-settings singletons."""
     from app import runtime_config as rc
-    from maljan.core.config import reset_settings_cache
+    from malspark.core.config import reset_settings_cache
 
     async def _mock_mode_allowed_override() -> dict[str, Any]:
         return {"api.mock_mode_allowed": True}
@@ -143,7 +143,7 @@ def _pipeline_result() -> dict[str, Any]:
 
 
 def _mock_mode():
-    return patch.dict("os.environ", {"MALJAN_MOCK_MODE": "true"}, clear=False)
+    return patch.dict("os.environ", {"MALSPARK_MOCK_MODE": "true"}, clear=False)
 
 
 @pytest.mark.asyncio
@@ -171,7 +171,7 @@ async def test_no_transaction_is_open_while_the_pipeline_runs(redis_stub: MagicM
     api_config._settings = None
     with (
         _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_slow_pipeline)),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(side_effect=_slow_pipeline)),
     ):
         result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
@@ -201,7 +201,7 @@ async def _run_and_watch_the_boundary(
     api_config._settings = None
     with (
         _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_pipeline)),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(side_effect=_pipeline)),
     ):
         result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
@@ -290,7 +290,7 @@ async def test_the_job_is_marked_failed_through_a_fresh_session(
     api_config._settings = None
     with (
         _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_pipeline)),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(side_effect=_pipeline)),
     ):
         result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
@@ -324,7 +324,7 @@ async def test_a_failure_names_the_class_and_an_error_id_only(
     with (
         _mock_mode(),
         patch(
-            "maljan.app.MaljanApp.arun",
+            "malspark.app.MalsparkApp.arun",
             new=AsyncMock(side_effect=FileNotFoundError("/home/someone/samples/secret.exe")),
         ),
     ):
@@ -374,7 +374,7 @@ async def test_a_cancelled_run_still_flushes_its_feed(redis_stub: MagicMock) -> 
     api_config._settings = None
     with (
         _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_cancelled_pipeline)),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(side_effect=_cancelled_pipeline)),
         patch.object(worker_module, "_stop_event_feed", _record_stop),
     ):
         result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
@@ -415,7 +415,7 @@ async def test_the_operators_cancellation_writes_the_cancelled_row(
     api_config._settings = None
     with (
         _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_wait_to_be_cancelled)),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(side_effect=_wait_to_be_cancelled)),
         patch.object(worker_module, "CANCEL_POLL_SECONDS", 0.01),
     ):
         # A job the operator cancelled is a finished job, and it ends like one:
@@ -475,7 +475,7 @@ async def test_the_run_claims_its_job_and_drops_the_claim_on_success(
     api_config._settings = None
     with (
         _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_pipeline)),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(side_effect=_pipeline)),
     ):
         result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
@@ -500,7 +500,7 @@ async def test_the_claim_is_dropped_when_the_run_fails(redis_stub: MagicMock) ->
     api_config._settings = None
     with (
         _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=RuntimeError("no"))),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(side_effect=RuntimeError("no"))),
     ):
         result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
@@ -535,7 +535,7 @@ async def test_the_refresher_cannot_outlive_the_job(redis_stub: MagicMock) -> No
     api_config._settings = None
     with (
         _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=_pipeline_result())),
     ):
         await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
@@ -560,7 +560,7 @@ async def test_a_redis_that_refuses_the_claim_never_costs_the_run(
     api_config._settings = None
     with (
         _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(return_value=_pipeline_result())),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(return_value=_pipeline_result())),
     ):
         result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
@@ -594,7 +594,7 @@ async def test_a_cancel_request_writes_its_row_even_between_two_polls(
     api_config._settings = None
     with (
         _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_cancelled)),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(side_effect=_cancelled)),
     ):
         result = await run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))
     api_config._settings = None
@@ -623,7 +623,7 @@ async def _shut_down_mid_run(factory: SessionFactory, redis: MagicMock, job: Any
     api_config._settings = None
     with (
         _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_long_pipeline)),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(side_effect=_long_pipeline)),
     ):
         task = asyncio.create_task(
             run_analysis({"redis": redis, "db_session": factory}, str(job.id))
@@ -708,7 +708,7 @@ async def test_a_shutdown_that_cancels_the_task_is_not_swallowed(
     api_config._settings = None
     with (
         _mock_mode(),
-        patch("maljan.app.MaljanApp.arun", new=AsyncMock(side_effect=_long_pipeline)),
+        patch("malspark.app.MalsparkApp.arun", new=AsyncMock(side_effect=_long_pipeline)),
     ):
         task = asyncio.create_task(
             run_analysis({"redis": redis_stub, "db_session": factory}, str(job.id))

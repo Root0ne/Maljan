@@ -22,14 +22,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from app.api.v1.reports import _detail
-from maljan.pipeline.outcome import (
+from malspark.pipeline.outcome import (
     VERDICT_READ_FALLBACK,
     VERDICT_READ_STATED,
     VERDICT_READ_UNRECOGNISED,
     VERDICT_READ_UNSTATED,
     verdict_reading,
 )
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.stix_models import Bundle
 
 READINGS = (
     VERDICT_READ_STATED,
@@ -67,7 +67,7 @@ def _report_row(run_summary: dict[str, Any] | None) -> Any:
 def _bundle(assessment: dict[str, Any] | None, **top: Any) -> Bundle:
     payload: dict[str, Any] = {"objects": [], **top}
     if assessment is not None:
-        payload["x_maljan_assessment"] = assessment
+        payload["x_malspark_assessment"] = assessment
     return Bundle.model_validate(payload)
 
 
@@ -85,14 +85,14 @@ class TestWhatThePipelineRecords:
     def test_an_answer_that_was_not_a_bundle(self) -> None:
         bundle = _bundle(
             {"verdict": "Malware"},
-            x_maljan_fallback_verdict={"decision": "Suspicious", "source": "extracted"},
+            x_malspark_fallback_verdict={"decision": "Suspicious", "source": "extracted"},
         )
 
         assert verdict_reading(bundle) == VERDICT_READ_FALLBACK
 
     def test_it_agrees_with_the_verdict_beside_it(self) -> None:
         """The same order ``decide_from_bundle`` reads them in."""
-        from maljan.pipeline.outcome import INCONCLUSIVE_VERDICT, decide_from_bundle
+        from malspark.pipeline.outcome import INCONCLUSIVE_VERDICT, decide_from_bundle
 
         for assessment, reading in (
             ({"verdict": "Benign"}, VERDICT_READ_STATED),

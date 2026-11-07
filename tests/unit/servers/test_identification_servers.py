@@ -25,9 +25,9 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.declared_reading import builtin_tools
-from maljan.core.tool_declarations import ToolFacts
+from malspark.core.config import Settings
+from malspark.core.declared_reading import builtin_tools
+from malspark.core.tool_declarations import ToolFacts
 
 ROOT = Path(__file__).resolve().parents[3]
 SERVICES = ROOT / "services"
@@ -52,7 +52,7 @@ MODULES = {"die": die, "ilspy": ilspy, "goresym": goresym}
 
 @pytest.fixture
 def roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A sample root holding one file, named in ``MALJAN_SAMPLE_ROOTS``; no bound on a run."""
+    """A sample root holding one file, named in ``MALSPARK_SAMPLE_ROOTS``; no bound on a run."""
     root = tmp_path / "samples"
     root.mkdir()
     (root / "sample.bin").write_bytes(b"MZ not a program\n")
@@ -631,7 +631,7 @@ class TestTheDeclarations:
         (port,) = re.findall(r"MCP_PORT=(\d+)", dockerfile)
         assert block.url == f"http://{service}:{port}/mcp"
         assert f"EXPOSE {port}" in dockerfile
-        assert "MALJAN_SAMPLE_ROOTS=/data/samples" in dockerfile
+        assert "MALSPARK_SAMPLE_ROOTS=/data/samples" in dockerfile
 
 
 def test_the_declared_rows_read_what_the_servers_answer(roots: Path, bin_dir: Path) -> None:

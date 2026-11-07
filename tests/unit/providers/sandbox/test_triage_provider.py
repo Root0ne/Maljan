@@ -9,15 +9,15 @@ from pathlib import Path
 import httpx
 import pytest
 
-from maljan.core.config import Settings
-from maljan.providers.errors import ArtefactFetchFailed, ProviderError
-from maljan.providers.sandbox.triage import (
+from malspark.core.config import Settings
+from malspark.providers.errors import ArtefactFetchFailed, ProviderError
+from malspark.providers.sandbox.triage import (
     ARTEFACT_FETCH_ATTEMPTS,
     FetchBudget,
     TriageSandboxProvider,
     fetch_budget,
 )
-from maljan.schemas.sandbox_report import section_id
+from malspark.schemas.sandbox_report import section_id
 
 FIX = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox"
 
@@ -286,7 +286,7 @@ def test_fetch_maps_overview_and_task_report_into_a_sandbox_report():
     # The consumer shape, not Triage's own field names: a flow's combined
     # "host:port" is split, and a DNS/HTTP request is read from its
     # domain_req/domain_resp or web_req/web_resp sub-object.
-    from maljan.schemas.sandbox_document import sandbox_document
+    from malspark.schemas.sandbox_document import sandbox_document
 
     # The request is held structurally; the document writes its rows.
     assert _bare(sandbox_document(report)["network"]["dns"]) == [
@@ -338,8 +338,8 @@ def _bare(rows):
 
 
 def test_the_rendered_dict_names_what_this_sandbox_cannot_provide():
-    from maljan.schemas.sandbox_document import sandbox_document
-    from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+    from malspark.schemas.sandbox_document import sandbox_document
+    from malspark.schemas.sandbox_report import triage_overview_to_sandbox_report
 
     overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
     rendered = sandbox_document(
@@ -355,7 +355,7 @@ def test_every_consumer_channel_is_populated_or_named_unavailable():
     never silently empty, which would read exactly like a clean sample.
     Written as a loop over the channel list so a future edit to the mapper
     cannot reintroduce a silent gap without this test catching it."""
-    from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+    from malspark.schemas.sandbox_report import triage_overview_to_sandbox_report
 
     overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
     task = json.loads((FIX / "triage_report_behavioral1.json").read_text(encoding="utf-8"))
@@ -393,10 +393,10 @@ def test_every_consumer_channel_is_populated_or_named_unavailable():
 def test_the_mapped_network_survives_the_real_parsers_not_as_na():
     """The mapping is only proven correct once real consumers, not the
     mapper's own assertions, read real domains and IPs out of it."""
-    from maljan.parsers.network_parser import NetworkParser
-    from maljan.reporting.ledger_projection import network_from_sandbox_report
-    from maljan.schemas.sandbox_document import sandbox_document
-    from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+    from malspark.parsers.network_parser import NetworkParser
+    from malspark.reporting.ledger_projection import network_from_sandbox_report
+    from malspark.schemas.sandbox_document import sandbox_document
+    from malspark.schemas.sandbox_report import triage_overview_to_sandbox_report
 
     overview = json.loads((FIX / "triage_overview.json").read_text(encoding="utf-8"))
     task = json.loads((FIX / "triage_report_behavioral1.json").read_text(encoding="utf-8"))
@@ -745,7 +745,7 @@ async def test_probe_reports_ok_against_the_resources_endpoint(monkeypatch):
     cfg.sandbox.triage.api_token = __import__("pydantic").SecretStr("not-a-real-token")
     provider = TriageSandboxProvider.from_settings(cfg)
 
-    import maljan.providers.sandbox.triage as triage_module
+    import malspark.providers.sandbox.triage as triage_module
 
     real_async_client = httpx.AsyncClient
 

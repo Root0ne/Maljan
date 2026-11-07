@@ -224,7 +224,7 @@ def degradations(record: RunRecord) -> list[str]:
     not one, even on a record written before the platform listed it apart:
     it is in :func:`operator_choices`.
     """
-    from maljan.pipeline.operator_choice import is_operator_choice
+    from malspark.pipeline.operator_choice import is_operator_choice
 
     return [r for r in _reasons(record) if not is_operator_choice(r)]
 
@@ -235,7 +235,7 @@ def operator_choices(record: RunRecord) -> list[str]:
     With any of them a record written before the platform listed them apart
     still carries among its degradation reasons. Each once, in order.
     """
-    from maljan.pipeline.operator_choice import is_operator_choice
+    from malspark.pipeline.operator_choice import is_operator_choice
 
     listed = list(record.run_summary.get("operator_choices") or [])
     listed += list(record.malware_report.get("operator_choices") or [])
@@ -261,8 +261,8 @@ def _measured_empty(record: RunRecord, section: str) -> bool:
     """
     if section != "encryption_scheme":
         return False
-    from maljan.reporting.evidence_bundles import is_crypto_finding, section_keywords
-    from maljan.reporting.models import EvidenceIndexRow
+    from malspark.reporting.evidence_bundles import is_crypto_finding, section_keywords
+    from malspark.reporting.models import EvidenceIndexRow
 
     report = record.malware_report
     profiles = [
@@ -499,7 +499,7 @@ def _check_narrative(record: RunRecord) -> Check:
 
 
 def _price_rows() -> dict[str, Any]:
-    from maljan.core.spend import table_prices
+    from malspark.core.spend import table_prices
 
     return dict(table_prices())
 
@@ -581,7 +581,7 @@ def priced_usage(record: RunRecord) -> tuple[float, list[str]]:
 
 def usage_records(record: RunRecord) -> list[dict[str, Any]]:
     """The run's per-call usage records (``model_usage`` events), retries decided left out."""
-    from maljan.core.token_ledger import RETRY_RECORD
+    from malspark.core.token_ledger import RETRY_RECORD
 
     out = []
     for event in record.events:
@@ -662,7 +662,7 @@ def _paired_records(record: RunRecord) -> _Pairing:
     A call answered whole is paired by its whole usage with a per-call record,
     a broken stream by its prompt's with a failed-attempt record.
     """
-    from maljan.llm.transient import FAILED_ATTEMPT_CALL
+    from malspark.llm.transient import FAILED_ATTEMPT_CALL
 
     records = usage_records(record)
     calls = [r for r in records if str(r.get("call") or "") != FAILED_ATTEMPT_CALL]
@@ -695,8 +695,8 @@ def _record_problems(record: RunRecord) -> tuple[list[str], float]:
     else. No other record, no record without a charge, and no record sent
     after the stub received the call it records.
     """
-    from maljan.core.spend import ESTIMATED_OUTPUT
-    from maljan.llm.transient import FAILED_ATTEMPT_CALL
+    from malspark.core.spend import ESTIMATED_OUTPUT
+    from malspark.llm.transient import FAILED_ATTEMPT_CALL
 
     rows = _price_rows()
     problems: list[str] = []
@@ -970,7 +970,7 @@ def _tightest_problems(
     leave its prompt no room. Computed here from the served facts, not by the
     product's own function, so a changed rule shows as a failure.
     """
-    from maljan.llm.context_window import REPLY_RESERVE_DIVISOR
+    from malspark.llm.context_window import REPLY_RESERVE_DIVISOR
 
     unknown = [m for m in models if m not in outputs]
     if unknown:
@@ -1163,7 +1163,7 @@ def answer_writers(record: RunRecord) -> tuple[dict[int, set[str]], list[str]]:
     because then each of them wrote those claims. Otherwise the call's
     writer is unknown, and that is a problem.
     """
-    from maljan.llm.transient import FAILED_ATTEMPT_CALL
+    from malspark.llm.transient import FAILED_ATTEMPT_CALL
 
     pools: dict[tuple[int, int, int], list[dict[str, Any]]] = {}
     for row in usage_records(record):

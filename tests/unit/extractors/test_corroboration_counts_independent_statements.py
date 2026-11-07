@@ -10,13 +10,13 @@ not a statement.
 
 from __future__ import annotations
 
-from maljan.extractors.capability_matrix import (
+from malspark.extractors.capability_matrix import (
     REPEATED_WORDS_SHARE,
     build_capability_matrix,
     independent_statements,
 )
-from maljan.reporting.renderers.markdown import _corroborated_words
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
+from malspark.reporting.renderers.markdown import _corroborated_words
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, Finding
 
 COPIED = "The sample persists by writing a shortcut into the Startup folder."
 
@@ -246,8 +246,8 @@ def test_a_findings_title_is_not_its_procedure() -> None:
 
 
 def test_the_narrative_is_told_which_layers_said_something_of_their_own() -> None:
-    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-    from maljan.reporting.narrative_agent import build_prompt_text
+    from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+    from malspark.reporting.narrative_agent import build_prompt_text
 
     isrs = {
         "static": _isr("static", _claim(COPIED)),

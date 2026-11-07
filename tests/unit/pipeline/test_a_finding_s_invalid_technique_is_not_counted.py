@@ -12,8 +12,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.pipeline.evidence_summary import collect, technique_evidence
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
+from malspark.pipeline.evidence_summary import collect, technique_evidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, Finding
 
 
 def _isr(*, flagged_claim: bool = False) -> AgentISR:

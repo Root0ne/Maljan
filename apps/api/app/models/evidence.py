@@ -50,7 +50,7 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # The failure text when ``ok`` is false, and what the tool said would make
-    # the next call succeed, when it said (``maljan.tools.errors``).
+    # the next call succeed, when it said (``malspark.tools.errors``).
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     remediation: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -63,7 +63,7 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     args: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     # Whether the model's arguments were truncated and were closed off before
     # the call ran, and what it wrote before they were
-    # (``maljan.agents.evidence_recorder``).
+    # (``malspark.agents.evidence_recorder``).
     args_repaired: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     args_raw: Mapped[str | None] = mapped_column(Text, nullable=True)
     # The model whose turn asked for the call, as ``provider/model``; NULL
@@ -76,7 +76,7 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     output: Mapped[str] = mapped_column(Text, nullable=False, default="")
     structured: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
     # The function index's exception-directory ranges, by function start,
-    # kept beside its answer for evidence roots (``maljan.analysis.evidence_roots``);
+    # kept beside its answer for evidence roots (``malspark.analysis.evidence_roots``);
     # never part of the answer. NULL on every other entry and every older row.
     function_ranges: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
 
@@ -104,7 +104,7 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     # Where the tool's declaration lives, what it declared about the answer,
     # the reputation record, and the operator's pack step, each as the entry
-    # recorded it when it was written (``maljan.schemas.evidence.LedgerEntry``).
+    # recorded it when it was written (``malspark.schemas.evidence.LedgerEntry``).
     # NULL where the entry carried none and on every row older than the
     # columns: absent, never false or empty.
     source: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -119,19 +119,19 @@ class EvidenceEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     agent_tab: Mapped[str | None] = mapped_column(String, nullable=True)
     # The fields of the call whose ``null`` the tool boundary dropped, and the
     # top-level ones it admitted that the transport did not send, each by its
-    # path segments (``maljan.agents.null_arguments``). NULL where there were
+    # path segments (``malspark.agents.null_arguments``). NULL where there were
     # none and on every row older than the columns; the chain digest seals
     # each only when set.
     args_nulls_dropped: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
     args_nulls_withheld: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
     # Where the platform's own readings behind a triage pack entry ran, as
     # sources (``mcp:<server key>``, ``pack`` for the worker beside one;
-    # ``maljan.tools.readers``). NULL where every reading ran in the worker
+    # ``malspark.tools.readers``). NULL where every reading ran in the worker
     # and on every row older than the column; the chain digest seals it only
     # when set.
     ran_on: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
     # Where the parts of the answer this row does not keep whole are kept
-    # whole in object storage (``maljan.schemas.evidence_spill``): one
+    # whole in object storage (``malspark.schemas.evidence_spill``): one
     # reference per part with the object key, the byte length and the SHA-256,
     # or the reason the upload failed. NULL where nothing was taken and on
     # every row older than the column.

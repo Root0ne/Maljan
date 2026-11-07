@@ -15,8 +15,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from maljan.core.config import Settings
-from maljan.core.pack_steps import check_steps, effective_steps
+from malspark.core.config import Settings
+from malspark.core.pack_steps import check_steps, effective_steps
 
 ROOT = Path(__file__).resolve().parents[3]
 WRITTEN = ROOT / "apps" / "web" / "src" / "test-fixtures" / "pack-steps-written-by-hand.json"

@@ -1,8 +1,8 @@
 """A relationship the platform builds names the agent that made the claim.
 
 When the judge's answer is not a bundle, this pipeline builds one from the
-analysts' claims. Every ``uses`` edge it built carried ``x_maljan_confidence:
-0.5`` and ``x_maljan_evidence_basis: unknown`` and credited no agent — 53 edges
+analysts' claims. Every ``uses`` edge it built carried ``x_malspark_confidence:
+0.5`` and ``x_malspark_evidence_basis: unknown`` and credited no agent — 53 edges
 across the stored fallback runs, each publishing a 0.5 as the judge's own
 number although the judge gave none, and each saying nobody contributed to a
 technique an analyst had claimed. An edge the platform mints names the agents
@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.extractors.capability_matrix import build_capability_matrix
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _claims() -> dict[str, AgentISR]:
@@ -39,7 +39,7 @@ def _claims() -> dict[str, AgentISR]:
 
 def _edges(bundle) -> dict[str, dict]:
     return {
-        o["x_maljan_technique_id"]: o
+        o["x_malspark_technique_id"]: o
         for o in bundle.model_dump(mode="json")["objects"]
         if o.get("type") == "relationship"
     }
@@ -52,8 +52,8 @@ class TestTheFallbackEdges:
         )
         edges = _edges(bundle)
 
-        assert edges["T1055"]["x_maljan_contributing_agents"] == ["static", "dynamic"]
-        assert edges["T1027"]["x_maljan_contributing_agents"] == ["static"]
+        assert edges["T1055"]["x_malspark_contributing_agents"] == ["static", "dynamic"]
+        assert edges["T1027"]["x_malspark_contributing_agents"] == ["static"]
 
     def test_no_edge_states_a_confidence(self) -> None:
         bundle = JudgeAgent(llm=MagicMock())._fallback_bundle_from_text(
@@ -61,8 +61,8 @@ class TestTheFallbackEdges:
         )
 
         for edge in _edges(bundle).values():
-            assert "x_maljan_confidence" not in edge
-            assert "x_maljan_evidence_basis" not in edge
+            assert "x_malspark_confidence" not in edge
+            assert "x_malspark_evidence_basis" not in edge
 
     def test_the_published_technique_carries_the_analysts_number(self) -> None:
         bundle = JudgeAgent(llm=MagicMock())._fallback_bundle_from_text(
@@ -137,4 +137,4 @@ class TestARetryAddedClaim:
     def test_an_unmarked_pattern_is_as_it_was(self) -> None:
         for pattern in self._patterns(_claims()).values():
             assert "description" not in pattern
-            assert not any(key.startswith("x_maljan_added") for key in pattern)
+            assert not any(key.startswith("x_malspark_added") for key in pattern)

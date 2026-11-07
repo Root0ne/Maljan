@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from maljan.reporting.models import Figure, FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.models import Figure, FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.html import HtmlRenderer
 
 
 def _figure(n: int) -> Figure:

@@ -18,7 +18,7 @@ grounded the first three, and no term read evasion or packing.
 
 from __future__ import annotations
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     CapabilityGrounding,
     behaviour_pattern,
     masked_values,
@@ -26,8 +26,8 @@ from maljan.pipeline.validation import (
     states_absence,
     ungrounded_capabilities,
 )
-from maljan.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 KEYLOGGING = "The sample performs keylogging and captures clipboard data [ev_0008, ev_0009]."
 EVADES = "The sample attempts to evade detection and debuggers [ev_0008, ev_0009]."

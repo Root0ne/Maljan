@@ -15,13 +15,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from maljan.analysis import sandbox_sections as ss
-from maljan.core.config import RestMappingConfig
-from maljan.providers.sandbox.readers import ReportReader, required_reader
-from maljan.providers.sandbox.rest_mapping import unnamed_blocks
-from maljan.providers.sandbox_tools import sandbox_channels, sandbox_network
-from maljan.schemas.sandbox_document import sandbox_document
-from maljan.schemas.sandbox_report import TASK_KEY, TASK_ROWS_KEY, SandboxReport
+from malspark.analysis import sandbox_sections as ss
+from malspark.core.config import RestMappingConfig
+from malspark.providers.sandbox.readers import ReportReader, required_reader
+from malspark.providers.sandbox.rest_mapping import unnamed_blocks
+from malspark.providers.sandbox_tools import sandbox_channels, sandbox_network
+from malspark.schemas.sandbox_document import sandbox_document
+from malspark.schemas.sandbox_report import TASK_KEY, TASK_ROWS_KEY, SandboxReport
 
 FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox"
 
@@ -211,7 +211,7 @@ class TestAKeptTaskBlockIsPagedPerItem:
         assert cited["fields"] == {TASK_KEY: "behavioral1", "name": "sig249", "score": 9}
 
     def test_a_page_builds_only_its_own_rows(self) -> None:
-        from maljan.schemas.sandbox_document import GroupedRows
+        from malspark.schemas.sandbox_document import GroupedRows
 
         document = self._document(100_000)
         held = document["channels"]["task.signatures"]

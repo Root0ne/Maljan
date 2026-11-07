@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.agents.mcp_client import MCPLangChainToolkit
+from malspark.agents.mcp_client import MCPLangChainToolkit
 
 
 def _make_mcp_tool(
@@ -395,7 +395,7 @@ class TestHttpTransport:
             async def __aexit__(self, *exc: object) -> bool:
                 return False
 
-        monkeypatch.setattr("maljan.agents.mcp_client.ClientSession", _FakeSessionCtx)
+        monkeypatch.setattr("malspark.agents.mcp_client.ClientSession", _FakeSessionCtx)
 
         tk = MCPLangChainToolkit(
             transport="http",
@@ -424,9 +424,9 @@ class TestDynamicAnalystMcpTransportWiring:
     """
 
     def test_http_transport_builds_http_toolkit(self, monkeypatch) -> None:
-        import maljan.agents.mcp_client as mc
-        from maljan.core.config import Settings
-        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+        import malspark.agents.mcp_client as mc
+        from malspark.core.config import Settings
+        from malspark.providers.sandbox.cape2 import CAPE2SandboxProvider
 
         captured: dict[str, Any] = {}
 
@@ -474,9 +474,9 @@ class TestDynamicAnalystMcpTransportWiring:
         assert captured["server_params"] is None
 
     def test_http_transport_without_url_skips(self, monkeypatch) -> None:
-        import maljan.agents.mcp_client as mc
-        from maljan.core.config import Settings
-        from maljan.providers.sandbox.cape2 import CAPE2SandboxProvider
+        import malspark.agents.mcp_client as mc
+        from malspark.core.config import Settings
+        from malspark.providers.sandbox.cape2 import CAPE2SandboxProvider
 
         def _boom(*a, **k):
             raise AssertionError("toolkit must not be built when url is empty")

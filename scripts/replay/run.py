@@ -129,7 +129,7 @@ def _write(path: Path | None, value: Any) -> None:
 
 def _replay(runs: list[Path], show_text: bool) -> list[dict[str, Any]]:
     """Each run replayed with the rules this process imports."""
-    cache = Path(tempfile.mkdtemp(prefix="maljan-replay-"))
+    cache = Path(tempfile.mkdtemp(prefix="malspark-replay-"))
     previous = prepare_process(cache)
     try:
         from scripts.replay.rules import replay_run
@@ -164,7 +164,7 @@ def _compare(
 
     ref_a, ref_b = refs
     owned = work is None
-    base = Path(tempfile.mkdtemp(prefix="maljan-replay-compare-")) if work is None else work
+    base = Path(tempfile.mkdtemp(prefix="malspark-replay-compare-")) if work is None else work
     try:
         before = {str(run): digests(run) for run in runs}
         records: dict[str, list[dict[str, Any]]] = {}
@@ -207,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.job:
             from scripts.replay.database import StoredRunExists, export_jobs
 
-            target = args.job_dir or Path(tempfile.mkdtemp(prefix="maljan-replay-jobs-"))
+            target = args.job_dir or Path(tempfile.mkdtemp(prefix="malspark-replay-jobs-"))
             job_dirs = [] if args.job_dir else [target]
             try:
                 exported = export_jobs(

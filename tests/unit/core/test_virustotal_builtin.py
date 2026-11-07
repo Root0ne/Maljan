@@ -13,8 +13,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from maljan.core import virustotal
-from maljan.core.config import (
+from malspark.core import virustotal
+from malspark.core.config import (
     Settings,
     ToolRef,
 )
@@ -46,14 +46,14 @@ class TestTheSeed:
         assert not set(server.tools or []) & set(virustotal.SUBMIT_TOOLS)
 
     def test_the_key_is_a_built_in_and_reserved(self) -> None:
-        from maljan.core.config import reserved_server_keys, shipped_server_keys
+        from malspark.core.config import reserved_server_keys, shipped_server_keys
 
         assert Settings(_env_file=None).mcp.servers[virustotal.SERVER_KEY].shipped
         assert virustotal.SERVER_KEY in shipped_server_keys()
         assert virustotal.SERVER_KEY in reserved_server_keys()
 
     def test_the_network_analyst_the_judge_and_triage_reach_it_by_capability(self) -> None:
-        from maljan.agents.composition import mcp_refs_for
+        from malspark.agents.composition import mcp_refs_for
 
         settings = Settings(_env_file=None)
         ref = ToolRef(kind="mcp", server=virustotal.SERVER_KEY)

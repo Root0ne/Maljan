@@ -20,9 +20,9 @@ from unittest.mock import patch
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.llm.anthropic_provider import AnthropicProvider
-from maljan.reporting.composer import COMPOSED_SECTIONS, ReportComposer
+from malspark.core.config import Settings
+from malspark.llm.anthropic_provider import AnthropicProvider
+from malspark.reporting.composer import COMPOSED_SECTIONS, ReportComposer
 from tests.unit.reporting.test_the_composer_writes_its_sections_at_once import (
     _answer,
     _isr,
@@ -78,7 +78,7 @@ def _composed(
     report = _report()
     composer = ReportComposer(llm=_model(), per_section_timeout=60)
     with patch(
-        "maljan.reporting.composer.structured_output_supported_for_llm", return_value=structured
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=structured
     ):
         asyncio.run(composer.compose(report, _isr(), facts_block=FACTS, concurrent=True))
     return wire, report, composer
@@ -178,7 +178,7 @@ class TestAnAnswerWithNothingInIt:
     def test_it_is_asked_again_without_the_tool_and_the_log_says_why(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.reporting import composer
+        from malspark.reporting import composer
 
         said: list[str] = []
         monkeypatch.setattr(
@@ -194,7 +194,7 @@ class TestAnAnswerWithNothingInIt:
 
 
 def _verdict_text(body: dict[str, Any]) -> dict[str, Any]:
-    from maljan.pipeline.mediation_models import MediatorVerdict
+    from malspark.pipeline.mediation_models import MediatorVerdict
 
     verdict = MediatorVerdict(contradictions=[], resolution_summary="Agreed.", confidence=0.9)
     text = verdict.model_dump_json()
@@ -206,7 +206,7 @@ class TestTheNarrativeRound:
 
     @staticmethod
     def _generate(monkeypatch: pytest.MonkeyPatch, answer: Any) -> tuple[Wire, Any]:
-        from maljan.reporting import narrative_agent
+        from malspark.reporting import narrative_agent
         from tests.unit.reporting.test_narrative_agent import _make_report, _valid_narrative
 
         text = _valid_narrative().model_dump_json()
@@ -251,7 +251,7 @@ class TestTheMediationExtraction:
     ) -> None:
         from langchain_core.prompts import ChatPromptTemplate
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         wire = Wire(_verdict_text)
         install(monkeypatch, wire)
@@ -304,7 +304,7 @@ class TestAMediationVerdictTheSchemaRefuses:
     ) -> None:
         from langchain_core.prompts import ChatPromptTemplate
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         def refused(body: dict[str, Any]) -> dict[str, Any]:
             text = json.dumps(

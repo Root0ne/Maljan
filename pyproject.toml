@@ -1,5 +1,5 @@
 [project]
-name = "maljan"
+name = "malspark"
 version = "1.0.0"
 description = "Multi-Agent Malware Analysis Pipeline powered by LangGraph"
 readme = "README.md"
@@ -79,24 +79,24 @@ dependencies = [
 ]
 
 [project.scripts]
-maljan = "maljan.cli:main"
+malspark = "malspark.cli:main"
 
 # The project is installed into the environment as an editable package. Without a
 # build system uv treated it as a virtual project: `uv sync` installed every
-# dependency and skipped the project itself, so `import maljan` worked only
-# under pytest's pythonpath or the image's PYTHONPATH, and the `maljan` console
+# dependency and skipped the project itself, so `import malspark` worked only
+# under pytest's pythonpath or the image's PYTHONPATH, and the `malspark` console
 # script the README's quick start runs was never created ("Failed to spawn").
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/maljan"]
+packages = ["src/malspark"]
 
 # One workspace, one lockfile. apps/api used to be a separate uv project with its
 # own uv.lock and a path dependency back here, which is why the runtime needed
 # PYTHONPATH in the Makefile, CI, the Dockerfile, compose and a sys.path.insert
-# inside the worker. As a member it is installed alongside maljan by one
+# inside the worker. As a member it is installed alongside malspark by one
 # `uv sync`, and every one of those shortcuts goes away.
 [tool.uv.workspace]
 members = ["apps/api"]
@@ -151,7 +151,7 @@ ignore = []
 
 [tool.ruff.lint.per-file-ignores]
 # Agent files contain LLM prompt strings that are intentionally long
-"src/maljan/agents/*.py" = ["E501"]
+"src/malspark/agents/*.py" = ["E501"]
 # A sidecar routes logging to stderr before the imports that can log
 "services/*/server.py" = ["E402"]
 # FastAPI dependency injection and query params are standard patterns

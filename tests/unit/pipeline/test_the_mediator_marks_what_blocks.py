@@ -22,7 +22,7 @@ value below is synthetic.
 
 from __future__ import annotations
 
-from maljan.pipeline.debate_facts import (
+from malspark.pipeline.debate_facts import (
     LEDGER_FACTS_HEAD,
     facts_naming,
     ledger_count_facts,
@@ -30,7 +30,7 @@ from maljan.pipeline.debate_facts import (
     read_marks,
     with_ledger_facts,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 AGENTS = ["alpha_static", "beta_reverser", "gamma"]
 
@@ -119,7 +119,7 @@ class TestTheLedgerCountsAreStated:
         assert ledger_count_facts([line], {}, [_entry("ev_0007", total=41)], AGENTS) == []
 
     def test_a_ledger_entry_model_is_read(self) -> None:
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.schemas.evidence import LedgerEntry
 
         line = "GAMMA Claim 1 counts 41 [ev_0007]; BETA_REVERSER Claim 1 counts 40."
         entry = LedgerEntry(id="ev_0007", tool="t", structured={"count": 41})

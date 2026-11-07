@@ -1,0 +1,1959 @@
+"""What one agent definition actually resolves to, for a given job.
+
+One function answers "what prompt, what tools, what LLM, what static provider
+does agent ``<key>`` get" — the graph, the container, the worker's mirror step
+and the settings probe all call it, so a probe cannot report one answer and a
+run produce another. That is the whole point of the module: before this, the
+answer was spread across three analyst classes and could only be discovered by
+running a job.
+
+Two halves of an agent's tools live in two places on purpose:
+
+* the *registry* half — servers bound by ``MCPServerConfig.agents`` and the
+  explicit ``ToolRef``s of the definition — is composed here, because nothing
+  else knows about ``ToolRef``;
+* the *provider* half of a built-in role stays inside that role's class
+  (``StaticAnalyst._initialize_mcp_client`` and friends), because opening
+  Ghidra is a per-sample act with a job context, and pulling it into
+  resolution would make the settings probe launch a decompiler.
+
+A ``generic`` or ``lead`` agent has no class of its own to open a provider, so
+an explicit ``ToolRef(kind="provider")`` is the one way it gets provider tools,
+and that path *is* resolved here (``opens_provider_by_reference``). A
+reference that names its provider opens that one, so one agent may hold
+several providers (``referenced_provider_ids``).
+
+``ToolRef(kind="sandbox")`` is the third half and the simplest: the job's
+sandbox report is already on the container, so the tools over it are closures
+built here with nothing to open and nothing that can hang.
+
+``ToolRef(kind="agent")`` is the fourth: another agent of the same job, as a
+tool named ``ask_<key>``. Built here as a closure over the container and the
+two keys (``agents.delegation``), it opens nothing at resolution time; the
+callee is resolved when it is first asked, through the container, like any
+stage agent.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from malspark.agents.prompt_tools import note_for_resolved
+from malspark.core.config import PROMPT_ROLES, AgentDefinition, ProfileDefinition, Settings, ToolRef
+from malspark.core.logger import logger
+
+if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
+
+
+@dataclass(frozen=True)
+class ResolvedAgent:
+    """Everything an agent needs, decided once per job and never re-derived.
+
+    ``degradation_reasons`` are this agent's own — a referenced tool that is
+    not there, a server that would not open. They are additive: the run
+    summary reads ``container.server_degradation_reasons()``, which is the
+    registry's union across every agent in the job.
+    """
+
+    key: str
+    role: str
+    prompt: str
+    tools: list[BaseTool]
+    static_provider_id: str
+    llm: Any | None
+    degradation_reasons: tuple[str, ...] = ()
+    # Every static provider resolution opened for the agent's ``provider``
+    # references, in reference order (``referenced_provider_ids``); the first
+    # is ``static_provider_id``. Empty for an agent that opens none here: a
+    # built-in role opens its own inside its class.
+    provider_ids: tuple[str, ...] = ()
+    # Where each tool server was handed the sample, for the servers that were
+    # handed it at all (``agents.sample_staging``). Empty on the common case:
+    # every server is a local stdio sidecar reading the same filesystem the
+    # worker does. An analyst passes this to ``pin_paths`` so a tool call goes
+    # out with the path its own server can open.
+    path_by_server: dict[str, str] = field(default_factory=dict)
+    # What a clone is seeded with: the agent's own text, or its role's assembly
+    # without the provider fragment and the sentence about tools. Both are
+    # platform text, added when the copy is resolved (``_provider_parts``) for
+    # its own provider and its own list, so a copy never carries either for a
+    # provider or tools that are not its own.
+    authored_prompt: str = ""
+    # Whether the agent is asked for an ATT&CK technique line on each claim
+    # (``AgentDefinition.attck_techniques``). Read by the configurable analyst
+    # only; a built-in role keeps its own claim format.
+    attck_techniques: bool = True
+    # What the agent does (``AgentDefinition.category``), which decides the
+    # platform steps it is offered (``core.agent_category``). ``other`` is
+    # what an agent resolved without a definition reads: the steps worked
+    # out from its tools and what they returned.
+    category: str = "other"
+
+
+def active_profile(settings: Settings) -> ProfileDefinition:
+    """The profile this job runs. ``AgentsConfig`` guarantees it exists."""
+    return settings.agents.profiles[settings.agents.profile]
+
+
+def display_name(settings: Settings, key: str) -> str:
+    """The label an operator gave this agent, or its key when they gave none.
+
+    The label lives on the definition, which only an admin can read through
+    the settings endpoint. Every place that puts a name in front of a reader
+    asks here instead, so a non-admin watching a run sees the same name the
+    operator typed rather than the registry key the name was meant to replace.
+    """
+    definition = settings.agents.definitions.get(key)
+    return str(getattr(definition, "label", "") or key)
+
+
+def analyst_keys(settings: Settings) -> list[str]:
+    """Every analysis-stage agent of the active profile, in stage order.
+
+    The single topology source: the negotiation and revision nodes, the judge
+    node and the run summary all read this list, so a profile change moves all
+    of them together or none of them. The builder reads the stages themselves —
+    it is the one caller that needs to know which stage an agent belongs to.
+    """
+    return list(active_profile(settings).analysis_agents)
+
+
+def called_assignments(settings: Settings, stages: Sequence[Any] | None = None) -> list[Any]:
+    """Every model a job of ``stages`` calls, each read as its builder reads it.
+
+    The one answer to "what will this run call", which the job-start probe
+    gate checks whole and the context window is taken over
+    (:func:`window_assignments`):
+
+    * every agent of the analysis stages and every agent they can ask, and so
+      on (:func:`reachable_agents`) — a lead's specialists sit in no stage —
+      each on the expert role (``get_agent_llm``);
+    * the mediator whenever a debate stage exists, and the function summariser
+      whenever ``preprocessing.use_function_summarizer`` is on, each on the
+      expert role with or without an entry of its own (``get_mediator_llm``,
+      ``get_summarizer_llm``) — with none they call the global expert model;
+    * the judge on the judge role (``get_judge_llm``): its own entry, or else
+      the global judge model, never the expert one — every team has exactly
+      one verdict stage;
+    * the reporter on the judge role whenever a report stage exists and
+      ``reporting.enabled`` is on (``get_reporter_llm``, the narrative and the
+      composer); with reporting off the report stage is not planned.
+
+    Each agent's fallbacks are in, because a model the run falls back to is a
+    model the run calls (``assignment_chain_for``). ``stages`` defaults to the
+    active profile's.
+    """
+    from malspark.core.config import (
+        JUDGE_AGENT_KEY,
+        MEDIATOR_AGENT_KEY,
+        REPORTER_AGENT_KEY,
+        SUMMARIZER_AGENT_KEY,
+    )
+    from malspark.core.model_assignments import assignment_chain_for, assignments_for
+
+    run_stages = list(active_profile(settings).stages if stages is None else stages)
+    kinds = {str(getattr(stage, "kind", "")) for stage in run_stages}
+    analysts = [
+        str(agent)
+        for stage in run_stages
+        if getattr(stage, "kind", "") == "analysis"
+        for agent in stage.agents
+    ]
+    # The agents only the mediator may ask are not in it: an ask of one whose
+    # model fails is a failed call on the ledger, never a refused job.
+    agents = reachable_agents(settings, analysts, mediated=False)
+    if "debate" in kinds:
+        agents.append(MEDIATOR_AGENT_KEY)
+    if settings.preprocessing.use_function_summarizer:
+        agents.append(SUMMARIZER_AGENT_KEY)
+    called = [
+        *assignments_for(settings, agents),
+        *assignment_chain_for(settings, JUDGE_AGENT_KEY, role="judge"),
+    ]
+    if "report" in kinds and bool(getattr(settings.reporting, "enabled", True)):
+        called += assignment_chain_for(settings, REPORTER_AGENT_KEY, role="judge")
+    return called
+
+
+def window_assignments(settings: Settings, stages: Sequence[Any] | None = None) -> list[Any]:
+    """Every model the job's one context window is taken over: the called set but the reporter.
+
+    One window sizes every tool answer of the job, the judge's own tool calls
+    included, so it has to fit the tightest model any agent that takes a tool
+    answer under it calls (:func:`called_assignments`). The reporter is the one
+    called role it leaves out: the narrative and the composer make no tool
+    call under the job's budget, the composer sizes each section's evidence on
+    its own models' windows (``ServiceContainer.get_report_composer``), and the
+    triage pack they read is cut on the smaller of the job's window and the
+    reporter's own (``pipeline.nodes.pack_text``).
+    """
+    from malspark.core.config import REPORTER_AGENT_KEY
+
+    return [a for a in called_assignments(settings, stages) if a.agent != REPORTER_AGENT_KEY]
+
+
+def stages(settings: Settings) -> list[Any]:
+    """The active profile's stages, in the order it declares them."""
+    return list(active_profile(settings).stages)
+
+
+def stage_for_agent(settings: Settings, key: str) -> Any | None:
+    """The stage agent ``key`` belongs to, or ``None`` if no stage names it."""
+    for stage in active_profile(settings).stages:
+        if key in stage.agents:
+            return stage
+    return None
+
+
+def current_analyst_keys() -> list[str]:
+    """``analyst_keys`` for the process-wide settings.
+
+    For the consumers that have no container to ask — ``run_summary``'s
+    per-source ordering, the judge node's claimless-analyst check — all of
+    which run inside a job whose settings the worker has already installed.
+    """
+    from malspark.core.config import get_settings
+
+    return analyst_keys(get_settings())
+
+
+def static_provider_id_for(
+    settings: Settings,
+    key: str,
+    *,
+    profile: ProfileDefinition | None = None,
+    global_provider: str | None = None,
+) -> str:
+    """The static provider id agent ``key`` reads, falling back to the global one.
+
+    The active profile wins over both. ``measurement`` forces ``none`` across
+    every member, which is what makes it a baseline rather than a profile that
+    merely happens to have no tool servers today.
+
+    ``profile`` and ``global_provider`` answer the question for a job that
+    has not been built yet: the team and the provider a submitted job names,
+    which the stored settings do not hold until the worker folds them in.
+    """
+    team = profile if profile is not None else active_profile(settings)
+    if team.static_provider:
+        return str(team.static_provider)
+    definition = settings.agents.definitions.get(key)
+    if definition is not None and definition.static_provider:
+        return str(definition.static_provider)
+    return str(global_provider or settings.static.provider)
+
+
+def opens_provider_by_reference(definition: AgentDefinition) -> bool:
+    """Whether resolution opens the agent's static provider from a ``provider`` reference.
+
+    The one gate for every role that is a prompt rather than a class
+    (``PROMPT_ROLES``: ``generic`` and ``lead``), the same roles the settings
+    validator lets carry a provider reference. The prompt's provider text, the
+    provider's tools and the mirror the worker stages all read this, so an
+    agent is never told about tools it does not get.
+    """
+    return definition.role in PROMPT_ROLES and any(
+        ref.kind == "provider" for ref in definition.tools
+    )
+
+
+def reads_static_provider(definition: AgentDefinition | None) -> bool:
+    """Whether a run opens a static provider for this definition.
+
+    Two ways, and only two. The ``static`` role opens its provider itself,
+    inside its own class; a ``generic`` or ``lead`` agent opens one when its
+    tool list holds a ``provider`` reference, at resolution
+    (``_provider_tools``). Every other role reads no static provider, whatever
+    its tool list says.
+    """
+    if definition is None:
+        return False
+    if definition.role == "static":
+        return True
+    return opens_provider_by_reference(definition)
+
+
+def referenced_provider_ids(
+    settings: Settings,
+    definition: AgentDefinition,
+    own_provider: str,
+    *,
+    profile: ProfileDefinition | None = None,
+) -> list[str]:
+    """Every static provider the definition's ``provider`` references open, in reference order.
+
+    A reference that names no provider stands for ``own_provider``, the one
+    ``static_provider_id_for`` answers for the agent; one that names a
+    provider stands for that one. A team that forces a static provider of its
+    own (``measurement`` forces ``none``) forces it on every reference, named
+    or not, so a baseline stays one. Each provider once, where it is first
+    referenced. Empty where ``opens_provider_by_reference`` is false.
+    """
+    if not opens_provider_by_reference(definition):
+        return []
+    team = profile if profile is not None else active_profile(settings)
+    out: list[str] = []
+    for ref in definition.tools:
+        if ref.kind != "provider":
+            continue
+        provider_id = (
+            str(ref.provider) if ref.provider and not team.static_provider else own_provider
+        )
+        if provider_id not in out:
+            out.append(provider_id)
+    return out
+
+
+def static_provider_ids_for(
+    settings: Settings,
+    key: str,
+    *,
+    profile: ProfileDefinition | None = None,
+    global_provider: str | None = None,
+) -> list[str]:
+    """Every static provider a run opens for agent ``key``, the one it reads the sample through first.
+
+    The ``static`` role's own (``static_provider_id_for``); a ``generic`` or
+    ``lead`` agent's ``provider`` references (``referenced_provider_ids``);
+    nothing for any other role or an unknown key. The worker's mirror, the
+    readiness check and the servers a job calls all read this, so a provider
+    an agent names on a reference is mirrored, checked and counted as its own
+    provider is.
+    """
+    definition = settings.agents.definitions.get(key)
+    if definition is None:
+        return []
+    own = static_provider_id_for(settings, key, profile=profile, global_provider=global_provider)
+    if definition.role == "static":
+        return [own]
+    return referenced_provider_ids(settings, definition, own, profile=profile)
+
+
+def _opened_provider_ids(settings: Settings, definition: AgentDefinition, key: str) -> list[str]:
+    """``static_provider_ids_for`` for a resolution: the references' providers, or the own one.
+
+    The first is the provider the agent reads the sample through
+    (``ResolvedAgent.static_provider_id``). An agent that opens none here
+    keeps ``static_provider_id_for``'s answer, as it always did.
+    """
+    own = static_provider_id_for(settings, key)
+    return referenced_provider_ids(settings, definition, own) or [own]
+
+
+NOT_MIRRORED_REASON = "sample not mirrored for {provider}"
+# A capability reference no server serves (``unresolved_capability_reasons``).
+UNRESOLVED_CAPABILITY_REASON = "capability '{capability}' resolves to no server"
+
+
+def pin_provider_sample(agent: Any, mirrored: Mapping[str, str] | None) -> None:
+    """Hand the agent's static provider its own mirror of the sample, or clear the pin.
+
+    For an agent whose tools include its provider's (a generic or lead agent
+    with a ``provider`` reference): the provider was opened at resolution, before the
+    sample's path was known, so its own guard on the path argument — Ghidra's
+    ``load_program`` override — had nothing to hold a model to. ``mirrored``
+    is the job's mirror per provider id (``state["static_sample_paths"]``);
+    only this provider's own entry is pinned, never a fallback path the
+    provider cannot read. A provider that needs a mirror and has none gets its
+    pin cleared and the run a degradation reason saying so. Never re-attaches;
+    a no-op for any other agent and any provider without a guard.
+    """
+    from malspark.agents.prompt_fragments import PROVIDER_FAMILY, tool_families
+
+    container = getattr(agent, "_container", None)
+    resolved = getattr(agent, "_resolved", None)
+    if container is None or resolved is None:
+        return
+    if PROVIDER_FAMILY not in tool_families(list(getattr(agent, "tools", None) or [])):
+        return
+    # An agent holding several providers (named ``provider`` references) has
+    # each of them pinned to its own mirror.
+    provider_ids = getattr(resolved, "provider_ids", None)
+    if not isinstance(provider_ids, tuple) or not provider_ids:
+        provider_ids = (resolved.static_provider_id,)
+    for provider_id in provider_ids:
+        _pin_one_provider(agent, container, resolved, str(provider_id), mirrored)
+
+
+def _pin_one_provider(
+    agent: Any, container: Any, resolved: Any, provider_id: str, mirrored: Mapping[str, str] | None
+) -> None:
+    """``pin_provider_sample`` for one of the agent's providers."""
+    try:
+        provider = container.get_static_provider(provider_id)
+    except Exception as exc:  # noqa: BLE001 — a pin is never worth a failed stage
+        logger.debug("no provider to pin the sample on for %s (%s)", resolved.key, exc)
+        return
+    pin = getattr(provider, "pin_sample", None)
+    if not callable(pin):
+        return
+    path = (mirrored or {}).get(provider_id) or None
+    pin(path)
+    needs_mirror = bool(
+        getattr(getattr(provider, "capabilities", None), "needs_sample_mirror", False)
+    )
+    if path is None and needs_mirror:
+        reason = NOT_MIRRORED_REASON.format(provider=provider_id)
+        logger.warning("%s: %s; its tools are not held to a path.", resolved.key, reason)
+        own = list(getattr(agent, "degradation_reasons", None) or [])
+        if reason not in own:
+            agent.degradation_reasons = [*own, reason]
+        try:
+            registry = container.get_server_registry()
+        except Exception:  # noqa: BLE001 — the reason is still on the agent
+            return
+        reasons = getattr(registry, "degradation_reasons", None)
+        if isinstance(reasons, list) and reason not in reasons:
+            reasons.append(reason)
+
+
+def mediates(team: Any) -> bool:
+    """Whether ``team`` holds a debate stage, the one place the judge runs a tool loop."""
+    return any(
+        getattr(stage, "kind", "") == "debate" for stage in getattr(team, "stages", ()) or ()
+    )
+
+
+def reachable_agents(
+    settings: Settings, named: Sequence[str], *, mediated: bool | None = None
+) -> list[str]:
+    """The agents ``named``, every agent they can ask, and so on, in order.
+
+    A team's stages name the agents it runs, and a lead names the specialists
+    it asks as ``agent`` tool references, which sit in no stage. Anything
+    asked of "the agents this run can call" — a model to have probed, a
+    provider to have mirrored the sample for — has to follow those
+    references. The reference graph is acyclic (the settings model refuses a
+    self-reference and the run refuses a cycle), so the closure terminates.
+
+    The judge asks only while it mediates, so its references are followed
+    only for a team with a debate stage: ``mediated``, or the active
+    profile's when it is not given (:func:`mediates`); and never where the
+    profile withholds every server from the judge, which builds it no ask
+    (:func:`_agent_tools`). The agents reached only this way are for the run
+    to have ready (the sample mirrored, the roster); none of them is a reason
+    to refuse a job, since a failed ask is a failed call on the ledger.
+    """
+    from malspark.core.config import ALL_SERVERS, JUDGE_AGENT_KEY
+
+    if mediated is None:
+        mediated = mediates(active_profile(settings))
+    if mediated and ALL_SERVERS in _withheld_servers(settings, JUDGE_AGENT_KEY):
+        mediated = False
+    definitions = settings.agents.definitions
+    reached = list(dict.fromkeys(str(key) for key in named))
+    seen = set(reached)
+    pending = list(reached)
+    while pending:
+        definition = definitions.get(pending.pop())
+        if getattr(definition, "role", "") == "judge" and not mediated:
+            continue
+        for ref in getattr(definition, "tools", None) or []:
+            callee = str(getattr(ref, "agent", "") or "")
+            if getattr(ref, "kind", "") != "agent" or not callee or callee in seen:
+                continue
+            seen.add(callee)
+            reached.append(callee)
+            pending.append(callee)
+    return reached
+
+
+def sample_format(container: Any) -> tuple[str, str]:
+    """The ``(file_type, platform)`` of the job's sample, as the container knows it.
+
+    ``app.arun`` puts the routing answer on the container before the graph
+    runs, which is the one place both the pipeline and every lazily built
+    agent can read it from. A container that was never told — the settings
+    probe, a test — answers ``("unknown", "unknown")`` and gets the neutral
+    fragment.
+    """
+    fmt = getattr(container, "sample_format", None)
+    if not isinstance(fmt, tuple) or len(fmt) != 2:
+        return "unknown", "unknown"
+    return str(fmt[0] or "unknown"), str(fmt[1] or "unknown")
+
+
+# The roles ``builtin_prompt`` assembles a prompt for. Any other role needs a
+# prompt on its definition.
+BUILTIN_PROMPT_ROLES: frozenset[str] = frozenset({"static", "dynamic", "network", "judge"})
+
+
+def _sandbox_provider(container: Any) -> Any | None:
+    """The job's sandbox provider, or ``None`` for a container that has none."""
+    try:
+        return container.get_sandbox_provider()
+    except Exception as exc:  # noqa: BLE001 — a prompt never fails over a provider lookup
+        logger.debug("No sandbox provider for the dynamic prompt (%s).", exc)
+        return None
+
+
+def builtin_prompt(
+    role: str,
+    container: Any,
+    static_provider_id: str,
+    tools: Sequence[Any] = (),
+    *,
+    provider_expected: bool = False,
+    for_a_clone: bool = False,
+) -> str:
+    """The prompt a built-in role sends for this job's sample, with ``tools``.
+
+    Every analyst assembles the same way: HEAD, then the sample's format
+    fragment, then the provider fragment where the role has one, then the
+    sentence about tools, then TAIL. The head says what the role does, the
+    format fragment says what artefacts exist on this sample, the provider
+    fragment says what the provider is, and the tool sentence says what the
+    request carries — so handing the same agent an APK, or attaching radare2,
+    each changes one part and nothing else.
+
+    ``tools`` is the list the request carries, and the prompt says nothing
+    about tools that is not true of it: a provider's tool workflow is sent only
+    when that provider's tools are in the list, and the sentence about tools is
+    built from the list alone (``prompt_fragments.tools_statement``).
+
+    ``provider_expected`` is for resolution, which runs before a built-in role
+    attaches its own provider (``StaticAnalyst._initialize_mcp_client`` and
+    friends): it describes the provider as attached when the provider offers
+    tools at all. The analyst builds its prompt again from the list it sends
+    (``BaseAnalyst._system_prompt``), where an attach that failed shows.
+
+    ``for_a_clone`` leaves out the provider fragment and the sentence about
+    tools: the text a clone of the role is seeded with, which gets both, for
+    its own provider and its own list, when it is resolved.
+
+    ``static`` reads the *agent's own* static provider, which is what makes a
+    clone on radare2 meaningful. ``dynamic`` reads the job's sandbox provider
+    for the workflow of that sandbox's own tool server.
+    """
+    from malspark.agents.prompt_fragments import format_fragment
+
+    fragment = format_fragment(*sample_format(container))
+    if role == "static":
+        from malspark.agents.static_analyst import assemble_static_prompt
+
+        provider = container.get_static_provider(static_provider_id)
+        return assemble_static_prompt(
+            provider,
+            fragment,
+            tools,
+            provider_expected=provider_expected and bool(provider.capabilities.provides_tools),
+            for_a_clone=for_a_clone,
+        )
+    if role == "dynamic":
+        from malspark.agents.dynamic_analyst import assemble_dynamic_prompt, sandbox_server_label
+
+        sandbox = _sandbox_provider(container)
+        workflow = str(sandbox.dynamic_prompt_fragment() or "") if sandbox is not None else ""
+        offers_tools = sandbox is not None and bool(sandbox.capabilities.provides_tools)
+        label = sandbox_server_label(sandbox)
+        return assemble_dynamic_prompt(
+            fragment,
+            tools,
+            provider_fragment=workflow,
+            provider_label=label,
+            provider_expected=provider_expected and offers_tools,
+            for_a_clone=for_a_clone,
+        )
+    if role == "network":
+        from malspark.agents.network_analyst import assemble_network_prompt
+
+        return assemble_network_prompt(fragment, tools, for_a_clone=for_a_clone)
+    if role == "judge":
+        # The verdict prompt names no tool, and the judge's own turns say what
+        # it may call where it may call it; nothing is appended here.
+        from malspark.agents.judge_agent import JUDGE_VERDICT_SYSTEM
+
+        return JUDGE_VERDICT_SYSTEM
+    raise ValueError(f"no built-in prompt for role {role!r}: give the definition a prompt")
+
+
+def _agent_prompt(
+    definition: AgentDefinition,
+    container: Any,
+    provider_id: str,
+    tools: Sequence[Any],
+    *,
+    provider_expected: bool = False,
+    for_a_clone: bool = False,
+    provider_ids: Sequence[str] = (),
+) -> str:
+    """An agent's prompt for ``tools``: its own text, or its role's built-in one.
+
+    A prompt an operator wrote says what the agent is for; the sentence about
+    the tools it is handed is the platform's, built from the list, and follows
+    it — a seeded reverser that expects a decompiler is told whether one is
+    there. The judge's prompt is sent by its own code and gets nothing added.
+    """
+    if definition.prompt is None:
+        return builtin_prompt(
+            definition.role,
+            container,
+            provider_id,
+            tools,
+            provider_expected=provider_expected,
+            for_a_clone=for_a_clone,
+        )
+    if definition.role == "judge" or for_a_clone:
+        return definition.prompt
+    parts = _provider_parts(
+        definition, container, provider_id, tools, provider_expected, provider_ids
+    )
+    return "\n\n".join([definition.prompt.rstrip(), *(part for part in parts if part)])
+
+
+def _provider_parts(
+    definition: AgentDefinition,
+    container: Any,
+    provider_id: str,
+    tools: Sequence[Any],
+    provider_expected: bool,
+    provider_ids: Sequence[str] = (),
+) -> tuple[str, ...]:
+    """What the platform adds after an operator's prompt: provider text, then the tool sentence.
+
+    The provider's text belongs to the provider, not to the prompt: a static
+    agent, and a generic one that reads a static provider, carry that
+    provider's guidance about claims always and its workflow when its tools
+    are in the request, exactly as the built-in assembly does. The dynamic
+    role carries its sandbox's workflow on the same rule. An agent with no
+    provider gets the sentence about tools alone.
+
+    An agent holding several providers (``provider_ids``, from its named
+    ``provider`` references) carries each provider's text in turn, each read
+    against that provider's own tools, and one sentence about the whole list.
+    """
+    from malspark.agents.prompt_fragments import tools_statement
+
+    if len(provider_ids) > 1 and opens_provider_by_reference(definition):
+        return _several_provider_parts(definition, container, provider_ids, tools)
+    if definition.role == "static" or opens_provider_by_reference(definition):
+        from malspark.agents.static_analyst import static_provider_parts
+
+        provider = container.get_static_provider(provider_id)
+        offers = bool(getattr(getattr(provider, "capabilities", None), "provides_tools", False))
+        text, statement = static_provider_parts(
+            provider,
+            tools,
+            provider_expected=provider_expected and definition.role == "static" and offers,
+        )
+        if not definition.attck_techniques:
+            # An agent not asked for techniques is not told which ones to look
+            # for either; the provider's text is otherwise sent as it is.
+            from malspark.providers.base import without_attck_focus
+
+            text = without_attck_focus(text)
+        return text, statement
+    if definition.role == "dynamic":
+        from malspark.agents.dynamic_analyst import sandbox_provider_parts, sandbox_server_label
+
+        sandbox = _sandbox_provider(container)
+        offers = sandbox is not None and bool(sandbox.capabilities.provides_tools)
+        return sandbox_provider_parts(
+            tools,
+            provider_fragment=str(sandbox.dynamic_prompt_fragment() or "") if sandbox else "",
+            provider_label=sandbox_server_label(sandbox),
+            provider_expected=provider_expected and offers,
+        )
+    return (tools_statement(tools),)
+
+
+# On each tool of an agent that holds several providers: the id of the
+# provider it came from, so each provider's text is read against its own tools
+# (``_several_provider_parts``). Not written for an agent with one provider,
+# whose tools stay the objects they always were.
+PROVIDER_ID_METADATA_KEY = "malspark_provider_id"
+
+
+def _of_provider(tools: Sequence[Any], provider_id: str, first: bool) -> list[Any]:
+    """``tools`` without the other providers' tools: what ``provider_id``'s text is read against.
+
+    A provider tool that carries no provider id (one that could not be
+    marked) is read as the first provider's.
+    """
+    from malspark.agents.prompt_fragments import PROVIDER_FAMILY, tool_family
+
+    out: list[Any] = []
+    for tool in tools:
+        if tool_family(tool) != PROVIDER_FAMILY:
+            out.append(tool)
+            continue
+        owner = (getattr(tool, "metadata", None) or {}).get(PROVIDER_ID_METADATA_KEY)
+        if owner == provider_id or (owner is None and first):
+            out.append(tool)
+    return out
+
+
+def _several_provider_parts(
+    definition: AgentDefinition,
+    container: Any,
+    provider_ids: Sequence[str],
+    tools: Sequence[Any],
+) -> tuple[str, ...]:
+    """``_provider_parts`` for an agent holding several static providers.
+
+    Each provider says what it says alone (``static_provider_parts``), read
+    against its own tools and every tool that is no provider's, so a provider
+    whose tools did not attach says so while the other's workflow stands. The
+    sentence about tools is one, over the whole list, naming every provider.
+    """
+    from malspark.agents.prompt_fragments import tools_statement
+    from malspark.agents.static_analyst import static_provider_parts
+
+    texts: list[str] = []
+    labels: list[str] = []
+    for index, provider_id in enumerate(provider_ids):
+        provider = container.get_static_provider(provider_id)
+        own = _of_provider(tools, provider_id, index == 0)
+        text, _statement = static_provider_parts(provider, own)
+        if not definition.attck_techniques:
+            from malspark.providers.base import without_attck_focus
+
+            text = without_attck_focus(text)
+        # A provider's text names its tools as it declares them; one of its
+        # tools whose name an earlier provider holds reaches the model as
+        # ``<provider>__<tool>``, and the text says that name.
+        texts.append(_with_offered_names(text, _renamed_tools(own, provider_id)))
+        labels.append(
+            str(getattr(provider, "label", "") or getattr(provider, "id", "") or provider_id)
+        )
+    joined = ", ".join(labels[:-1]) + " and " + labels[-1]
+    statement = tools_statement(tools, provider_label=f"the {joined} static providers")
+    return (*texts, statement)
+
+
+def _renamed_tools(tools: Sequence[Any], provider_id: str) -> dict[str, str]:
+    """Each of ``provider_id``'s tools in ``tools`` offered under another name, declared to offered."""
+    from malspark.agents.tool_pinning import declared_name_of
+
+    out: dict[str, str] = {}
+    for tool in tools:
+        if (getattr(tool, "metadata", None) or {}).get(PROVIDER_ID_METADATA_KEY) != provider_id:
+            continue
+        declared, offered = declared_name_of(tool), str(getattr(tool, "name", "") or "")
+        if declared and offered and declared != offered:
+            out[declared] = offered
+    return out
+
+
+def _with_offered_names(text: str, renamed: Mapping[str, str]) -> str:
+    """``text`` with each declared tool name it writes as code replaced by the name offered.
+
+    The forms a workflow names a tool in: set off in backticks (`` `name` ``)
+    and called (``name(``). A word that only happens to be spelled like a tool
+    is prose and stays.
+    """
+    import re
+
+    for declared, offered in renamed.items():
+        name = re.escape(declared)
+        text = re.sub(rf"`{name}`", f"`{offered}`", text)
+        text = re.sub(rf"(?<![\w.]){name}(?=\s*\()", offered, text)
+    return text
+
+
+def prompt_for(resolved: ResolvedAgent, container: Any, tools: Sequence[Any]) -> str:
+    """The prompt agent ``resolved.key`` sends with a request carrying ``tools``.
+
+    What a built-in analyst's ``_system_prompt`` calls: the composition that
+    resolved the agent, built again for the list this request carries — the
+    tool loop's, or none for a tools-free call. An agent whose definition is
+    gone keeps the prompt it was resolved with.
+    """
+    definition = container.config.agents.definitions.get(resolved.key)
+    if definition is None:
+        return resolved.prompt
+    return _agent_prompt(
+        definition,
+        container,
+        resolved.static_provider_id,
+        tools,
+        provider_ids=tuple(getattr(resolved, "provider_ids", ()) or ()),
+    )
+
+
+def _check_prompt_role(definition: AgentDefinition) -> None:
+    """Refuse a definition with no prompt for a role that has no built-in one.
+
+    Before any tool is attached, so a definition that cannot be resolved opens
+    nothing.
+    """
+    if definition.prompt is None and definition.role not in BUILTIN_PROMPT_ROLES:
+        raise ValueError(
+            f"no built-in prompt for role {definition.role!r}: give the definition a prompt"
+        )
+
+
+def _definition(settings: Settings, key: str) -> AgentDefinition:
+    definition = settings.agents.definitions.get(key)
+    if definition is None:
+        available = ", ".join(sorted(settings.agents.definitions)) or "(none)"
+        raise KeyError(f"No agent definition named {key!r}. Available: {available}")
+    return definition
+
+
+def _dedupe(tools: list[BaseTool]) -> list[BaseTool]:
+    """First occurrence of each tool name wins, order preserved.
+
+    B's collision prefixing has already run by the time a tool reaches here, so
+    two tools with the same name really are the same tool arriving twice — a
+    server both bound by ``agents`` and named by a ``ToolRef``.
+    """
+    seen: set[str] = set()
+    out: list[BaseTool] = []
+    for tool in tools:
+        name = str(getattr(tool, "name", ""))
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(tool)
+    return out
+
+
+# What the run says of one of several providers an agent holds that would not
+# open (``_providers_tools``).
+PROVIDER_NOT_OPENED_REASON = "static provider '{provider}' did not open"
+
+
+def _providers_tools(
+    container: Any, definition: AgentDefinition, provider_ids: Sequence[str]
+) -> tuple[list[tuple[str, list[Any]]], list[str]]:
+    """Each referenced provider's tools, by provider id, in reference order, and the reasons.
+
+    Every provider is opened on its own (``_provider_tools``): the container
+    holds one object per id and closes each at the end of the job
+    (``ServiceContainer.aclose``), so an agent holding several leaves nothing
+    open behind it. With one provider a failed open fails the resolution, as
+    it always did. With several, a provider that will not open is logged,
+    named in a degradation reason (also on the job's registry, which the run
+    summary reads) and gives no tools, so the prompt carries its absent
+    text; the others are opened all the same.
+    """
+    if not opens_provider_by_reference(definition):
+        return [], []
+    if len(provider_ids) <= 1:
+        return [
+            (str(provider_id), _provider_tools(container, definition, str(provider_id)))
+            for provider_id in provider_ids
+        ], []
+    out: list[tuple[str, list[Any]]] = []
+    reasons: list[str] = []
+    for provider_id in provider_ids:
+        try:
+            out.append((str(provider_id), _provider_tools(container, definition, str(provider_id))))
+        except Exception as exc:  # noqa: BLE001 — the agent's other providers still serve
+            logger.warning("static provider '%s' did not open: %s", provider_id, type(exc).__name__)
+            reason = PROVIDER_NOT_OPENED_REASON.format(provider=provider_id)
+            reasons.append(reason)
+            try:
+                held = getattr(container.get_server_registry(), "degradation_reasons", None)
+            except Exception:  # noqa: BLE001 — the reason is still on the agent
+                held = None
+            if isinstance(held, list) and reason not in held:
+                held.append(reason)
+            out.append((str(provider_id), []))
+    return out, reasons
+
+
+def _failing_as_a_call(tool: Any, provider_id: str) -> dict[str, Any]:
+    """``tool``'s callables, a :class:`SampleNotOpened` they raise filed as an ordinary failure.
+
+    For an agent holding several providers: a provider that cannot open the
+    sample answers each call with its sentence, as a failed call
+    (:class:`SampleNotOpenedOnOneProvider`), so the loop goes on with the
+    agent's other providers. Empty for a tool with no callable to wrap.
+    """
+    import functools
+
+    from malspark.core.exceptions import SampleNotOpened, SampleNotOpenedOnOneProvider
+
+    def _said(exc: SampleNotOpened) -> SampleNotOpenedOnOneProvider:
+        sentence = str(getattr(exc, "remediation", "") or exc)
+        return SampleNotOpenedOnOneProvider(
+            sentence, provider=exc.provider or provider_id, sent_args=exc.sent_args
+        )
+
+    out: dict[str, Any] = {}
+    func = getattr(tool, "func", None)
+    if callable(func):
+
+        @functools.wraps(func)
+        def run(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return func(*args, **kwargs)
+            except SampleNotOpened as exc:
+                raise _said(exc) from exc
+
+        out["func"] = run
+    coroutine = getattr(tool, "coroutine", None)
+    if callable(coroutine):
+
+        @functools.wraps(coroutine)
+        async def arun(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return await coroutine(*args, **kwargs)
+            except SampleNotOpened as exc:
+                raise _said(exc) from exc
+
+        out["coroutine"] = arun
+    return out
+
+
+def _claim_provider_tools(
+    by_provider: list[tuple[str, list[Any]]], tools: list[Any], seen: dict[str, str]
+) -> None:
+    """Put each provider's tools into ``tools``, a later provider's clashing name namespaced.
+
+    The servers' collision rule (``providers.servers.offered_name``): the
+    first provider to claim a name keeps it, and a later provider's tool of
+    the same name is offered as ``<provider id>__<name>``, its declared name
+    kept beside it, as a server's is; where another source already holds that
+    name too, ``provider__<provider id>__<name>``. With one provider this is
+    ``_claim_in_process_tools`` exactly; with several, each tool is marked
+    with the provider it came from (``PROVIDER_ID_METADATA_KEY``) and a
+    sample its provider cannot open fails that call rather than the loop
+    (``_failing_as_a_call``).
+    """
+    if len(by_provider) <= 1:
+        for provider_id, incoming in by_provider:
+            _claim_in_process_tools(incoming, f"provider:{provider_id}", tools, seen)
+        return
+    from malspark.agents.tool_pinning import DECLARED_NAME_METADATA_KEY
+
+    for provider_id, incoming in by_provider:
+        source = f"provider:{provider_id}"
+        renamed = 0
+        for tool in incoming:
+            name = str(getattr(tool, "name", ""))
+            owner = seen.get(name)
+            if owner == source:
+                continue
+            metadata = {
+                **(getattr(tool, "metadata", None) or {}),
+                PROVIDER_ID_METADATA_KEY: provider_id,
+            }
+            update: dict[str, Any] = {"metadata": metadata, **_failing_as_a_call(tool, provider_id)}
+            offered = name
+            if owner is not None:
+                offered = f"{provider_id}__{name}"
+                if offered in seen:
+                    # Another source holds the namespaced name as well.
+                    fallback = f"provider__{provider_id}__{name}"
+                    logger.warning(
+                        "static provider '%s': %r is taken by %s; offered as %r.",
+                        provider_id,
+                        offered,
+                        seen[offered],
+                        fallback,
+                    )
+                    offered = fallback
+                if offered in seen:
+                    logger.warning(
+                        "static provider '%s': tool %r has no free name and is left out.",
+                        provider_id,
+                        name,
+                    )
+                    continue
+                metadata[DECLARED_NAME_METADATA_KEY] = name
+                update["name"] = offered
+            copy = getattr(tool, "model_copy", None)
+            try:
+                marked = copy(update=update) if callable(copy) else None
+            except Exception:  # noqa: BLE001 — handled below
+                marked = None
+            if marked is None:
+                if offered != name:
+                    # Offered under its own name it would clash; it cannot be renamed.
+                    logger.warning(
+                        "static provider '%s': tool %r could not be renamed and is left out.",
+                        provider_id,
+                        name,
+                    )
+                    continue
+                logger.info(
+                    "static provider '%s': tool %r could not be marked; offered as it is.",
+                    provider_id,
+                    name,
+                )
+                marked = tool
+            renamed += offered != name
+            seen[offered] = source
+            tools.append(marked)
+        if renamed:
+            logger.info(
+                "static provider '%s': %d tool name(s) already taken, prefixed with '%s__'.",
+                provider_id,
+                renamed,
+                provider_id,
+            )
+
+
+def _provider_tools(container: Any, definition: AgentDefinition, provider_id: str) -> list[Any]:
+    """The agent's static provider's tools, for a definition that asked for them.
+
+    Gated on ``opens_provider_by_reference`` (a ``generic`` or ``lead``
+    definition) in addition to the ``AgentsConfig`` validator that already
+    refuses a provider reference on a built-in role:
+    a built-in role opens its own provider lazily, inside its own class
+    (``StaticAnalyst._initialize_mcp_client`` and friends), so resolution
+    must never open one itself — spec §4. The validator is the primary
+    defence; this is defence in depth for a definition that reached here by
+    some other path than validated ``Settings``.
+    """
+    if not opens_provider_by_reference(definition):
+        return []
+    from malspark.providers.base import StaticJobContext
+
+    provider = container.get_static_provider(provider_id)
+    if not provider.capabilities.provides_tools:
+        logger.info("Static provider '%s' exposes no tools.", provider.id)
+        return []
+    # The job's ledger and the job's tool-output limit travel with the attach,
+    # as they do for a built-in role's own provider: a toolkit opened without
+    # them records nowhere and cuts at the signature's default rather than at
+    # the number the operator set.
+    try:
+        rest_hook = container.get_server_registry().rest_hook()
+    except Exception:  # noqa: BLE001 - a rest is then logged, not recorded
+        rest_hook = None
+    provider.open(
+        StaticJobContext(
+            job_key=container.job_key(),
+            max_output_chars=int(container.config.preprocessing.max_tool_output_chars),
+            truncation_ledger=container.get_truncation_ledger(),
+            context_budget=container.get_context_budget(),
+            on_server_rest=rest_hook,
+        )
+    )
+    from malspark.agents.prompt_fragments import PROVIDER_FAMILY, provider_source, stamp_source
+    from malspark.providers.base import record_provider_withheld
+
+    tools = provider.get_tools()
+    # A tool the provider withholds is said where it is withheld.
+    try:
+        registry = container.get_server_registry()
+    except Exception:  # noqa: BLE001 - the reasons are still logged where withheld
+        registry = None
+    record_provider_withheld(provider, registry)
+    return stamp_source(tools, PROVIDER_FAMILY, declared=provider_source(provider))
+
+
+def _sandbox_tools(container: Any, definition: AgentDefinition) -> list[Any]:
+    """The job's sandbox-report tools, for a definition that asked for them.
+
+    In-process, so unlike the provider half there is nothing to open and
+    nothing that can hang: the report is already on the container and the tools
+    are closures over it. Any role may ask — ``dynamic`` is the obvious one,
+    but a judge cross-checking an analyst's claim about a dropped file wants
+    the same lookup, and there is no reason to make it read the whole report to
+    get it.
+    """
+    if not any(ref.kind == "sandbox" for ref in definition.tools):
+        return []
+    if active_profile(container.config).exclude_sandbox_tools:
+        return []
+    from malspark.agents.prompt_fragments import SANDBOX_FAMILY, stamp_source
+    from malspark.providers.sandbox_tools import sandbox_tools
+
+    return stamp_source(sandbox_tools(container), SANDBOX_FAMILY, declared="sandbox")
+
+
+def _agent_tools(
+    container: Any, definition: AgentDefinition, key: str, caller: Any = None
+) -> list[Any]:
+    """The ``ask_<agent>`` tools, one per agent reference on the definition.
+
+    In-process like the sandbox tools, and only bound where the definition
+    asks: an agent with no agent reference has no way to ask anyone, which is
+    what keeps the default profile's analysts exactly what they were.
+
+    A profile that excludes every server excludes this one too. ``*`` is the
+    measurement baseline's way of saying "nothing to call", and an agent that
+    could still hand its task to a colleague with tools would call through it.
+    """
+    refs = [ref for ref in definition.tools if ref.kind == "agent" and ref.agent]
+    if not refs:
+        return []
+    from malspark.core.config import ALL_SERVERS
+
+    if ALL_SERVERS in _withheld_servers(container.config, key):
+        return []
+    from malspark.agents.delegation import ask_tool
+
+    return [ask_tool(container, key, str(ref.agent), caller) for ref in refs]
+
+
+def in_process_tools_for(
+    container: Any, key: str, caller: Any = None
+) -> tuple[list[Any], dict[str, str]]:
+    """Agent ``key``'s sandbox-report and ``ask_<agent>`` tools, and the names they claimed.
+
+    The half of a definition that resolution builds in-process, for an agent
+    that attaches its own servers rather than reading a ``ResolvedAgent``: the
+    judge. The names come back so the servers attached after them take the
+    prefix on a clash, as they do in resolution. ``caller`` is the asking
+    instance an ask runs for (``delegation.ask_tool``).
+    """
+    definition = getattr(getattr(container.config, "agents", None), "definitions", {}).get(key)
+    seen: dict[str, str] = {}
+    tools: list[Any] = []
+    if definition is None:
+        return tools, seen
+    _claim_in_process_tools(
+        _sandbox_tools(container, definition), "in-process:sandbox", tools, seen
+    )
+    _claim_in_process_tools(
+        _agent_tools(container, definition, key, caller), "in-process:team", tools, seen
+    )
+    return tools, seen
+
+
+def _claim_in_process_tools(
+    incoming: list[Any], source: str, tools: list[Any], seen: dict[str, str]
+) -> None:
+    """Put an in-process half into ``tools`` and record what it claimed.
+
+    Three halves come through here: the static provider's tools, the sandbox
+    report's and the team's ``ask_<agent>`` tools. All are first, so none
+    renames anything; recording their names under the source's own id is what
+    makes a later server's identically named tool take the prefix rather than
+    vanish into ``_dedupe``.
+    """
+    for tool in incoming:
+        name = str(getattr(tool, "name", ""))
+        if name in seen:
+            continue
+        seen[name] = source
+        tools.append(tool)
+
+
+def _withheld_servers(settings: Settings, key: str) -> set[str]:
+    """Every server agent ``key`` may not reach, under the active profile.
+
+    Two sources, and they stack. The profile's own ``exclude_servers`` is the
+    tool-free baseline's lever and applies to every member. A stage's
+    ``builtin_tools=False`` is the narrower one: it withholds every server the
+    platform ships (``MCPServerConfig.shipped``) from that stage's agents
+    only, so a triage stage can be made to read what it was handed instead of
+    going looking, without cloning the definitions it runs.
+    """
+    from malspark.core.config import shipped_server_keys
+
+    excluded = set(active_profile(settings).exclude_servers)
+    stage = stage_for_agent(settings, key)
+    if stage is not None and not stage.builtin_tools:
+        excluded.update(shipped_server_keys(settings.mcp.servers))
+    return excluded
+
+
+def capability_servers(settings: Settings, capability: str) -> list[str]:
+    """The servers a ``ToolRef(kind="capability")`` stands for, in their configured order.
+
+    It stands for every built-in server that says it serves ``capability``:
+    its block names it among its ``roles``, or a tool it declares (its
+    block's, or what it served when last listed) is of the capability's kind.
+    Whether agents are bound to the server by its own ``agents`` list does
+    not matter: a server bound to the judge serves a capability reference of
+    the static analyst as well. The role is read from the block, so a server
+    whose tools were never listed yet (a fresh or cloned database keeps
+    nothing) still counts. Each is then referenced exactly as a
+    ``kind="mcp"`` reference to it by key is: a disabled server gives
+    nothing, and its tick list and allow-list narrow what it gives. A server
+    an operator adds is never reached through a capability; it is bound by
+    its own ``agents`` list or a reference to it by key, as every server of
+    its own is.
+    """
+    return servers_of_capability(settings.mcp.servers, capability)
+
+
+def servers_of_capability(server_keys: Iterable[str], capability: str) -> list[str]:
+    """``capability_servers`` over a list of server keys, in their order.
+
+    ``server_keys`` may be the settings' server blocks by key, whose roles are
+    then read; for a bare key the block the settings in force hold is read,
+    else the one it ships with. The settings API serves it on the agent
+    definitions' catalogue entry, so the console draws which servers a
+    capability reference stands for without a rule of its own.
+    """
+    from malspark.core.config import _builtin_servers
+    from malspark.core.declared_reading import _block_in_force, builtin_tools
+    from malspark.core.reputation import kinds_of_capability
+
+    kinds = kinds_of_capability(capability)
+    seeds = _builtin_servers()
+    blocks = server_keys if isinstance(server_keys, Mapping) else {}
+    out: list[str] = []
+    for name in server_keys:
+        seed = seeds.get(str(name))
+        if seed is None:
+            continue
+        block = blocks.get(name) or _block_in_force(str(name)) or seed
+        if capability in (getattr(block, "roles", None) or []) or any(
+            facts.kind in kinds for facts in builtin_tools(str(name)).values()
+        ):
+            out.append(str(name))
+    return out
+
+
+def capability_undecided(server_keys: Iterable[str]) -> list[str]:
+    """The enabled built-in servers among ``server_keys`` whose tools are not known yet.
+
+    A server never listed (nothing kept of it, as on a fresh or cloned
+    database) may serve a capability its block does not name; until it is
+    listed, no capability reference is refused for want of a server.
+    """
+    from malspark.core.config import _builtin_servers
+    from malspark.core.declared_reading import _block_in_force, builtin_tools
+
+    seeds = _builtin_servers()
+    blocks = server_keys if isinstance(server_keys, Mapping) else {}
+    out: list[str] = []
+    for name in server_keys:
+        seed = seeds.get(str(name))
+        if seed is None:
+            continue
+        block = blocks.get(name) or _block_in_force(str(name)) or seed
+        if getattr(block, "enabled", False) and not builtin_tools(str(name)):
+            out.append(str(name))
+    return out
+
+
+def _server_refs(settings: Settings, definition: AgentDefinition) -> list[ToolRef]:
+    """The definition's server references, a capability reference as one per server it names.
+
+    A server a capability names that the definition already references whole
+    (by key, or by an earlier capability) is not referenced twice.
+    """
+    from malspark.core.config import ToolRef
+
+    whole = {str(ref.server) for ref in definition.tools if ref.kind == "mcp" and not ref.name}
+    out: list[ToolRef] = []
+    for ref in definition.tools:
+        if ref.kind == "mcp":
+            out.append(ref)
+        elif ref.kind == "capability" and ref.capability:
+            for server in capability_servers(settings, ref.capability):
+                if server not in whole:
+                    whole.add(server)
+                    out.append(ToolRef(kind="mcp", server=server))
+    return out
+
+
+def unresolved_capability_reasons(settings: Settings, key: str) -> list[str]:
+    """One reason per capability agent ``key``'s definition references that names no server.
+
+    A save does not refuse such a reference while a built-in server is not
+    listed yet (``capability_undecided``), so a mistyped capability is said
+    here instead, beside an unservable reference's reason, rather than
+    resolving to nothing in silence. Nothing is said under a profile that
+    withholds every server.
+    """
+    from malspark.core.config import ALL_SERVERS
+
+    if not isinstance(settings, Settings):
+        return []
+    definition = _definition_of(settings, key)
+    if definition is None or ALL_SERVERS in _withheld_servers(settings, key):
+        return []
+    capabilities = dict.fromkeys(
+        str(ref.capability)
+        for ref in definition.tools
+        if ref.kind == "capability" and ref.capability
+    )
+    return [
+        UNRESOLVED_CAPABILITY_REASON.format(capability=capability)
+        for capability in capabilities
+        if not capability_servers(settings, capability)
+    ]
+
+
+def note_unresolved_capabilities(registry: Any, settings: Settings, key: str) -> list[str]:
+    """``unresolved_capability_reasons``, also put where the run summary reads the registry's."""
+    reasons = unresolved_capability_reasons(settings, key)
+    held = getattr(registry, "degradation_reasons", None)
+    if isinstance(held, list):
+        held.extend(reason for reason in reasons if reason not in held)
+    return reasons
+
+
+def _mcp_refs(settings: Settings, definition: AgentDefinition, key: str) -> list[ToolRef]:
+    """The definition's server references, minus the ones the profile excludes."""
+    from malspark.core.config import ALL_SERVERS
+
+    excluded = _withheld_servers(settings, key)
+    if ALL_SERVERS in excluded:
+        return []
+    return [ref for ref in _server_refs(settings, definition) if str(ref.server) not in excluded]
+
+
+def _definition_of(settings: Any, key: str) -> Any:
+    definitions = getattr(getattr(settings, "agents", None), "definitions", None) or {}
+    return definitions.get(key) if hasattr(definitions, "get") else None
+
+
+def role_of(settings: Any, key: str) -> str | None:
+    """The role agent ``key``'s definition declares, or ``None`` when it has none."""
+    role = getattr(_definition_of(settings, key), "role", None)
+    return str(role) if role else None
+
+
+def tab_of(settings: Any, key: str) -> str | None:
+    """The console tab agent ``key``'s definition declares, or ``None`` when it declares none."""
+    tab = getattr(_definition_of(settings, key), "tab", None)
+    return str(tab) if tab else None
+
+
+def mcp_refs_for(settings: Settings, key: str) -> list[ToolRef]:
+    """Agent ``key``'s server references under the active profile, or ``[]``.
+
+    The built-in analysts and the judge attach their own tools rather than
+    reading a ``ResolvedAgent``, so they need the same answer resolution
+    computes; exporting it here is what keeps the two from disagreeing about
+    what a definition asked for.
+    """
+    definition = settings.agents.definitions.get(key)
+    if definition is None:
+        return []
+    return _mcp_refs(settings, definition, key)
+
+
+def servers_bound_to(settings: Settings, key: str) -> set[str]:
+    """Every server agent ``key`` can reach under the active profile.
+
+    Two binding mechanisms, and both count. A definition's
+    ``ToolRef(kind="mcp")`` is one; ``core.mcp.servers.<server>.agents``
+    naming the agent is the other, and it is the one the shipped map uses for
+    ``network``, ``threatintel`` and every other role-bound server. Reading
+    only the first said a stage-less specialist brought nothing with it.
+
+    Narrowed by what the profile withholds from this agent, because a server
+    it cannot resolve is not one it brings.
+    """
+    from malspark.core.config import ALL_SERVERS
+
+    withheld = _withheld_servers(settings, key)
+    if ALL_SERVERS in withheld:
+        return set()
+    bound = {str(ref.server) for ref in mcp_refs_for(settings, key)}
+    bound |= {
+        str(name)
+        for name, server in settings.mcp.servers.items()
+        if server.enabled and key in server.agents and str(name) not in withheld
+    }
+    return bound
+
+
+def servers_withheld_from(
+    settings: Settings,
+    caller_key: str,
+    callee_key: str,
+    also: frozenset[str] = frozenset(),
+    caller_withholds: Iterable[str] | None = None,
+) -> list[str]:
+    """The servers ``callee_key`` brings that ``caller_key``'s own stage may not reach.
+
+    A callee's effective tool set is what it is bound to — by its own
+    definition and by the server map alike, see ``servers_bound_to`` —
+    narrowed by the tool policy of the stage doing the asking: a stage with
+    ``builtin_tools=False`` is told to read what it was handed, and an ask
+    that came back with a ``knowledge`` lookup or a ``network`` query would
+    have gone around it.
+
+    Reported rather than applied, because the callee is one cached instance
+    per job: narrowing the instance for one ask would narrow it for whoever
+    asks next, and for its own stage. The delegation refuses the ask instead,
+    in words the model reads.
+    """
+    from malspark.core.config import ALL_SERVERS
+
+    # ``also`` is what the stage that started the chain withholds, carried down
+    # by the delegation. Without it the policy stops at the first callee: a
+    # specialist that no stage names withholds nothing of its own, so the ask
+    # it makes in turn would reach exactly what the stage was told not to.
+    # ``caller_withholds`` is the caller's own policy where it is not the
+    # stage its key is in: the judge asks while it mediates, under the debate
+    # stage and the profile, never under its verdict stage.
+    own = (
+        _withheld_servers(settings, caller_key)
+        if caller_withholds is None
+        else set(caller_withholds)
+    )
+    withheld = own | set(also)
+    if not withheld:
+        return []
+    brought = servers_bound_to(settings, callee_key)
+    if ALL_SERVERS in withheld:
+        return sorted(brought)
+    return sorted(brought & withheld)
+
+
+def _excluded_servers(settings: Settings, key: str = "") -> str:
+    """``ServerRegistry``'s ``exclude`` argument for one agent under this profile.
+
+    The registry takes one name, not a list — it grew for the one case of an
+    analyst that must not see its own provider's server. A profile excluding
+    several is expressed as a comma-joined value that ``handles_for`` splits,
+    and ``*`` among them means every server; see ``ServerRegistry.for_agent``.
+    """
+    return ",".join(sorted(_withheld_servers(settings, key)))
+
+
+def _agent_llm(container: Any, key: str) -> Any:
+    """The agent's model, or None on a mock container.
+
+    A mock container (``ServiceContainer(settings, mock=True)``) builds no LLM
+    registry and ``get_agent_llm`` raises there; the agent probe resolves on
+    such a container on purpose, so resolution never asks it for a model.
+    """
+    if getattr(container, "mock", False):
+        return None
+    return container.get_agent_llm(key)
+
+
+def _staging_inputs(container: Any) -> tuple[str | None, str]:
+    """The job's sample path and digest, as ``app.arun`` left them on the container.
+
+    Resolution has neither the graph state nor a job argument carrying these,
+    for the same reason it has neither the sample format nor the sandbox
+    report: agents are built lazily, from nodes that do not all carry the
+    state. A container that was never told stages nothing.
+    """
+    path = getattr(container, "sample_path", None)
+    digest = str(getattr(container, "sample_sha256", "") or "")
+    return (str(path) if path else None), digest
+
+
+async def _astage(
+    registry: Any, container: Any, tools: list[Any], job_key: str
+) -> tuple[dict[str, str], list[str]]:
+    """Upload the sample to every bound server that wants it. Never raises.
+
+    The registry is handed in rather than asked of the container: the
+    synchronous caller below holds the container's cache lock while it waits
+    for this coroutine, so a guarded getter reached from here would wait for a
+    lock that only the blocked caller can release.
+
+    Staging records its own failures on the registry, which is the union
+    across every agent in the job; this agent's own reasons are the ones that
+    appeared while *it* was staging, so the slice is taken rather than the
+    whole list — an agent must not report a failure another agent caused.
+    """
+    sample_path, digest = _staging_inputs(container)
+    if not sample_path:
+        return {}, []
+    from malspark.agents.sample_staging import stage_for_agent
+
+    before = len(registry.degradation_reasons)
+    # The job's record of every upload, for the run's disclosure block.
+    stagings = getattr(container, "sample_stagings", None)
+    try:
+        staged = await stage_for_agent(
+            registry,
+            tools,
+            sample_path,
+            sha256=digest,
+            job_id=job_key,
+            stagings=stagings if isinstance(stagings, list) else None,
+        )
+    except Exception as exc:  # noqa: BLE001 — staging never fails a run
+        logger.warning("sample staging skipped for job %s: %s", job_key, exc)
+        return {}, []
+    return dict(staged), list(registry.degradation_reasons[before:])
+
+
+def _has_remote_server(registry: Any, tools: list[Any]) -> bool:
+    """Whether any server behind ``tools`` is reached over a network.
+
+    Only such a server is ever staged to, and the answer is a property of the
+    configuration alone — no transport is touched, nothing is awaited. Asking
+    it here, on the caller's own thread, is what keeps a deployment whose
+    servers are all local subprocesses from handing the agent loop a
+    coroutine, and waiting on it, for an answer that is always ``{}``.
+    """
+    from malspark.agents.sample_staging import REMOTE_TRANSPORTS
+    from malspark.agents.tool_pinning import server_of
+
+    for key in dict.fromkeys(server_of(tool) for tool in tools):
+        if not key:
+            continue
+        try:
+            handle = registry.get(key)
+        except Exception:  # noqa: BLE001 — a tool from a server that is gone
+            continue
+        transport = str(getattr(handle.config, "transport", "stdio") or "stdio").lower()
+        if transport in REMOTE_TRANSPORTS:
+            return True
+    return False
+
+
+def _mounted(container: Any, tools: list[Any], staged: dict[str, str]) -> dict[str, str]:
+    """``staged``, and for each other server behind ``tools`` its copy under its declared mount.
+
+    The worker copies the sample for every tool server that declares a
+    ``sample_mount`` (``container.server_sample_paths``), and the path the
+    server opens is that copy under its mount, as a static provider's is. A
+    server the sample was staged to keeps the path its own staging answered.
+    """
+    from malspark.agents.tool_pinning import server_of
+
+    mounted = getattr(container, "server_sample_paths", None) or {}
+    if not isinstance(mounted, dict) or not mounted:
+        return staged
+    out = dict(staged)
+    for key in dict.fromkeys(server_of(tool) for tool in tools):
+        if key and key not in out and mounted.get(key):
+            out[key] = str(mounted[key])
+    return out
+
+
+def hold_sample_paths(
+    registry: Any,
+    tools: list[Any],
+    path_by_server: dict[str, str] | None,
+    default_path: str | None = None,
+) -> None:
+    """Note on the job's registry where each server behind ``tools`` holds the job's sample.
+
+    The server's own path (``path_by_server``: its mirror under the declared
+    mount, or where the sample was staged to it), else ``default_path``, the
+    agent's own, which never replaces a server's own path another agent
+    noted: on a server other jobs share, the only path an open may name
+    (``ServerRegistry.hold_sample_path``). With neither, nothing is noted and
+    every open there stays refused.
+    """
+    hold = getattr(registry, "hold_sample_path", None)
+    if not callable(hold):
+        return
+    from malspark.agents.tool_pinning import server_of
+
+    paths = dict(path_by_server or {})
+    for key in dict.fromkeys(server_of(tool) for tool in tools):
+        if not key:
+            continue
+        if paths.get(key):
+            hold(key, paths[key])
+        elif default_path:
+            # The agent's own path: never in the place of a server's own.
+            hold(key, default_path, fallback=True)
+
+
+def _stage(container: Any, tools: list[Any], job_key: str) -> tuple[dict[str, str], list[str]]:
+    """``_astage`` for the synchronous resolver, on the shared agent loop.
+
+    The same loop the handles were opened on, which is the loop their
+    transports are bound to: uploading on any other one is the cross-loop
+    failure ``ServerHandle`` exists to avoid.
+
+    Both questions that can be answered without a transport are answered
+    first, on this thread: a job with no sample stages nothing, and neither
+    does a deployment whose servers are all local.
+    """
+    sample_path, digest = _staging_inputs(container)
+    if not sample_path:
+        return {}, []
+    registry = container.get_server_registry()
+    if not _has_remote_server(registry, tools):
+        return {}, []
+    import threading
+
+    from malspark.agents.base_agent import run_coro_blocking
+    from malspark.agents.sample_staging import (
+        cached_path,
+        mark_unfinished_failed,
+        record_failure,
+        staged_servers,
+    )
+    from malspark.pipeline.events import describe_exception
+
+    bound, servers, unlimited = _staging_bound(registry, tools, sample_path)
+    before = len(registry.degradation_reasons)
+    stagings = getattr(container, "sample_stagings", None)
+    noted = len(stagings) if isinstance(stagings, list) else 0
+    # The calls themselves are bounded, each by its own server's deadline
+    # (``ServerGuard.call_timeout``, sent with the call). Waiting for a
+    # server's slot is not: there is no default limit, so the wait is never
+    # cut. It is stated once it outlasts the calls' deadlines together.
+    logger.info(
+        "sample staging for job %s to %s: its calls' deadlines sum to %s; a wait for a "
+        "server's slot is not limited.",
+        job_key,
+        ", ".join(servers) or "no server",
+        "no time limit" if bound is None else f"{bound:g} s",
+    )
+    if unlimited:
+        logger.warning(
+            "sample staging for job %s has no time limit: these calls have no deadline (%s), "
+            "so staging waits for them as their servers do.",
+            job_key,
+            ", ".join(unlimited),
+        )
+    long_wait = (
+        threading.Timer(
+            bound,
+            lambda: logger.warning(
+                "sample staging for job %s has run past its calls' deadlines (%g s): "
+                "it is waiting for a server's slot, and goes on waiting.",
+                job_key,
+                bound,
+            ),
+        )
+        if bound is not None
+        else None
+    )
+    if long_wait is not None:
+        long_wait.daemon = True
+        long_wait.start()
+    try:
+        staged, reasons = run_coro_blocking(
+            _astage(registry, container, tools, job_key),
+            hard_timeout=None,
+            label="sample-staging",
+        )
+    except Exception as exc:  # noqa: BLE001 — staging never fails a run
+        logger.warning("sample staging skipped for job %s: %s", job_key, exc)
+        # Said, not swallowed: an upload still written down as attempted is
+        # marked failed and its server named; a path already staged is kept,
+        # and one staged whose path cannot be read back is said to be so.
+        stopped = f"the uploads stopped ({describe_exception(exc)})"
+        unfinished = mark_unfinished_failed(stagings, noted)
+        finished = staged_servers(stagings, noted)
+        kept: dict[str, str] = {}
+        for key in servers:
+            path = cached_path(job_key, key, digest)
+            if path:
+                kept[key] = path
+            elif key in finished:
+                record_failure(registry, key, "staged, path not recovered")
+            elif key in unfinished or not isinstance(stagings, list):
+                record_failure(registry, key, stopped)
+        return kept, list(registry.degradation_reasons[before:])
+    finally:
+        if long_wait is not None:
+            long_wait.cancel()
+    return dict(staged or {}), list(reasons or [])
+
+
+def _staging_bound(
+    registry: Any, tools: list[Any], sample_path: str
+) -> tuple[float | None, list[str], list[str]]:
+    """How long the uploads' calls to the remote servers behind ``tools`` may take.
+
+    ``(bound, servers, calls with no deadline)``: the servers staged to, and
+    each ``server.tool`` whose call has no deadline, which leaves the bound
+    ``None``.
+
+    Derived, never a default: the sum, over every call each upload makes
+    (``sample_staging.planned_calls``), of the deadline that server's guard
+    gives the call (``ServerGuard.call_timeout``), which each call is held to
+    on its own. ``None``, no limit, when a call has none. A wait for a
+    server's slot is not in it, and no wait is cut by it: past it the
+    resolver says that it is still waiting.
+    """
+    import os
+
+    from malspark.agents.sample_staging import REMOTE_TRANSPORTS, planned_calls
+    from malspark.agents.tool_pinning import server_of
+
+    try:
+        size = os.path.getsize(sample_path)
+    except OSError:
+        size = 0
+    total = 0.0
+    servers: list[str] = []
+    unlimited: list[str] = []
+    for key in dict.fromkeys(server_of(tool) for tool in tools):
+        if not key:
+            continue
+        try:
+            handle = registry.get(key)
+        except Exception:  # noqa: BLE001 — a tool from a server that is gone
+            continue
+        transport = str(getattr(handle.config, "transport", "stdio") or "stdio").lower()
+        if transport not in REMOTE_TRANSPORTS or not getattr(handle, "is_open", False):
+            continue
+        try:
+            calls = planned_calls(size, set(handle.all_tool_names()))
+        except Exception:  # noqa: BLE001 — a manifest that cannot be read stages nothing
+            continue
+        if not calls:
+            continue
+        servers.append(str(key))
+        guard = getattr(handle, "guard", None)
+        timeout_of = getattr(guard, "call_timeout", None)
+        for name, count in calls.items():
+            deadline = timeout_of(name) if callable(timeout_of) else None
+            if deadline is None:
+                unlimited.append(f"{key}.{name}")
+            else:
+                total += float(deadline) * count
+    return (total if servers and not unlimited else None), servers, unlimited
+
+
+def resolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAgent:
+    """Everything agent ``key`` gets under this container's settings."""
+    settings: Settings = container.config
+    definition = _definition(settings, key)
+    provider_ids = _opened_provider_ids(settings, definition, key)
+    provider_id = provider_ids[0]
+    _check_prompt_role(definition)
+
+    reasons: list[str] = []
+    # One ``seen`` map across every half, so B's collision rule holds over the
+    # agent's whole tool set: a referenced server's tool whose name a bound
+    # server already claimed arrives as ``<server>__<tool>`` instead of being
+    # dropped as a duplicate of a tool it has nothing to do with.
+    seen: dict[str, str] = {}
+    tools: list[Any] = []
+    by_provider, provider_reasons = _providers_tools(container, definition, provider_ids)
+    reasons.extend(provider_reasons)
+    _claim_provider_tools(by_provider, tools, seen)
+    _claim_in_process_tools(
+        _sandbox_tools(container, definition), "in-process:sandbox", tools, seen
+    )
+    _claim_in_process_tools(
+        _agent_tools(container, definition, key), "in-process:team", tools, seen
+    )
+    registry = container.get_server_registry()
+    # The built-in servers and the definition's own claim their names before
+    # an operator's server bound by ``agents`` (``ServerRegistry.agent_tools``).
+    served, served_reasons = registry.agent_tools(
+        key,
+        job_key,
+        _mcp_refs(settings, definition, key),
+        exclude=_excluded_servers(settings, key),
+        seen=seen,
+    )
+    tools.extend(served)
+    reasons.extend(served_reasons)
+    reasons.extend(note_unresolved_capabilities(registry, settings, key))
+
+    # The notes after each description, settled over the whole list: the
+    # provider's tools as the agent is offered them, beside the servers'.
+    from malspark.providers.servers import settle_tool_notes
+
+    deduped = settle_tool_notes(_dedupe(tools), settings)
+    staged, staging_reasons = _stage(container, deduped, job_key)
+    staged = _mounted(container, deduped, staged)
+    hold_sample_paths(registry, deduped, staged)
+    reasons.extend(staging_reasons)
+    note_for_resolved(settings, definition, key, deduped)
+    opened = tuple(provider_ids) if opens_provider_by_reference(definition) else ()
+    return ResolvedAgent(
+        key=key,
+        role=definition.role,
+        prompt=_agent_prompt(
+            definition,
+            container,
+            provider_id,
+            deduped,
+            provider_expected=True,
+            provider_ids=opened,
+        ),
+        authored_prompt=_agent_prompt(
+            definition,
+            container,
+            provider_id,
+            deduped,
+            provider_expected=True,
+            for_a_clone=True,
+        ),
+        tools=deduped,
+        static_provider_id=provider_id,
+        provider_ids=opened,
+        llm=_agent_llm(container, key),
+        degradation_reasons=tuple(dict.fromkeys(reasons)),
+        path_by_server=staged,
+        attck_techniques=definition.attck_techniques,
+        category=definition.category,
+    )
+
+
+async def aresolve_agent(key: str, container: Any, job_key: str = "job") -> ResolvedAgent:
+    """``resolve_agent``, attaching on the caller's own loop.
+
+    For a caller already inside an event loop — the judge's node and the
+    settings probe — where handing the attach to the shared agent loop would
+    bind a transport to a loop other than the one that awaits its tool calls.
+    """
+    settings: Settings = container.config
+    definition = _definition(settings, key)
+    provider_ids = _opened_provider_ids(settings, definition, key)
+    provider_id = provider_ids[0]
+    _check_prompt_role(definition)
+
+    reasons: list[str] = []
+    seen: dict[str, str] = {}
+    tools: list[Any] = []
+    # The provider handshake is synchronous — for Ghidra it hands ``initialize``
+    # to the shared agent loop and blocks on the result — so it runs off this
+    # loop. Awaited callers (the judge's node, the settings probe) keep serving
+    # everything else, and the probe's ``asyncio.wait`` budget can actually
+    # preempt a wedged provider.
+    by_provider, provider_reasons = await asyncio.to_thread(
+        _providers_tools, container, definition, provider_ids
+    )
+    reasons.extend(provider_reasons)
+    _claim_provider_tools(by_provider, tools, seen)
+    # Off the loop for the same reason, and before the registry asks for it:
+    # learning the window is a metadata request, and the first caller to build
+    # the budget pays for it. For every role but ``generic`` the provider call
+    # above returns nothing, so without this the registry below would be the
+    # first builder — on the caller's own loop.
+    await asyncio.to_thread(container.get_context_budget)
+    _claim_in_process_tools(
+        _sandbox_tools(container, definition), "in-process:sandbox", tools, seen
+    )
+    _claim_in_process_tools(
+        _agent_tools(container, definition, key), "in-process:team", tools, seen
+    )
+    registry = container.get_server_registry()
+    served, served_reasons = await registry.aagent_tools(
+        key,
+        job_key,
+        _mcp_refs(settings, definition, key),
+        exclude=_excluded_servers(settings, key),
+        seen=seen,
+    )
+    tools.extend(served)
+    reasons.extend(served_reasons)
+    reasons.extend(note_unresolved_capabilities(registry, settings, key))
+
+    # The notes after each description, settled over the whole list: the
+    # provider's tools as the agent is offered them, beside the servers'.
+    from malspark.providers.servers import settle_tool_notes
+
+    deduped = settle_tool_notes(_dedupe(tools), settings)
+    staged, staging_reasons = await _astage(
+        container.get_server_registry(), container, deduped, job_key
+    )
+    staged = _mounted(container, deduped, staged)
+    hold_sample_paths(registry, deduped, staged)
+    reasons.extend(staging_reasons)
+    note_for_resolved(settings, definition, key, deduped)
+    opened = tuple(provider_ids) if opens_provider_by_reference(definition) else ()
+    return ResolvedAgent(
+        key=key,
+        role=definition.role,
+        prompt=_agent_prompt(
+            definition,
+            container,
+            provider_id,
+            deduped,
+            provider_expected=True,
+            provider_ids=opened,
+        ),
+        authored_prompt=_agent_prompt(
+            definition,
+            container,
+            provider_id,
+            deduped,
+            provider_expected=True,
+            for_a_clone=True,
+        ),
+        tools=deduped,
+        static_provider_id=provider_id,
+        provider_ids=opened,
+        llm=_agent_llm(container, key),
+        degradation_reasons=tuple(dict.fromkeys(reasons)),
+        path_by_server=staged,
+        attck_techniques=definition.attck_techniques,
+        category=definition.category,
+    )
+
+
+def servers_a_job_calls(
+    settings: Settings, *, global_provider: str | None = None, level: int = logging.INFO
+) -> set[str]:
+    """Every tool server a job under ``settings`` can call, by key.
+
+    The one answer for "does this job use this server", read by the submit
+    check, the worker's check of a stored secret and the sample mirroring. It
+    covers what the run can reach, never less:
+
+    * the servers bound (``servers_bound_to``) to every agent the profile's
+      stages run, every agent those ask in turn, every enabled judge- or
+      report-role definition, the mediator when a debate stage exists and the
+      summariser while it is on, each followed through its references;
+    * the reputation lookups of the triage pack, unless ``core.triage.reputation``
+      is off (``pipeline.nodes`` chooses them the same way, from ``pack_lookups``);
+    * ``static.generic.server`` when the global static provider, the team's or
+      any reached agent's is ``generic_mcp`` (``global_provider`` is the one
+      a submitted job names).
+
+    ``level`` is what the triage pack's choice of a switched-off or one of
+    several declaring servers is logged at: info for the job start, debug for
+    a status read (``pack_servers._declaring_server_key``).
+    """
+    from malspark.core.config import MEDIATOR_AGENT_KEY, SUMMARIZER_AGENT_KEY
+    from malspark.core.declared_reading import declarations
+    from malspark.core.reputation import pack_lookups
+
+    team = active_profile(settings)
+    named = [str(agent) for stage in team.stages for agent in stage.agents]
+    named += [
+        key
+        for key, definition in settings.agents.definitions.items()
+        if definition.enabled and definition.role in ("judge", "report") and key not in named
+    ]
+    if any(getattr(stage, "kind", "") == "debate" for stage in team.stages):
+        named.append(MEDIATOR_AGENT_KEY)
+    if settings.preprocessing.use_function_summarizer:
+        named.append(SUMMARIZER_AGENT_KEY)
+    agents = [
+        key for key in reachable_agents(settings, named) if key in settings.agents.definitions
+    ]
+    used: set[str] = set()
+    for key in agents:
+        used |= servers_bound_to(settings, key)
+    if str(settings.triage.reputation) != "off":
+        used |= {
+            lookup.server
+            for lookup in pack_lookups(settings.mcp.servers, declarations(settings))
+            if lookup.enabled
+        }
+    # The triage pack: a step an operator declared calls its own server, and
+    # the capa, decoder and carve steps run in process on the env of the server
+    # declaring their tool.
+    from malspark.core.pack_servers import (
+        _CAPA_RENDERER,
+        _carve_server_key,
+        _decoder_server_key,
+        _step_server_key,
+    )
+    from malspark.core.pack_steps import effective_steps, steps_on_servers
+
+    # A shipped step whose server is off calls nothing (``steps_on_servers``).
+    steps, _off = steps_on_servers(
+        effective_steps(getattr(settings.triage, "steps", None) or ()), settings.mcp.servers
+    )
+    used |= {
+        str(step.server) for step in steps if step.enabled and not step.builtin and step.server
+    }
+    servers = settings.mcp.servers
+    used |= {
+        key
+        for key in (
+            _decoder_server_key(servers, steps, level=level),
+            _step_server_key(servers, steps, _CAPA_RENDERER, purpose="capa", level=level),
+            _carve_server_key(servers, level=level),
+        )
+        if key
+    }
+    # The registry servers each static provider the job runs calls, as the
+    # provider itself names them.
+    from malspark.providers.registry import static_provider_servers
+
+    providers = {str(global_provider or settings.static.provider)} | {
+        str(static_provider_id_for(settings, key, global_provider=global_provider))
+        for key in agents
+    }
+    # And every provider an agent names on a ``provider`` reference.
+    for key in agents:
+        providers |= set(static_provider_ids_for(settings, key, global_provider=global_provider))
+    for provider in providers:
+        used |= static_provider_servers(provider, settings)
+    return used

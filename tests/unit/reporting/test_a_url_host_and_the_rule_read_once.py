@@ -12,16 +12,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting import builder
-from maljan.reporting.models import (
+from malspark.reporting import builder
+from malspark.reporting.models import (
     JudgeIndicator,
     MalwareReport,
     NetworkDomain,
     NetworkIOCs,
     NetworkURL,
 )
-from maljan.reporting.renderers import stix_renderer
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer, publishes
+from malspark.reporting.renderers import stix_renderer
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer, publishes
 
 CDN_URL = "https://www.googleapis.com/upload/x"
 

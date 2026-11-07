@@ -20,8 +20,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from app.deps import require_admin, require_admin_session
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import StoredCase
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.memory.long_term_memory import StoredCase
 
 UID = "3f1c2b9e-6a1d-4f7e-9b2a-0c8d7e6f5a41"
 ROUTE = "/api/v1/system/ltm/purge-owners"

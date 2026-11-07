@@ -5,9 +5,9 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from maljan.core.config import Settings
-from maljan.providers.base import StaticJobContext
-from maljan.providers.static.ghidra import GhidraStaticProvider
+from malspark.core.config import Settings
+from malspark.providers.base import StaticJobContext
+from malspark.providers.static.ghidra import GhidraStaticProvider
 
 
 class _Tool:
@@ -121,8 +121,8 @@ def test_the_analyst_asks_the_provider_for_tools(monkeypatch):
     """``_initialize_mcp_client`` resolves a provider and does nothing else."""
     from unittest.mock import MagicMock
 
-    from maljan.agents.static_analyst import StaticAnalyst
-    from maljan.providers.base import StaticCapabilities
+    from malspark.agents.static_analyst import StaticAnalyst
+    from malspark.providers.base import StaticCapabilities
 
     calls: list[str] = []
 
@@ -150,8 +150,8 @@ def test_the_analyst_asks_the_provider_for_tools(monkeypatch):
 def test_a_provider_without_tools_leaves_the_analyst_toolless():
     from unittest.mock import MagicMock
 
-    from maljan.agents.static_analyst import StaticAnalyst
-    from maljan.providers.base import StaticCapabilities
+    from malspark.agents.static_analyst import StaticAnalyst
+    from malspark.providers.base import StaticCapabilities
 
     class _Evidence:
         id = "capa_yara"
@@ -172,8 +172,8 @@ def test_a_provider_without_tools_leaves_the_analyst_toolless():
 def test_static_still_fails_loudly_and_a_degrading_provider_does_not(monkeypatch):
     from unittest.mock import MagicMock
 
-    from maljan.agents.static_analyst import StaticAnalyst
-    from maljan.providers.base import StaticCapabilities
+    from malspark.agents.static_analyst import StaticAnalyst
+    from malspark.providers.base import StaticCapabilities
 
     analyst = StaticAnalyst(llm=MagicMock(), name="static")
 
@@ -206,8 +206,8 @@ def test_analyze_isr_degrades_for_a_degrading_provider_but_raises_for_ghidra():
     """
     from unittest.mock import MagicMock
 
-    from maljan.agents.static_analyst import StaticAnalyst
-    from maljan.providers.base import StaticCapabilities
+    from malspark.agents.static_analyst import StaticAnalyst
+    from malspark.providers.base import StaticCapabilities
 
     missing_sample = "/nonexistent/path/does-not-exist.exe"
 
@@ -250,7 +250,7 @@ def test_open_is_idempotent_for_a_repeat_call_with_an_equal_job(monkeypatch):
     value comparison ``open()`` relies on, rather than trivially passing an
     identity check.
     """
-    from maljan.providers.static.ghidra import http_client as ghidra_http_client
+    from malspark.providers.static.ghidra import http_client as ghidra_http_client
 
     constructions: list[int] = []
 
@@ -283,7 +283,7 @@ def test_open_is_idempotent_for_a_repeat_call_with_an_equal_job(monkeypatch):
 
 
 def test_open_for_a_different_job_closes_the_stale_toolkit_before_reattaching(monkeypatch):
-    from maljan.providers.static.ghidra import http_client as ghidra_http_client
+    from malspark.providers.static.ghidra import http_client as ghidra_http_client
 
     constructions: list[int] = []
     closed: list[int] = []

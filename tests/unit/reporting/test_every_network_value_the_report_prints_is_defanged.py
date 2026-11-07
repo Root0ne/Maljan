@@ -18,14 +18,14 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     SampleIdentity,
     StaticAnalysis,
     StringIOC,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 URL = "https://relay.example.net/live/"
 HOST = "relay.example.net"
@@ -125,7 +125,7 @@ def test_a_host_indicator_holding_a_network_value_prints_it_defanged() -> None:
 
 
 def test_a_draft_rule_s_source_line_is_defanged_and_its_body_compiles_as_written() -> None:
-    from maljan.reporting.models import DetectionRule
+    from malspark.reporting.models import DetectionRule
 
     body = f'rule Example {{ strings: $s1 = "{HOST}" condition: $s1 }}'
     report = _report(
@@ -192,7 +192,7 @@ def test_a_host_in_capitals_and_an_onion_name_print_defanged() -> None:
 
 
 def test_a_draft_rule_s_compile_error_prints_defanged() -> None:
-    from maljan.reporting.models import DetectionRule
+    from malspark.reporting.models import DetectionRule
 
     report = _report(
         detection_signatures=[
@@ -238,20 +238,20 @@ NETWORK = (
 
 @pytest.mark.parametrize("sentence", NOT_NETWORK)
 def test_prose_that_names_no_network_value_prints_as_written(sentence: str) -> None:
-    from maljan.reporting.renderers.markdown import _defanged_text
+    from malspark.reporting.renderers.markdown import _defanged_text
 
     assert _defanged_text(sentence) == sentence
 
 
 @pytest.mark.parametrize(("sentence", "defanged"), NETWORK)
 def test_prose_that_names_a_network_value_prints_it_defanged(sentence: str, defanged: str) -> None:
-    from maljan.reporting.renderers.markdown import _defanged_text
+    from malspark.reporting.renderers.markdown import _defanged_text
 
     assert defanged in _defanged_text(sentence)
 
 
 def test_the_run_s_own_indicator_is_defanged_even_where_it_reads_as_a_file_name() -> None:
-    from maljan.reporting.models import (
+    from malspark.reporting.models import (
         NetworkDomain,
         NetworkIOCs,
         TechnicalAnalysis,
@@ -272,10 +272,10 @@ def test_the_run_s_own_indicator_is_defanged_even_where_it_reads_as_a_file_name(
 
 
 def test_a_reference_link_stays_a_link_unless_it_holds_the_run_s_indicator() -> None:
-    from maljan.reporting.renderers.markdown import _Context
+    from malspark.reporting.renderers.markdown import _Context
 
     report = _report(network=None)
-    from maljan.reporting.models import NetworkIOCs, NetworkIP
+    from malspark.reporting.models import NetworkIOCs, NetworkIP
 
     report.network = NetworkIOCs(ips=[NetworkIP(address="203.0.113.9", source="sandbox")])
     ctx = _Context(report)
@@ -288,7 +288,7 @@ def test_a_reference_link_stays_a_link_unless_it_holds_the_run_s_indicator() -> 
 
 
 def test_a_digit_before_a_top_level_domain_is_no_host() -> None:
-    from maljan.reporting.renderers.markdown import _defanged_text
+    from malspark.reporting.renderers.markdown import _defanged_text
 
     assert _defanged_text('noise "?3e)}3.cz in a string') == 'noise "?3e)}3.cz in a string'
 
@@ -303,7 +303,7 @@ def test_a_digit_before_a_top_level_domain_is_no_host() -> None:
     ],
 )
 def test_a_reference_host_url_off_its_lookup_shape_is_defanged(url: str) -> None:
-    from maljan.reporting.renderers.markdown import _defanged_text
+    from malspark.reporting.renderers.markdown import _defanged_text
 
     written = _defanged_text(f"see {url} here")
 
@@ -326,13 +326,13 @@ def test_a_reference_host_url_off_its_lookup_shape_is_defanged(url: str) -> None
     ],
 )
 def test_a_reference_lookup_stays_a_link(url: str) -> None:
-    from maljan.reporting.renderers.markdown import _defanged_text
+    from malspark.reporting.renderers.markdown import _defanged_text
 
     assert _defanged_text(f"see {url} here") == f"see {url} here"
 
 
 def test_a_package_name_is_no_host() -> None:
-    from maljan.pipeline.validation import network_values_in
+    from malspark.pipeline.validation import network_values_in
 
     for name in (
         "com.facebook.react.bridge.app",
@@ -354,13 +354,13 @@ def test_a_package_name_is_no_host() -> None:
 # country code samples use (".pl", ".ml") it is a host, and so is a longer name.
 @pytest.mark.parametrize("host", ["evil.pl", "panel.ml", "cdn.evil.pl", "x.update.sh"])
 def test_a_common_country_code_host_is_defanged_in_prose(host: str) -> None:
-    from maljan.reporting.renderers.markdown import _defanged_text
+    from malspark.reporting.renderers.markdown import _defanged_text
 
     assert host not in _defanged_text(f"see {host} now")
 
 
 def test_a_kept_link_is_put_back_whatever_the_text_holds() -> None:
-    from maljan.reporting.renderers.markdown import _defanged_text
+    from malspark.reporting.renderers.markdown import _defanged_text
 
     url = "https://www.virustotal.com/gui/file/" + "a" * 64
     text = f"odd \x000\x00 and  0  beside {url}"
@@ -369,14 +369,14 @@ def test_a_kept_link_is_put_back_whatever_the_text_holds() -> None:
 
 
 def test_a_reference_lookup_before_a_comma_stays_a_link() -> None:
-    from maljan.reporting.renderers.markdown import _defanged_text
+    from malspark.reporting.renderers.markdown import _defanged_text
 
     text = "report_url=https://www.virustotal.com/gui/ip-address/198.51.100.20, coverage=91"
     assert _defanged_text(text) == text
 
 
 def test_the_command_line_flags_table_prints_its_network_values_defanged() -> None:
-    from maljan.reporting.models import CliFlag, TechnicalAnalysis
+    from malspark.reporting.models import CliFlag, TechnicalAnalysis
 
     report = _report(
         technical_analysis=TechnicalAnalysis(
@@ -395,8 +395,8 @@ def test_the_command_line_flags_table_prints_its_network_values_defanged() -> No
 
 
 def test_a_draft_rule_s_comments_print_defanged_and_its_strings_compile_as_written() -> None:
-    from maljan.reporting.detection_signatures import build_detection_rules
-    from maljan.reporting.models import ConsolidatedIOC
+    from malspark.reporting.detection_signatures import build_detection_rules
+    from malspark.reporting.models import ConsolidatedIOC
 
     report = _report(
         malware_category="loader",

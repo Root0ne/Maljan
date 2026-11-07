@@ -25,13 +25,13 @@ import pytest
 from langchain_core.messages import AIMessage
 from pydantic import BaseModel
 
-from maljan.agents.ledger_reads import LedgerReads
-from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
-from maljan.core.config import Settings
-from maljan.llm.anthropic_provider import AnthropicProvider
-from maljan.llm.registry import schema_tool_worth_offering
-from maljan.reporting.composer import COMPOSED_SECTIONS, ReportComposer
-from maljan.reporting.narrative_agent import NarrativeAgent
+from malspark.agents.ledger_reads import LedgerReads
+from malspark.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+from malspark.core.config import Settings
+from malspark.llm.anthropic_provider import AnthropicProvider
+from malspark.llm.registry import schema_tool_worth_offering
+from malspark.reporting.composer import COMPOSED_SECTIONS, ReportComposer
+from malspark.reporting.narrative_agent import NarrativeAgent
 from tests.unit.reporting.test_the_composer_writes_its_sections_at_once import _isr, _report
 
 from .anthropic_wire import MODEL, Wire, install
@@ -60,7 +60,7 @@ class TestTheProviderSaysSo:
 
     def test_it_is_said_once_per_model(self, caplog: pytest.LogCaptureFixture) -> None:
         llm = _built(MODEL)
-        with caplog.at_level(logging.INFO, logger="maljan"):
+        with caplog.at_level(logging.INFO, logger="malspark"):
             assert schema_tool_worth_offering(llm) is False
             assert schema_tool_worth_offering(llm) is False
         said = [r for r in caplog.records if "writes a schema offered beside" in r.getMessage()]
@@ -74,7 +74,7 @@ class TestTheProviderSaysSo:
         assert schema_tool_worth_offering(_Other()) is True
 
     def test_it_is_read_from_its_own_vendored_fact(self) -> None:
-        from maljan.llm.anthropic_provider import thinks_by_default_source
+        from malspark.llm.anthropic_provider import thinks_by_default_source
 
         assert "adaptive thinking is on by default" in thinks_by_default_source(MODEL)
         assert thinks_by_default_source("claude-3-5-haiku-20241022") == ""
@@ -85,7 +85,7 @@ class TestTheProviderSaysSo:
 
     def test_a_fallback_list_takes_the_text_path_only_when_every_model_would(self) -> None:
         class _List:
-            _llm_type = "maljan-fallback"
+            _llm_type = "malspark-fallback"
 
             def __init__(self, models: list[Any]) -> None:
                 self.models = models
@@ -136,7 +136,7 @@ class TestTheCallsAreAskedInText:
         composer = ReportComposer(llm=_built(MODEL), per_section_timeout=60)
         composer.ledger_reads = LedgerReads(LEDGER)
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=True
         ):
             asyncio.run(composer.compose(report, _isr(), facts_block=FACTS, concurrent=False))
         by_section = _by_section(wire)
@@ -155,7 +155,7 @@ class TestTheCallsAreAskedInText:
         composer = ReportComposer(llm=_built("claude-3-5-haiku-20241022"), per_section_timeout=60)
         composer.ledger_reads = LedgerReads(LEDGER)
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=True
         ):
             asyncio.run(composer.compose(_report(), _isr(), facts_block=FACTS, concurrent=False))
         firsts = [b for b in wire.bodies if len(b["messages"]) == 1]
@@ -169,7 +169,7 @@ class TestTheCallsAreAskedInText:
         agent.llm = _built(MODEL)
         agent.ledger_reads = LedgerReads(LEDGER)
         with patch(
-            "maljan.reporting.narrative_agent.structured_output_supported_for_llm",
+            "malspark.reporting.narrative_agent.structured_output_supported_for_llm",
             return_value=True,
         ):
             assert agent._structured_path() is False

@@ -10,16 +10,16 @@ once with a trailing separator and once without.
 
 from __future__ import annotations
 
-from maljan.agents._indicator_denylists import hash_literal_is_wellformed, malformed_hash_in
-from maljan.pipeline.validation import validate_verdict_bundle
-from maljan.reporting.dedupe import canonical_path, pattern_fingerprint
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.agents._indicator_denylists import hash_literal_is_wellformed, malformed_hash_in
+from malspark.pipeline.validation import validate_verdict_bundle
+from malspark.reporting.dedupe import canonical_path, pattern_fingerprint
+from malspark.reporting.renderers.stix_renderer import (
     MALFORMED_HASH_CODE,
     UNPUBLISHABLE_ARTEFACT_CODE,
     ExtendedSTIXRenderer,
     _judge_indicator_problem,
 )
-from maljan.schemas.stix_models import Bundle, Indicator
+from malspark.schemas.stix_models import Bundle, Indicator
 
 # The real digest of the recorded sample, and the half of it that was exported.
 FULL_MD5 = "32066ff6369a7bd794f03bdb77c399f3"
@@ -195,7 +195,7 @@ class TestOnePathIsOneRow:
 
 
 def _rendered(judge: Bundle) -> Bundle:
-    from maljan.reporting.models import (
+    from malspark.reporting.models import (
         DynamicBehavior,
         FileHashes,
         JudgeIndicator,
@@ -317,7 +317,7 @@ class TestAHashWithNoLength:
 
     def test_the_algorithm_name_is_not_asked_the_question(self) -> None:
         """``file:hashes.'SSDEEP'`` names the algorithm inside the object path."""
-        from maljan.pipeline.validation import _comparisons
+        from malspark.pipeline.validation import _comparisons
 
         assert _comparisons(f"[file:hashes.'SSDEEP' = '{SSDEEP}']") == [
             ("file:hashes.'ssdeep'", SSDEEP)

@@ -91,8 +91,8 @@ def _watcher(floor: int | None = None, available: int = 8 * 1024**3, **kw: Any) 
 
 
 def test_the_command_line_holds_every_cap_and_the_command_after_the_separator() -> None:
-    line = rc.build_command("maljan-capped-x", 8 * 1024**3, 512, "400%", ["pytest", "-q"])
-    assert line[:5] == ["systemd-run", "--user", "--scope", "--quiet", "--unit=maljan-capped-x"]
+    line = rc.build_command("malspark-capped-x", 8 * 1024**3, 512, "400%", ["pytest", "-q"])
+    assert line[:5] == ["systemd-run", "--user", "--scope", "--quiet", "--unit=malspark-capped-x"]
     props = [line[i + 1] for i, word in enumerate(line) if word == "-p"]
     assert props == [
         f"MemoryMax={8 * 1024**3}",

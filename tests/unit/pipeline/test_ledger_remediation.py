@@ -11,10 +11,10 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-from maljan.pipeline.nodes import tool_failures
-from maljan.schemas.evidence import LedgerEntry
-from maljan.tools.errors import tool_error
+from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+from malspark.pipeline.nodes import tool_failures
+from malspark.schemas.evidence import LedgerEntry
+from malspark.tools.errors import tool_error
 
 
 class TestTheLedgerKeepsTheRemedy:
@@ -98,8 +98,8 @@ class TestTheReportListsFailuresOnce:
         ]
 
     def test_the_limitations_section_carries_them(self) -> None:
-        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         report = MalwareReport(
             identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),

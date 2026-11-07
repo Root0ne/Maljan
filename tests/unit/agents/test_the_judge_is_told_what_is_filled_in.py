@@ -16,11 +16,11 @@ asks about them reads the names the evidence summary uses.
 
 from __future__ import annotations
 
-from maljan.agents.judge_agent import JUDGE_VERDICT_SYSTEM
-from maljan.agents.judge_postprocess import postprocess_judge_bundle
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-from maljan.schemas.stix_models import Bundle, Indicator
+from malspark.agents.judge_agent import JUDGE_VERDICT_SYSTEM
+from malspark.agents.judge_postprocess import postprocess_judge_bundle
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.schemas.stix_models import Bundle, Indicator
 
 
 class TestThePromptAgreesWithTheChecks:
@@ -84,7 +84,7 @@ class TestWhatIsFilledInIsNotAsked:
         ).build_deterministic()
         # A sandbox reached the address: the second source the one publish rule
         # asks of the judge's value.
-        from maljan.reporting.models import NetworkIOCs, NetworkIP
+        from malspark.reporting.models import NetworkIOCs, NetworkIP
 
         report.network = NetworkIOCs(
             ips=[NetworkIP(address="82.157.13.47", source="sandbox", sample_process_tree=True)]

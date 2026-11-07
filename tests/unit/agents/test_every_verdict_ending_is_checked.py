@@ -27,15 +27,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     VERDICT_FALLBACK_CODE,
     VERDICT_TIMEOUT_CODE,
     JudgeAgent,
     JudgeVerdict,
 )
-from maljan.pipeline.outcome import decide_from_bundle
-from maljan.pipeline.validation import UNSUPPORTED_BENIGN_CODE, UNSUPPORTED_MALWARE_CODE
-from maljan.schemas.isr_models import AgentISR
+from malspark.pipeline.outcome import decide_from_bundle
+from malspark.pipeline.validation import UNSUPPORTED_BENIGN_CODE, UNSUPPORTED_MALWARE_CODE
+from malspark.schemas.isr_models import AgentISR
 
 # A run in which the tools recorded something and no analyst claimed anything,
 # which is the only run these two checks have an opinion about.
@@ -60,7 +60,7 @@ def _bundle_json(*, malware: bool) -> str:
             "type": "bundle",
             "id": "bundle--0f1e2d3c-4b5a-4968-8776-655443332200",
             "objects": objects,
-            "x_maljan_assessment": {
+            "x_malspark_assessment": {
                 "severity": {"rating": "High" if malware else "Informational", "rationale": "x"},
                 "malware_category": "loader" if malware else None,
             },
@@ -81,7 +81,7 @@ class _Llm:
 async def _verdict(*answers: str, time_out: bool = False, monkeypatch: Any = None) -> JudgeVerdict:
     judge = JudgeAgent(llm=_Llm(*answers))  # type: ignore[arg-type]
     if time_out:
-        from maljan.agents import judge_agent as module
+        from malspark.agents import judge_agent as module
 
         async def _timeout(coro: Any, *args: Any, **kwargs: Any) -> Any:
             coro.close()
@@ -130,7 +130,7 @@ class TestTheMalwareDirection:
         answer = json.dumps({"objects": {"verdict": "malware, a loader"}})
         verdict = await _verdict(answer, answer)
 
-        assert verdict.bundle.x_maljan_fallback_verdict is not None
+        assert verdict.bundle.x_malspark_fallback_verdict is not None
         assert VERDICT_FALLBACK_CODE in _codes(verdict)
         assert UNSUPPORTED_MALWARE_CODE in _codes(verdict)
 
@@ -221,7 +221,7 @@ class TestARunWithClaimsBehindItIsAskedNothing:
 
     @pytest.mark.asyncio
     async def test_prose_over_a_run_with_claims(self) -> None:
-        from maljan.schemas.isr_models import ClaimEvidence
+        from malspark.schemas.isr_models import ClaimEvidence
 
         judge = JudgeAgent(llm=_Llm("Verdict: Malware.", "Verdict: Malware."))  # type: ignore[arg-type]
         verdict = await judge.give_verdict(

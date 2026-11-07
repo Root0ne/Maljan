@@ -19,9 +19,9 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, BaseMessage
 
-from maljan.pipeline.validation import EntryTexts
-from maljan.reporting.agreement_facts import ledger_facts
-from maljan.reporting.models import (
+from malspark.pipeline.validation import EntryTexts
+from malspark.reporting.agreement_facts import ledger_facts
+from malspark.reporting.models import (
     CapabilityCell,
     FileHashes,
     MalwareReport,
@@ -30,7 +30,7 @@ from maljan.reporting.models import (
     TechnicalSubsection,
     TechniqueProcedure,
 )
-from maljan.reporting.section_agreement import (
+from malspark.reporting.section_agreement import (
     CLAIM_LED,
     FACT,
     REWRITTEN_CODE,
@@ -39,7 +39,7 @@ from maljan.reporting.section_agreement import (
     passages_of,
     prompt_text,
 )
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 
 BASE = 0x2470000
 INSTALL, COPY = BASE + 0x33AC, BASE + 0x7504

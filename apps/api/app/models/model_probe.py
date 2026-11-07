@@ -11,7 +11,7 @@ reached. Changing either is a different question and finds no row, which is
 the invalidation: nothing has to expire a result, because a result is never
 looked up for a pair it was not taken against.
 
-``model`` is the model as ``maljan.core.model_assignments.filed_model`` spells
+``model`` is the model as ``malspark.core.model_assignments.filed_model`` spells
 it: the model name alone, or, for a per-agent entry that names its own
 reasoning effort, ``"<model> (effort <level>)"`` — a probe at an entry's own
 effort is a different question from one at the provider's global effort. A
@@ -23,7 +23,7 @@ The detail is the probe's own last sentence, kept so a refusal can say what
 went wrong rather than only that something did.
 """
 
-from maljan.core.model_assignments import FILED_MODEL_MAX_CHARS
+from malspark.core.model_assignments import FILED_MODEL_MAX_CHARS
 from sqlalchemy import Boolean, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,7 +36,7 @@ class ModelProbe(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (UniqueConstraint("endpoint", "model", name="uq_model_probes_endpoint_model"),)
 
     # Where the probe went: a URL for a provider that has one, the vendor's
-    # own name for one that does not (``maljan.core.model_assignments``).
+    # own name for one that does not (``malspark.core.model_assignments``).
     endpoint: Mapped[str] = mapped_column(String(500), nullable=False)
     model: Mapped[str] = mapped_column(String(FILED_MODEL_MAX_CHARS), nullable=False)
     provider: Mapped[str] = mapped_column(String(50), nullable=False, default="")

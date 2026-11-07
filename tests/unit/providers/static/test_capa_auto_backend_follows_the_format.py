@@ -22,11 +22,11 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.providers.static import capa_child, capa_yara
-from maljan.providers.static.capa_yara import CapaYaraStaticProvider
-from maljan.tools import rules as tool
-from maljan.tools import staging
+from malspark.core.config import Settings
+from malspark.providers.static import capa_child, capa_yara
+from malspark.providers.static.capa_yara import CapaYaraStaticProvider
+from malspark.tools import rules as tool
+from malspark.tools import staging
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ _DOTNET_RULE = """rule:
     name: compiled to the .NET platform
     namespace: runtime/dotnet
     authors:
-      - maljan
+      - malspark
     scopes:
       static: file
       dynamic: file

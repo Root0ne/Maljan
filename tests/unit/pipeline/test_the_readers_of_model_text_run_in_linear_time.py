@@ -16,15 +16,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     _EVIDENCE_ENDS_INLINE_RE,
     _PARTIAL_ID_AT_END_RE,
     read_technique_line,
 )
-from maljan.agents.claim_headings import CLAIM_HEAD_RE, claim_blocks
-from maljan.agents.repeat_watch import ClaimRepeatReader
-from maljan.pipeline.claim_drops import claim_substance
-from maljan.pipeline.debate_facts import (
+from malspark.agents.claim_headings import CLAIM_HEAD_RE, claim_blocks
+from malspark.agents.repeat_watch import ClaimRepeatReader
+from malspark.pipeline.claim_drops import claim_substance
+from malspark.pipeline.debate_facts import (
     claim_references_of,
     fact_atoms,
     ledger_count_facts,
@@ -32,13 +32,13 @@ from maljan.pipeline.debate_facts import (
     read_claim_references,
     read_marks,
 )
-from maljan.pipeline.limit_rulings import REASON_LIMIT, clean_quote, read_rulings
-from maljan.pipeline.validation import (
+from malspark.pipeline.limit_rulings import REASON_LIMIT, clean_quote, read_rulings
+from malspark.pipeline.validation import (
     EntryTexts,
     absence_holders_note,
     ledger_absence_contradictions,
 )
-from maljan.reporting.absence_answers import (
+from malspark.reporting.absence_answers import (
     FailureCounts,
     count_disagrees,
     denied_subject,
@@ -49,7 +49,7 @@ from maljan.reporting.absence_answers import (
     quote_stands,
     reading_denied_in,
 )
-from maljan.reporting.section_agreement import (
+from malspark.reporting.section_agreement import (
     _candidates,
     _reports_a_claim,
     _said_unread,
@@ -58,7 +58,7 @@ from maljan.reporting.section_agreement import (
     unread_listed_sentences,
     whole_code_absences,
 )
-from maljan.schemas.evidence import build_entry
+from malspark.schemas.evidence import build_entry
 from tests.linear_cost import TIME_RATIO_LIMIT, cpu_seconds
 
 UNIT = "T1234 Native words T1106 more is not read 0x1400 which that 12 hits Web Protocols "

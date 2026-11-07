@@ -8,9 +8,9 @@ with the children of every place it stands, and each parent names it.
 
 from __future__ import annotations
 
-from maljan.reporting.dedupe import distinct_processes
-from maljan.reporting.models import ProcessNode
-from maljan.reporting.renderers.stix_renderer import _processes_to_observables
+from malspark.reporting.dedupe import distinct_processes
+from malspark.reporting.models import ProcessNode
+from malspark.reporting.renderers.stix_renderer import _processes_to_observables
 
 
 def _child() -> ProcessNode:

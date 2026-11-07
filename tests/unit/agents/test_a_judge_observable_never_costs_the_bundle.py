@@ -23,10 +23,10 @@ import json
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.agents.judge_postprocess import UNKNOWN_OBJECT_CODE
-from maljan.pipeline.validation import FILE_UNIDENTIFIED_CODE, validate_verdict_bundle
-from maljan.schemas.stix_models import Bundle, File, Process
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.agents.judge_postprocess import UNKNOWN_OBJECT_CODE
+from malspark.pipeline.validation import FILE_UNIDENTIFIED_CODE, validate_verdict_bundle
+from malspark.schemas.stix_models import Bundle, File, Process
 
 # The shapes the stored runs hold, as the judge or the old export wrote them.
 STORED_FILE = {
@@ -52,7 +52,7 @@ def _answer(*extra: dict[str, Any]) -> str:
                 {"type": "malware", "id": "malware--1", "name": "x", "is_family": False},
                 *extra,
             ],
-            "x_maljan_assessment": {"verdict": "Malware", "confidence": 0.85},
+            "x_malspark_assessment": {"verdict": "Malware", "confidence": 0.85},
         }
     )
 
@@ -73,9 +73,9 @@ class TestTheBundleSurvives:
             _answer({"type": "file", "id": "file--1", "hashes": {"MD5": "a" * 32}})
         )
 
-        assert bundle.x_maljan_fallback_verdict is None
-        assert bundle.x_maljan_assessment is not None
-        assert bundle.x_maljan_assessment.confidence == 0.85
+        assert bundle.x_malspark_fallback_verdict is None
+        assert bundle.x_malspark_assessment is not None
+        assert bundle.x_malspark_assessment.confidence == 0.85
         (file,) = _of(bundle, "file")
         assert file.hashes == {"MD5": "a" * 32}
 
@@ -135,7 +135,7 @@ class TestTheBundleSurvives:
         bundle, record = _parse(_answer(written))
 
         assert _of(bundle, "observed-data") == []
-        assert bundle.x_maljan_fallback_verdict is None
+        assert bundle.x_malspark_fallback_verdict is None
         assert [v.code for v in record] == [UNKNOWN_OBJECT_CODE]
         assert "'objects'" in record[0].message
 

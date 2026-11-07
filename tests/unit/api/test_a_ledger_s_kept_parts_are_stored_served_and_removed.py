@@ -28,8 +28,8 @@ from app.schemas.evidence import EvidenceEntryResponse
 from app.services import object_store
 from app.worker import analysis_worker
 from app.worker.analysis_worker import _evidence_row
-from maljan.schemas.evidence import fit_structures_to_budget
-from maljan.schemas.evidence_spill import settle_refs, spill_part
+from malspark.schemas.evidence import fit_structures_to_budget
+from malspark.schemas.evidence_spill import settle_refs, spill_part
 
 _REV = (
     Path(__file__).resolve().parents[3]
@@ -421,7 +421,7 @@ class _Talkative(_Store):
 
     def put_object(self, bucket: str, path: str, data: Any, length: int, content_type: str) -> None:
         raise OSError(
-            "S3 operation failed; host: minio.internal:9000, bucket: maljan-samples, "
+            "S3 operation failed; host: minio.internal:9000, bucket: malspark-samples, "
             "access key: operator-key"
         )
 
@@ -434,7 +434,7 @@ class TestWhatIsServed:
         row.id = uuid.uuid4()
         served = EvidenceEntryResponse.model_validate(row).model_dump_json()
         assert ref["error"] == "upload_failed (OSError)"
-        for leaked in ("minio.internal", "9000", "maljan-samples", "operator-key", "host"):
+        for leaked in ("minio.internal", "9000", "malspark-samples", "operator-key", "host"):
             assert leaked not in served, leaked
         assert "minio.internal:9000" in caplog.text, "the whole failure is logged server-side"
 
@@ -452,7 +452,7 @@ class TestTheBound:
         assert at["key"] in store.objects and len(store.objects) == 1
 
     def test_a_part_surely_over_the_bound_is_never_encoded(self) -> None:
-        from maljan.schemas import evidence_spill
+        from malspark.schemas import evidence_spill
 
         encoded: list[str] = []
         real = evidence_spill.part_bytes

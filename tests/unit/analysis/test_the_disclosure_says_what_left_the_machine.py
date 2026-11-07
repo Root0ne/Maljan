@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from tests.credential_shapes import password
 
-from maljan.analysis.disclosure import (
+from malspark.analysis.disclosure import (
     FOOTNOTE_SENTENCE,
     STAGING_ATTEMPTED,
     STAGING_DONE,
@@ -489,7 +489,7 @@ def test_a_tool_of_a_kind_that_reaches_outside_is_never_taken_as_local(kind: str
 
 
 def test_a_server_that_declares_a_submission_tool_is_a_gateway() -> None:
-    from maljan.analysis.disclosure import gateway_blocks
+    from malspark.analysis.disclosure import gateway_blocks
 
     snapshot = {**STDIO, "mcp.servers.analysis.tool_facts.send_it.kind": "submission"}
 
@@ -500,8 +500,8 @@ def test_a_server_that_declares_a_submission_tool_is_a_gateway() -> None:
 
 
 def test_the_kinds_that_reach_outside_are_defined_once_with_their_meaning() -> None:
-    from maljan.core.builtin_declarations import OUTWARD_KINDS, REPUTATION_KINDS
-    from maljan.core.reputation import INDICATOR_LOOKUP_KINDS
+    from malspark.core.builtin_declarations import OUTWARD_KINDS, REPUTATION_KINDS
+    from malspark.core.reputation import INDICATOR_LOOKUP_KINDS
 
     assert {"submission", "submission_status", *REPUTATION_KINDS, *INDICATOR_LOOKUP_KINDS} == set(
         OUTWARD_KINDS
@@ -571,7 +571,7 @@ def test_a_call_answered_from_an_earlier_entry_or_a_guard_sent_nothing() -> None
 
 
 def test_an_entry_without_a_source_is_placed_only_when_nothing_ran_outside_the_worker() -> None:
-    from maljan.agents.delegation import TEAM_SERVER
+    from malspark.agents.delegation import TEAM_SERVER
 
     record = _local(
         entries=[
@@ -749,9 +749,9 @@ def test_a_tool_declared_to_send_the_sample_out_is_an_upload(block: dict, where:
 
 
 def test_the_declaration_to_send_the_sample_out_is_stored_on_the_entry_it_is_read_from() -> None:
-    from maljan.core.config import Settings
-    from maljan.core.declared_reading import facts_record
-    from maljan.core.tool_declarations import ToolDeclarations
+    from malspark.core.config import Settings
+    from malspark.core.declared_reading import facts_record
+    from malspark.core.tool_declarations import ToolDeclarations
 
     settings = Settings.model_validate(
         {
@@ -838,7 +838,7 @@ def test_a_backend_that_declares_neither_an_address_nor_the_process_cannot_be_pl
 
 
 def test_the_registered_backends_declare_where_their_store_is() -> None:
-    from maljan.memory.store_factory import declared_backends
+    from malspark.memory.store_factory import declared_backends
 
     held = declared_backends()
     assert held["memory"]["in_process"] is True
@@ -873,7 +873,7 @@ def test_a_record_that_may_miss_a_call_never_says_nothing_left() -> None:
 
 
 def test_a_report_enriched_twice_says_every_question_either_run_sent() -> None:
-    from maljan.analysis.disclosure import rdap_row, with_enrichment, with_enrichment_asked
+    from malspark.analysis.disclosure import rdap_row, with_enrichment, with_enrichment_asked
 
     queued = with_enrichment(_local(), [rdap_row()])
     rdap = {"source": "rdap", "host": "rdap.arin.net", "why": ""}
@@ -957,7 +957,7 @@ def test_the_agents_of_the_stages_that_ran_are_read_once_each() -> None:
 
 
 def test_no_record_renders_no_line() -> None:
-    from maljan.analysis.disclosure import NOT_BUILT_REPORTING_OFF, not_built
+    from malspark.analysis.disclosure import NOT_BUILT_REPORTING_OFF, not_built
 
     assert disclosure_lines(None) == []
     assert disclosure_lines("not a record") == []

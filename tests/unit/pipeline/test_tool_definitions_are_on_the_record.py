@@ -16,11 +16,11 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.base_agent import BaseAnalyst, LoopBudget
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.llm.context_window import tool_definition_chars
-from maljan.pipeline.events import BUDGET_TICK, emit_budget_tick
-from maljan.pipeline.nodes import _budget_update
+from malspark.agents.base_agent import BaseAnalyst, LoopBudget
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.llm.context_window import tool_definition_chars
+from malspark.pipeline.events import BUDGET_TICK, emit_budget_tick
+from malspark.pipeline.nodes import _budget_update
 
 
 class _Scripted(BaseChatModel):

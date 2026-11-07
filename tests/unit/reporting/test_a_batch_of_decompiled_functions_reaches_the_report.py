@@ -29,25 +29,25 @@ from typing import Any
 
 import pytest
 
-from maljan.core.undeclared_tools import (
+from malspark.core.undeclared_tools import (
     ANSWER_CUT_NOTE,
     CodePart,
     code_parts,
     function_key,
     names_itself,
 )
-from maljan.reporting import tool_kinds
-from maljan.reporting.composer import FUNCTION_CODE_HEADING, FUNCTION_INDEX_HEADING, _bundle_text
-from maljan.reporting.evidence_bundles import (
+from malspark.reporting import tool_kinds
+from malspark.reporting.composer import FUNCTION_CODE_HEADING, FUNCTION_INDEX_HEADING, _bundle_text
+from malspark.reporting.evidence_bundles import (
     CODE_HOME_SECTION,
     SECTIONS,
     bundle_for,
     function_table,
 )
-from maljan.reporting.figures import ANSWER_CUT_AFTER_LISTING, build_code_listings
-from maljan.reporting.ledger_report import build_sections
-from maljan.reporting.models import EvidenceIndexRow, FileHashes, MalwareReport, SampleIdentity
-from maljan.schemas.evidence import LedgerEntry, entry_ids_in
+from malspark.reporting.figures import ANSWER_CUT_AFTER_LISTING, build_code_listings
+from malspark.reporting.ledger_report import build_sections
+from malspark.reporting.models import EvidenceIndexRow, FileHashes, MalwareReport, SampleIdentity
+from malspark.schemas.evidence import LedgerEntry, entry_ids_in
 
 SWITCH = (
     "\nint FUN_00401000(int cmd)\n\n{\n  switch(cmd) {\n  case 1:\n    run(cmd);\n  }\n"
@@ -533,7 +533,7 @@ def test_a_function_no_claim_points_at_is_shown_in_commands() -> None:
 def test_a_function_no_claim_points_at_falls_to_the_first_section_it_reaches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.reporting import evidence_bundles
+    from malspark.reporting import evidence_bundles
 
     # A configuration whose commands section reads no code.
     reads = tuple(k for k in evidence_bundles._SECTION_KINDS["commands"] if k != "decompile")
@@ -592,7 +592,7 @@ def test_code_that_takes_a_prompt_past_the_window_is_stated() -> None:
     from types import SimpleNamespace
     from unittest.mock import patch
 
-    from maljan.reporting.composer import ReportComposer
+    from malspark.reporting.composer import ReportComposer
 
     long = "\n".join(f"  v{i} = f(v{i - 1});" for i in range(1, 2000))
     big = json.dumps(
@@ -617,7 +617,9 @@ def test_code_that_takes_a_prompt_past_the_window_is_stated() -> None:
         window_tokens=40_000,
         output_cap=1000,
     )
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
+    ):
         asyncio.run(composer.compose(report, isr_reports={}))
     said = "\n".join(composer.degradations)
     assert "The commands section's prompt with the code of the functions it is shown" in said
@@ -630,7 +632,7 @@ def test_an_answer_nested_past_the_decoder_never_costs_the_report() -> None:
         assert code_parts(answer) == []
         output = _capture("lookup_things", answer, 4)
         for section in SECTIONS:
-            from maljan.reporting.evidence_bundles import shown_to_section
+            from malspark.reporting.evidence_bundles import shown_to_section
 
             assert not shown_to_section(section, output)
         bundle_for("commands", _report(output))

@@ -15,14 +15,14 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import MCPServerConfig, PrepassToolsConfig
-from maljan.providers.base import StaticJobContext
-from maljan.providers.static.declared_prepass import (
+from malspark.core.config import MCPServerConfig, PrepassToolsConfig
+from malspark.providers.base import StaticJobContext
+from malspark.providers.static.declared_prepass import (
     call_graph_of,
     function_hashes_of,
     scan_findings,
 )
-from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+from malspark.providers.static.generic_mcp import GenericMCPStaticProvider
 
 MIRROR = "/data/samples/.work/abc.exe"
 
@@ -280,7 +280,7 @@ def test_a_declared_scan_with_no_copy_of_the_sample_says_why() -> None:
 
 
 def test_a_failed_declared_scan_raises_a_pass_failure() -> None:
-    from maljan.analysis.anti_analysis import PassFailed
+    from malspark.analysis.anti_analysis import PassFailed
 
     provider, _handle = _provider(
         {"scan": json.dumps({"error": "busy"})}, prepass_tools={"anti_analysis": "scan"}
@@ -341,7 +341,7 @@ def test_three_empty_names_are_held_as_none_declared() -> None:
 
 
 def test_a_pass_that_attached_the_server_leaves_no_open_in_the_job_s_note() -> None:
-    from maljan.providers.sample_open import SampleNotes, SampleOpener
+    from malspark.providers.sample_open import SampleNotes, SampleOpener
 
     provider, handle = _provider(
         {"load": json.dumps({"program": "abc.exe-1"}), "graph": "main -> WinExec"},
@@ -364,7 +364,7 @@ def test_a_pass_that_attached_the_server_leaves_no_open_in_the_job_s_note() -> N
 
 
 def test_a_pass_on_an_attached_server_notes_its_open_in_the_job_s_note() -> None:
-    from maljan.providers.sample_open import SampleNotes, SampleOpener
+    from malspark.providers.sample_open import SampleNotes, SampleOpener
 
     provider, handle = _provider(
         {"load": json.dumps({"program": "abc.exe-1"}), "graph": "main -> WinExec"},
@@ -383,7 +383,7 @@ _REFUSED = json.dumps({"error": "file is not a program it can load"})
 
 
 def test_a_refused_open_is_said_where_a_pass_needs_the_program() -> None:
-    from maljan.analysis.anti_analysis import PassFailed
+    from malspark.analysis.anti_analysis import PassFailed
 
     provider, handle = _provider(
         {"load": _REFUSED, "graph": "a -> b", "hashes": "[]", "scan": "[]"},

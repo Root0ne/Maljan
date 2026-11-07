@@ -21,16 +21,16 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
-from maljan.pipeline.validation import EntryTexts
-from maljan.reporting.agreement_facts import answered_later, ledger_facts
-from maljan.reporting.models import (
+from malspark.pipeline.validation import EntryTexts
+from malspark.reporting.agreement_facts import answered_later, ledger_facts
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     SampleIdentity,
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.section_agreement import (
+from malspark.reporting.section_agreement import (
     _CLAUSE_JOIN,
     ABSENCE_KEPT_CODE,
     FACT,
@@ -44,7 +44,7 @@ from maljan.reporting.section_agreement import (
     passages_of,
     prompt_text,
 )
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 from tests.linear_cost import assert_scales
 
 BASE = 0x2470000
@@ -363,7 +363,7 @@ def test_a_callee_a_passage_names_is_a_fact_of_its_own_and_the_rest_are_counted(
 
 
 def test_the_prompt_says_an_unlisted_routine_is_unexamined_not_absent() -> None:
-    from maljan.reporting.section_agreement import SYSTEM_PROMPT
+    from malspark.reporting.section_agreement import SYSTEM_PROMPT
 
     assert "its code was not examined, not that it does or does not do anything" in SYSTEM_PROMPT
     assert (
@@ -398,7 +398,7 @@ def test_an_emulated_or_rule_matched_callee_is_only_said_unlisted() -> None:
 
 
 def _bound_report(body: str, value: str = "qorvel-77") -> MalwareReport:
-    from maljan.reporting.models import BoundValue
+    from malspark.reporting.models import BoundValue
 
     report = _report()
     report.technical_analysis.evasion_antiforensics.body = body
@@ -523,7 +523,7 @@ def test_a_fact_citing_nothing_asks_no_passage_written_without_the_code() -> Non
 def test_a_bound_value_is_named_whole_and_never_by_a_fragment(
     value: str, text: str, about: bool
 ) -> None:
-    from maljan.reporting.section_agreement import Passage, _about
+    from malspark.reporting.section_agreement import Passage, _about
 
     fact = Passage(id="bound.1", label="", text="", kind=FACT, value=value)
     assert _about(fact, text) is about
@@ -541,7 +541,7 @@ def test_a_bound_value_is_named_whole_and_never_by_a_fragment(
 def test_a_bound_value_in_the_platform_s_clause_cites_nothing_and_is_no_token(
     value: str, forged: str
 ) -> None:
-    from maljan.schemas.evidence import entry_ids_in
+    from malspark.schemas.evidence import entry_ids_in
 
     report = _bound_report(f"{GATED} {NAMELESS}", value)
     row = _row("evasion_antiforensics", NAMELESS, ["bound.1"], "x")
@@ -787,7 +787,7 @@ def test_an_answered_failure_qualifies_no_sentence_on_dropped_files_beside_it() 
     ],
 )
 def test_an_address_counts_only_as_a_word_of_its_own(text: str, named: list[int]) -> None:
-    from maljan.reporting.section_agreement import _addresses_named
+    from malspark.reporting.section_agreement import _addresses_named
 
     assert _addresses_named(text) == named
 
@@ -822,7 +822,7 @@ def test_a_routine_named_only_inside_a_path_is_no_fact_of_its_own() -> None:
 def test_a_quote_or_bracket_after_the_end_mark_stays_with_its_words(
     sentence: str, qualified: str
 ) -> None:
-    from maljan.reporting.section_agreement import Passage, _qualified
+    from malspark.reporting.section_agreement import Passage, _qualified
 
     fact = Passage(
         id="f", label="", text="", kind=FACT, cites=frozenset({"ev_0107"}), qualifier="Q"

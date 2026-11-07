@@ -2,7 +2,7 @@
 
 A pre-promotion check, run locally. It scans the files under :data:`SHIPPED`
 that ship what a model is told (the agents' prompts and the provider fragments,
-the built-in agent definitions, profiles and teams in ``src/maljan``, the
+the built-in agent definitions, profiles and teams in ``src/malspark``, the
 sidecars' tool descriptions in ``services``, the API's seeded defaults and
 migrations in ``apps/api``, the knowledge files in ``data``, and the
 validation scenarios' prompts in ``scripts/validation``), tracked or not (a
@@ -60,7 +60,7 @@ CASE_SENSITIVE_PREFIX = "cs:"
 ALLOW_KEYS: tuple[str, ...] = ("path", "term_sha256", "line_sha256", "reason")
 # What ships to a model, by directory.
 SHIPPED: dict[str, str] = {
-    "src/maljan": "prompts, provider fragments, built-in agent definitions, profiles and teams",
+    "src/malspark": "prompts, provider fragments, built-in agent definitions, profiles and teams",
     "services": "the sidecars' tool declarations and descriptions",
     "apps/api": "seeded defaults and the migrations that write them",
     "data": "knowledge files tools and agents read",

@@ -6,17 +6,16 @@ into prose and validated rows and drops what does not validate; it never raises.
 """
 
 import logging
-import re
 import sys
 
 import atheris
 
 with atheris.instrument_imports():
-    from maljan.agents import findings_block
+    from malspark.agents import findings_block
 
-# The fence's language tag, read from the parser's own pattern so the harness
-# opens the block exactly as the parser looks for it.
-FENCE = re.search(r"[\w-]+-findings", findings_block._OPEN_RE.pattern).group(0)
+# The fence's language tag, the parser's own constant, so the harness opens the
+# block exactly as the parser looks for it.
+FENCE = findings_block._TAG
 
 # The parser counts dropped rows in a warning on nearly every input.
 logging.disable(logging.CRITICAL)

@@ -45,7 +45,7 @@ def _isolated_runtime_settings(monkeypatch: pytest.MonkeyPatch):
     requests mock mode via the job/env flag relies on this being True.
     """
     from app import runtime_config as rc
-    from maljan.core.config import reset_settings_cache
+    from malspark.core.config import reset_settings_cache
 
     async def _mock_mode_allowed_override() -> dict[str, Any]:
         return {"api.mock_mode_allowed": True}
@@ -237,7 +237,7 @@ async def test_mock_pipeline_completes(
     api_config._settings = None
     with patch.dict(
         "os.environ",
-        {"MALJAN_MOCK_MODE": "true", "MOCK_MODE_ALLOWED": "true"},
+        {"MALSPARK_MOCK_MODE": "true", "MOCK_MODE_ALLOWED": "true"},
         clear=False,
     ):
         result = await run_analysis(mock_ctx, str(job.id))
@@ -286,11 +286,11 @@ async def test_report_less_pipeline_result_fails_the_job(
     with (
         patch.dict(
             "os.environ",
-            {"MALJAN_MOCK_MODE": "true", "MOCK_MODE_ALLOWED": "true"},
+            {"MALSPARK_MOCK_MODE": "true", "MOCK_MODE_ALLOWED": "true"},
             clear=False,
         ),
         patch(
-            "maljan.app.MaljanApp.arun",
+            "malspark.app.MalsparkApp.arun",
             new=AsyncMock(return_value={"report_error": "ValueError: boom"}),
         ),
     ):
@@ -356,11 +356,11 @@ async def test_reporting_disabled_completes_without_a_malware_report(
     with (
         patch.dict(
             "os.environ",
-            {"MALJAN_MOCK_MODE": "true"},
+            {"MALSPARK_MOCK_MODE": "true"},
             clear=False,
         ),
         patch(
-            "maljan.app.MaljanApp.arun",
+            "malspark.app.MalsparkApp.arun",
             new=AsyncMock(
                 return_value={
                     "final_decision": "Malware",
@@ -444,7 +444,7 @@ async def test_a_refused_stored_value_fails_the_job_by_name_and_runs_nothing(
     recorded = _answer_reads(mock_db_session, _job_rows(job, sample))
     pipeline = AsyncMock(return_value={"final_decision": "Malware"})
 
-    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+    with patch("malspark.app.MalsparkApp.arun", new=pipeline):
         result = await run_analysis(mock_ctx, str(job.id))
 
     assert result["status"] == "failed", result
@@ -468,7 +468,7 @@ async def test_unreadable_stored_settings_fail_the_job_and_run_nothing(
     from app.services import settings_service
 
     async def _unreadable(_db: Any) -> dict[str, Any]:
-        raise ConnectionError("postgresql://maljan:hunter2@db:5432 refused")
+        raise ConnectionError("postgresql://malspark:hunter2@db:5432 refused")
 
     monkeypatch.setattr(settings_service, "load_core_overrides", _unreadable)
     job = _make_job()
@@ -476,7 +476,7 @@ async def test_unreadable_stored_settings_fail_the_job_and_run_nothing(
     recorded = _answer_reads(mock_db_session, _job_rows(job, sample))
     pipeline = AsyncMock(return_value={"final_decision": "Malware"})
 
-    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+    with patch("malspark.app.MalsparkApp.arun", new=pipeline):
         result = await run_analysis(mock_ctx, str(job.id))
 
     assert result["status"] == "failed", result
@@ -500,7 +500,7 @@ async def test_a_stored_secret_the_worker_cannot_decrypt_fails_the_job_naming_it
 ) -> None:
     """The row used to be dropped and the job ran on the default in its place."""
     from app.services import settings_service
-    from maljan.core.settings_overrides import StoredValueRefused
+    from malspark.core.settings_overrides import StoredValueRefused
 
     async def _undecryptable(_db: Any) -> dict[str, Any]:
         raise StoredValueRefused({"llm.api_key": "the stored secret cannot be decrypted"})
@@ -510,7 +510,7 @@ async def test_a_stored_secret_the_worker_cannot_decrypt_fails_the_job_naming_it
     _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
     pipeline = AsyncMock(return_value={"final_decision": "Malware"})
 
-    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+    with patch("malspark.app.MalsparkApp.arun", new=pipeline):
         result = await run_analysis(mock_ctx, str(job.id))
 
     assert result["status"] == "failed", result
@@ -528,7 +528,7 @@ async def test_a_secret_of_a_server_the_job_never_calls_does_not_stop_the_worker
 ) -> None:
     """An orphan server's token that cannot be read is no reason to fail a job."""
     from app.services import settings_service
-    from maljan.core.settings_overrides import StoredValueRefused
+    from malspark.core.settings_overrides import StoredValueRefused
 
     calls: list[int] = []
 
@@ -543,7 +543,7 @@ async def test_a_secret_of_a_server_the_job_never_calls_does_not_stop_the_worker
     _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
     pipeline = AsyncMock(return_value={"final_decision": "Malware"})
 
-    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+    with patch("malspark.app.MalsparkApp.arun", new=pipeline):
         result = await run_analysis(mock_ctx, str(job.id))
 
     assert "cannot be decrypted" not in str(result.get("error", "")), result
@@ -558,7 +558,7 @@ async def test_the_workers_real_settings_read_refuses_an_undecryptable_secret_ro
     """Through the real ``load_core_overrides`` and its context variable: no fake."""
     from types import SimpleNamespace
 
-    from maljan.core import settings_secrets as box
+    from malspark.core import settings_secrets as box
 
     job = _make_job()
     rows = MagicMock()
@@ -570,7 +570,7 @@ async def test_the_workers_real_settings_read_refuses_an_undecryptable_secret_ro
 
     with (
         patch.object(box, "decrypt", side_effect=box.SecretsUnavailable("rotated")),
-        patch("maljan.app.MaljanApp.arun", new=pipeline),
+        patch("malspark.app.MalsparkApp.arun", new=pipeline),
     ):
         result = await run_analysis(mock_ctx, str(job.id))
 
@@ -592,7 +592,7 @@ async def test_a_refused_job_option_fails_the_job_by_field_without_its_value(
     _answer_reads(mock_db_session, _job_rows(job, sample))
     pipeline = AsyncMock(return_value={"final_decision": "Malware"})
 
-    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+    with patch("malspark.app.MalsparkApp.arun", new=pipeline):
         result = await run_analysis(mock_ctx, str(job.id))
 
     assert result["status"] == "failed", result
@@ -637,7 +637,7 @@ async def test_a_database_that_cannot_give_the_settings_is_named_with_its_error_
     _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
     pipeline = AsyncMock(return_value={"final_decision": "Malware"})
 
-    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+    with patch("malspark.app.MalsparkApp.arun", new=pipeline):
         result = await run_analysis(mock_ctx, str(job.id))
 
     assert result["status"] == "failed", result
@@ -664,7 +664,7 @@ async def test_a_settings_read_that_fails_for_another_reason_is_not_blamed_on_th
     recorded = _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
     pipeline = AsyncMock(return_value={"final_decision": "Malware"})
 
-    with patch("maljan.app.MaljanApp.arun", new=pipeline):
+    with patch("malspark.app.MalsparkApp.arun", new=pipeline):
         result = await run_analysis(mock_ctx, str(job.id))
 
     assert result["status"] == "failed", result
@@ -697,7 +697,7 @@ async def test_a_plain_settings_refusal_is_stated_by_its_class_never_its_text(
     pipeline = AsyncMock(return_value={"final_decision": "Malware"})
 
     with (
-        patch("maljan.app.MaljanApp.arun", new=pipeline),
+        patch("malspark.app.MalsparkApp.arun", new=pipeline),
         caplog.at_level(logging.INFO, logger="app.worker.analysis_worker"),
     ):
         result = await run_analysis(mock_ctx, str(job.id))
@@ -722,8 +722,8 @@ async def test_a_provider_with_no_role_block_is_refused_by_its_setting_with_why(
 ) -> None:
     """The one refusal written here from setting names keeps its sentence."""
     from app.services import settings_service
-    from maljan.llm import registry
-    from maljan.llm.provider_base import _FACTS, LLMProvider
+    from malspark.llm import registry
+    from malspark.llm.provider_base import _FACTS, LLMProvider
 
     class _Bare(LLMProvider):
         name = "bare"
@@ -741,7 +741,7 @@ async def test_a_provider_with_no_role_block_is_refused_by_its_setting_with_why(
     _answer_reads(mock_db_session, _job_rows(job, _make_sample()))
     pipeline = AsyncMock(return_value={"final_decision": "Malware"})
     try:
-        with patch("maljan.app.MaljanApp.arun", new=pipeline):
+        with patch("malspark.app.MalsparkApp.arun", new=pipeline):
             result = await run_analysis(mock_ctx, str(job.id))
     finally:
         registry._PROVIDER_REGISTRY.pop("bare", None)
@@ -774,8 +774,8 @@ async def test_pipeline_failure_sets_failed_status(
 
     recorded = _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
-    # Force MaljanApp to blow up by mocking the class where it is defined.
-    with patch("maljan.app.MaljanApp") as mock_app_cls:
+    # Force MalsparkApp to blow up by mocking the class where it is defined.
+    with patch("malspark.app.MalsparkApp") as mock_app_cls:
         mock_app_cls.side_effect = RuntimeError("Simulated pipeline crash")
 
         result = await run_analysis(mock_ctx, str(job.id))
@@ -931,13 +931,13 @@ async def _run_with_attached_report(
         # Real (non-mock) mode: mock mode's own container override always
         # hands back a MockSandboxProvider with no set_pending_blob, so an
         # attached-report job can only succeed off mock mode (see the
-        # capability-guard test above). MaljanApp.arun is patched anyway, so
+        # capability-guard test above). MalsparkApp.arun is patched anyway, so
         # this never reaches a real LLM or sandbox call.
         patch.dict("os.environ", {}, clear=False),
         patch("app.api.v1.sandbox_reports.get_object", return_value=b"{}"),
         patch("minio.Minio", return_value=_FakeMinioClient()),
         patch(
-            "maljan.app.MaljanApp.arun",
+            "malspark.app.MalsparkApp.arun",
             new=AsyncMock(
                 return_value={
                     "final_decision": "Suspicious",
@@ -1058,8 +1058,8 @@ async def test_a_provider_s_own_words_over_an_attached_report_are_stated_by_thei
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A plug-in provider's refusal can quote a value: the job says its class, the log no text."""
-    from maljan.providers.errors import ProviderError
-    from maljan.providers.sandbox.upload import UploadSandboxProvider
+    from malspark.providers.errors import ProviderError
+    from malspark.providers.sandbox.upload import UploadSandboxProvider
     from tests.credential_shapes import password
 
     secret = password(12)
@@ -1142,7 +1142,7 @@ async def test_worker_removes_private_sample_copies_after_success(
         patch.dict(
             "os.environ",
             {
-                "MALJAN_MOCK_MODE": "true",
+                "MALSPARK_MOCK_MODE": "true",
                 "MOCK_MODE_ALLOWED": "true",
                 "UPLOAD_TEMP_DIR": str(tmp_path / "tmp"),
                 "SAMPLES_DIR": str(tmp_path / "samples"),
@@ -1203,7 +1203,7 @@ async def test_worker_removes_private_sample_copies_after_pipeline_failure(
         patch.dict(
             "os.environ",
             {
-                "MALJAN_MOCK_MODE": "true",
+                "MALSPARK_MOCK_MODE": "true",
                 "MOCK_MODE_ALLOWED": "true",
                 "UPLOAD_TEMP_DIR": str(tmp_path / "tmp"),
                 "SAMPLES_DIR": str(tmp_path / "samples"),
@@ -1212,11 +1212,11 @@ async def test_worker_removes_private_sample_copies_after_pipeline_failure(
         ),
         patch("minio.Minio", return_value=_FakeMinioClient()),
         # The download/mirror happen before ``app.arun`` is ever awaited, so
-        # failing here (rather than in ``MaljanApp.__init__``, as the other
+        # failing here (rather than in ``MalsparkApp.__init__``, as the other
         # failure test does) is what actually exercises cleanup of real
         # on-disk copies rather than of two still-``None`` paths.
         patch(
-            "maljan.app.MaljanApp.arun",
+            "malspark.app.MalsparkApp.arun",
             new=AsyncMock(side_effect=RuntimeError("Simulated pipeline crash")),
         ),
     ):
@@ -1316,7 +1316,9 @@ async def test_override_load_failure_fails_the_job_and_logs_no_secret(
     _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
 
     async def _boom(_db: Any) -> dict[str, Any]:
-        raise ConnectionError(f"{_dsn('postgres', 'maljan:s3cret', 'db:5432/maljan')} unreachable")
+        raise ConnectionError(
+            f"{_dsn('postgres', 'malspark:s3cret', 'db:5432/malspark')} unreachable"
+        )
 
     from app.services import settings_service
 
@@ -1328,7 +1330,7 @@ async def test_override_load_failure_fails_the_job_and_logs_no_secret(
     with (
         patch.dict(
             "os.environ",
-            {"MALJAN_MOCK_MODE": "true", "MOCK_MODE_ALLOWED": "true"},
+            {"MALSPARK_MOCK_MODE": "true", "MOCK_MODE_ALLOWED": "true"},
             clear=False,
         ),
         caplog.at_level(logging.WARNING, logger="app.worker.analysis_worker"),

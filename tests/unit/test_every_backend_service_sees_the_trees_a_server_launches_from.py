@@ -190,7 +190,7 @@ LAUNCHING = {name: {"volumes": ["../src:/app/src:ro"]} for name in LAUNCHERS}
         ["${X:-../x}:/app/x"],
         ["src:/app/src"],
         ["/app/src"],
-        ["../evil:/app/src/maljan"],
+        ["../evil:/app/src/malspark"],
         ["../evil:/app/services/x:ro"],
         ["C:\\x:/app/x"],
     ],

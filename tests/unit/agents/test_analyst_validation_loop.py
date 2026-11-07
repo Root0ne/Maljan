@@ -15,14 +15,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.technique_facts import TECHNIQUE_FACTS_ATTACHED
-from maljan.pipeline.validation import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.technique_facts import TECHNIQUE_FACTS_ATTACHED
+from malspark.pipeline.validation import (
     ANALYST_FEEDBACK_CLOSING,
     ANALYST_FEEDBACK_CLOSING_BY_NUMBER,
     FEEDBACK_PREAMBLE,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 class _Attck:
@@ -87,7 +87,7 @@ _STUBBORN_ANSWER = _GOOD_ANSWER.replace("TECHNIQUE: T1055", "TECHNIQUE: T1699")
 @pytest.fixture(autouse=True)
 def _offline_knowledge(monkeypatch: pytest.MonkeyPatch) -> None:
     """Point the loop's knowledge lookup at the stub, not at MITRE."""
-    import maljan.tools.knowledge as knowledge
+    import malspark.tools.knowledge as knowledge
 
     stub = _Attck()
     monkeypatch.setattr(knowledge, "attck_validate", stub.attck_validate, raising=False)
@@ -214,7 +214,7 @@ def _fenced(*titles: str) -> str:
     import json
 
     body = json.dumps({"findings": [{"title": t, "technique_ids": ["T1003"]} for t in titles]})
-    return f"```maljan-findings\n{body}\n```"
+    return f"```malspark-findings\n{body}\n```"
 
 
 _BLOCK_ANSWER = (
@@ -285,7 +285,7 @@ class TestTheRetryIsShownTheAnswerAsWritten:
             "EVIDENCE:",
             "CONFIDENCE:",
             "TECHNIQUE:",
-            "maljan-findings",
+            "malspark-findings",
             "WITHDRAW CLAIM",
             'WITHDRAW FINDING "',
         ):
@@ -336,7 +336,7 @@ def _asked(*questions: str) -> str:
     body = json.dumps(
         {"open_questions": [{"question": q, "why_open": "obfuscated"} for q in questions]}
     )
-    return f"```maljan-findings\n{body}\n```"
+    return f"```malspark-findings\n{body}\n```"
 
 
 class TestOpenQuestionsFollowTheKeptAnswer:
@@ -484,7 +484,7 @@ class TestTheReplayIsTheAnswerWithoutScaffolding:
 
         again = analyst._text_to_isr(_BLOCK_ANSWER.strip(), 0)
 
-        assert "maljan-findings" not in again.answer_text
+        assert "malspark-findings" not in again.answer_text
 
 
 class TestTheGatedAnswerIsShownWhole:
@@ -493,7 +493,7 @@ class TestTheGatedAnswerIsShownWhole:
     ) -> None:
         from types import SimpleNamespace
 
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         monkeypatch.setattr(
             base_agent,
@@ -510,7 +510,7 @@ class TestTheGatedAnswerIsShownWhole:
         assert gated.gate_removed == ["writes into the memory it allocated"]
 
     def test_the_question_names_the_claims_the_gate_set_aside(self) -> None:
-        from maljan.pipeline.validation import GATE_REMOVED_LEAD
+        from malspark.pipeline.validation import GATE_REMOVED_LEAD
 
         analyst = _WrittenAnalyst(_BLOCK_ANSWER, [_BLOCK_ANSWER])
         first = analyst._text_to_isr(_BLOCK_ANSWER, 0)
@@ -529,7 +529,7 @@ class TestTheRetryIsLabelledOnTheLedger:
     def test_a_retry_that_reports_no_usage_is_named_as_the_validation_retry(self) -> None:
         from langchain_core.messages import AIMessage
 
-        from maljan.core.token_ledger import TokenLedger
+        from malspark.core.token_ledger import TokenLedger
 
         class _Model:
             async def ainvoke(self, messages: list) -> AIMessage:

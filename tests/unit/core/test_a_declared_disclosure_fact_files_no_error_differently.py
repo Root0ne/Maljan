@@ -21,10 +21,10 @@ from typing import Any
 
 import pytest
 
-from maljan.core import declared_reading
-from maljan.core.config import Settings
-from maljan.core.tool_declarations import ToolDeclarations
-from maljan.schemas.evidence import build_entry
+from malspark.core import declared_reading
+from malspark.core.config import Settings
+from malspark.core.tool_declarations import ToolDeclarations
+from malspark.schemas.evidence import build_entry
 
 ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "error_filing_on_dev.json"
@@ -103,7 +103,7 @@ def test_every_built_in_tool_files_every_answer_as_dev_did(declared: ToolDeclara
 def test_a_cape_submission_that_failed_is_filed_as_failed(
     declared: ToolDeclarations, answer: str
 ) -> None:
-    from maljan.core.tool_declarations import SourceRef
+    from malspark.core.tool_declarations import SourceRef
 
     assert _filed(SourceRef.parse("provider:cape2"), "submit_file", answer) == [False, answer]
 
@@ -111,7 +111,7 @@ def test_a_cape_submission_that_failed_is_filed_as_failed(
 def test_the_cape_submit_tool_still_declares_that_it_sends_the_sample_out(
     declared: ToolDeclarations,
 ) -> None:
-    from maljan.core.declared_reading import facts_record
+    from malspark.core.declared_reading import facts_record
 
     stored = facts_record("provider:cape2", "submit_file", declared=declared)
 
@@ -123,8 +123,8 @@ def test_the_cape_submit_tool_still_declares_that_it_sends_the_sample_out(
 def test_the_cape_submission_is_an_upload_in_the_runs_disclosure(
     declared: ToolDeclarations,
 ) -> None:
-    from maljan.analysis.disclosure import disclosure_record
-    from maljan.core.settings_overrides import public_snapshot
+    from malspark.analysis.disclosure import disclosure_record
+    from malspark.core.settings_overrides import public_snapshot
 
     entry = build_entry(
         entry_id="ev_0001",

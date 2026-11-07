@@ -87,18 +87,18 @@ prepare-api-db:
 
 # ── Docker Orchestration ───────────────────────────────────────────
 
-# The backend containers run as MALJAN_UID:MALJAN_GID. A target that starts
+# The backend containers run as MALSPARK_UID:MALSPARK_GID. A target that starts
 # the stack sets both, unless the environment or docker/.env already does, to
 # the invoking user's ids (the user behind sudo, not root), so data/samples and
 # data/uploads stay that user's and volume-init does not refuse them as someone
 # else's. A value in docker/.env is read without its quotes, spaces or inline
 # comment; an id that still comes out 0 falls back to the image's 10001.
 COMPOSE_IDS = \
-	env_uid=$$(sed -n 's/^[[:space:]]*MALJAN_UID[[:space:]]*=//p' docker/.env 2>/dev/null | tail -n 1 | cut -d '\#' -f 1 | tr -dc 0-9); \
-	env_gid=$$(sed -n 's/^[[:space:]]*MALJAN_GID[[:space:]]*=//p' docker/.env 2>/dev/null | tail -n 1 | cut -d '\#' -f 1 | tr -dc 0-9); \
+	env_uid=$$(sed -n 's/^[[:space:]]*MALSPARK_UID[[:space:]]*=//p' docker/.env 2>/dev/null | tail -n 1 | cut -d '\#' -f 1 | tr -dc 0-9); \
+	env_gid=$$(sed -n 's/^[[:space:]]*MALSPARK_GID[[:space:]]*=//p' docker/.env 2>/dev/null | tail -n 1 | cut -d '\#' -f 1 | tr -dc 0-9); \
 	own_uid=$${SUDO_UID:-$$(id -u)}; [ "$$own_uid" != 0 ] || own_uid=10001; \
 	own_gid=$${SUDO_GID:-$$(id -g)}; [ "$$own_gid" != 0 ] || own_gid=10001; \
-	export MALJAN_UID=$${MALJAN_UID:-$${env_uid:-$$own_uid}} MALJAN_GID=$${MALJAN_GID:-$${env_gid:-$$own_gid}};
+	export MALSPARK_UID=$${MALSPARK_UID:-$${env_uid:-$$own_uid}} MALSPARK_GID=$${MALSPARK_GID:-$${env_gid:-$$own_gid}};
 
 docker-build:
 	cd docker && POSTGRES_PORT=$${POSTGRES_PORT:-5433} docker compose build
@@ -153,7 +153,7 @@ fe-rebuild:
 	$(COMPOSE_IDS) cd docker && docker compose build frontend && docker compose up -d --no-deps frontend
 
 worker-restart:
-	docker restart maljan-worker
+	docker restart malspark-worker
 
 # ── Ghidra MCP Manager ─────────────────────────────────────────────
 

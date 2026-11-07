@@ -156,7 +156,7 @@ test.describe("Dashboard alerts for an administrator", () => {
       "/settings/configuration/search?q=api.enrichment_dedicated_worker",
     );
     const text = await alerts.innerText();
-    expect(text).not.toMatch(/MALJAN_|MOCK_MODE|config\.|api\.enrichment|Setting:/);
+    expect(text).not.toMatch(/MALSPARK_|MOCK_MODE|config\.|api\.enrichment|Setting:/);
   });
 
   test("say an unread status is not a clean one", async ({ sessionPage: page }) => {

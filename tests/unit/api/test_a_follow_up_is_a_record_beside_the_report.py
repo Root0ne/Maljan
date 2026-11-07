@@ -30,7 +30,7 @@ from app.models.follow_up import JobFollowUp
 from app.models.job_event import JobEvent
 from app.models.report import AnalysisReport
 from app.services import audit_chain, follow_up, ledger_chain
-from maljan.reporting.models import QuestionAnswer
+from malspark.reporting.models import QuestionAnswer
 
 KEY = ledger_chain.derive_key("follow-up-test-material")
 # The chained append itself, kept before a test replaces it to capture its calls.
@@ -367,8 +367,8 @@ class TestThePreparation:
 
         from app import runtime_config as rc
         from app.services import settings_service
-        from maljan.core.model_assignments import model_label_for
-        from maljan.reporting.follow_up import RUN_MODEL
+        from malspark.core.model_assignments import model_label_for
+        from malspark.reporting.follow_up import RUN_MODEL
 
         async def _overrides(db: Any) -> dict[str, Any]:
             return {"llm.provider": "openai"}
@@ -408,8 +408,8 @@ class TestThePreparation:
 
         from app.models.evidence import EvidenceEntry
         from app.services import settings_service
-        from maljan.core.container import ServiceContainer
-        from maljan.reporting.narrative_agent import NarrativeAgent
+        from malspark.core.container import ServiceContainer
+        from malspark.reporting.narrative_agent import NarrativeAgent
 
         async def _overrides(db: Any) -> dict[str, Any]:
             return {}
@@ -462,7 +462,7 @@ class TestThePreparation:
         monkeypatch.setattr(ServiceContainer, "get_narrative_agent", _reporter)
         monkeypatch.setattr(ServiceContainer, "aclose", _close)
         monkeypatch.setattr(follow_up, "_learn_reporter_windows", lambda settings: None)
-        monkeypatch.setattr("maljan.pipeline.nodes.pack_text", _pack)
+        monkeypatch.setattr("malspark.pipeline.nodes.pack_text", _pack)
         job = type("Job", (), {"id": uuid.uuid4(), "status": "completed", "config": {}})()
         report = _sealed_report()
         report.malware_report = ledger_chain.with_seal(_payload(), report.ledger_seal)
@@ -488,7 +488,7 @@ class TestThePreparation:
         )
 
         from app.services import settings_service
-        from maljan.core import settings_overrides
+        from malspark.core import settings_overrides
 
         async def _overrides(db: Any) -> dict[str, Any]:
             return {"llm.openai.api_key": "a-value"}
@@ -532,8 +532,8 @@ class TestTheAnswer:
             _rows,
         )
 
-        from maljan.core.settings_overrides import build_settings
-        from maljan.reporting.follow_up import stored_run
+        from malspark.core.settings_overrides import build_settings
+        from malspark.reporting.follow_up import stored_run
 
         return follow_up.Prepared(
             job_id=uuid.uuid4(),
@@ -563,8 +563,8 @@ class TestTheAnswer:
     ) -> None:
         import json
 
-        from maljan.core.container import ServiceContainer
-        from maljan.reporting.narrative_agent import NarrativeAgent
+        from malspark.core.container import ServiceContainer
+        from malspark.reporting.narrative_agent import NarrativeAgent
 
         answer = {
             "answers": [
@@ -591,7 +591,7 @@ class TestTheAnswer:
         monkeypatch.setattr(ServiceContainer, "get_narrative_agent", _reporter)
         monkeypatch.setattr(ServiceContainer, "aclose", _close)
         monkeypatch.setattr(follow_up, "_learn_reporter_windows", lambda settings: None)
-        monkeypatch.setattr("maljan.pipeline.nodes.pack_text", lambda *a, **k: "PACK")
+        monkeypatch.setattr("malspark.pipeline.nodes.pack_text", lambda *a, **k: "PACK")
 
         done = await follow_up.answer(self._prepared(mock=False), "Does it beacon?")
 
@@ -807,9 +807,9 @@ class TestTheModelChosen:
     async def test_a_recorded_model_that_will_not_build_falls_back_to_the_current_and_says_why(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.model_assignments import model_label_for
-        from maljan.reporting import follow_up as core
-        from maljan.reporting.follow_up import UNBUILT_MODEL
+        from malspark.core.model_assignments import model_label_for
+        from malspark.reporting import follow_up as core
+        from malspark.reporting.follow_up import UNBUILT_MODEL
 
         def _half_blank(overrides: Any, snapshot: Any, current: Any = None) -> Any:
             return {**overrides, "llm.agents": {"reporter": {"provider": "openai"}}}, "run"
@@ -961,7 +961,7 @@ class TestTheVerification:
         from app.models.evidence import EvidenceEntry
         from app.services import ledger_verify
         from app.worker.analysis_worker import _evidence_row
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.schemas.evidence import LedgerEntry
 
         monkeypatch.setattr(ledger_chain, "platform_key_status", lambda: (VERIFY_KEY, None))
         job_id = uuid.uuid4()

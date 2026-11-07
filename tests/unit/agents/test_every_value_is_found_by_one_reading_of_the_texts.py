@@ -14,7 +14,7 @@ import string
 
 import pytest
 
-from maljan.agents._indicator_denylists import first_holders, whole_value_in
+from malspark.agents._indicator_denylists import first_holders, whole_value_in
 from tests.unit.agents.test_a_value_is_found_at_its_own_boundaries import FOUND, NOT_FOUND
 
 
@@ -70,7 +70,7 @@ def test_many_values_over_many_texts_are_read_in_one_pass() -> None:
 
 
 def test_the_emulation_record_holds_out_what_a_plain_string_holds() -> None:
-    from maljan.reporting.renderers.stix_renderer import _hold_out_plain
+    from malspark.reporting.renderers.stix_renderer import _hold_out_plain
 
     values = {"evil.com": "ev_0003", "c2.example": "ev_0003", "hidden.example": "ev_0004"}
     plain = [("", "evil.com"), ("ev_0001", "see evil.com."), ("ev_0002", "c2.example/x")]
@@ -82,7 +82,7 @@ def test_the_emulation_record_holds_out_what_a_plain_string_holds() -> None:
 
 def test_the_reading_costs_the_text_plus_the_occurrences() -> None:
     """Many distinct lengths over a large text: the work is counted, not timed."""
-    from maljan.agents._indicator_denylists import _Automaton
+    from malspark.agents._indicator_denylists import _Automaton
 
     literals = ["a" * k for k in range(1, 401)] + ["q" * k for k in range(1, 401)]
     text = "a b " * 100_000

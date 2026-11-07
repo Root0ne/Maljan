@@ -17,13 +17,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.renderers.stix_renderer import (
     emulation_kwargs,
     indicator_publish_reason,
     publishes,
 )
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 
 ADDRESS = "185.199.110.88"
 NAME = "relay-alpha-7f3c.top"

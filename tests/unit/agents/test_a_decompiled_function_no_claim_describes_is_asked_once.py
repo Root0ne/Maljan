@@ -29,8 +29,8 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.pipeline.validation import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.pipeline.validation import (
     DECOMPILED_NOT_DESCRIBED_CODE,
     DecompiledFunction,
     decompiled_functions,
@@ -38,8 +38,8 @@ from maljan.pipeline.validation import (
     image_bases_in,
     undescribed_decompiles,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 BASE = 0x140000000
 FIRST_OFFSET = 0x1230
@@ -364,7 +364,7 @@ class TestWhatAClaimNames:
         assert image_bases_in(entries) == (BASE,)
 
     def test_every_agent_is_handed_the_base_the_pack_read(self) -> None:
-        from maljan.pipeline.nodes import pack_image_bases
+        from malspark.pipeline.nodes import pack_image_bases
 
         state: Any = {
             "evidence_ledger": [
@@ -452,7 +452,7 @@ class _Analyst(BaseAnalyst):
 def _check(analyst: _Analyst, first: str = FIRST) -> AgentISR:
     isr = analyst._text_to_isr(first, 0)
     with (
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
         patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
     ):
         return analyst._validate_isr(isr, "evidence")
@@ -502,8 +502,8 @@ class TestTheValidationTurn:
         assert f"0x{FIRST_FN:x}" in str(turns[-1].content)
 
     def test_the_report_prints_the_line_naming_them(self) -> None:
-        from maljan.pipeline.validation import validation_metrics
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.pipeline.validation import validation_metrics
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
         from tests.unit.reporting._report_shapes import rich_report
 
         analyst = _Analyst([ONE], ENTRIES)

@@ -22,8 +22,8 @@ from app.api.v1.jobs import router
 from app.database import get_db
 from app.deps import get_current_user
 from app.services.model_probes import NEVER_PROBED, unprobed_models
-from maljan.core.config import Settings
-from maljan.core.model_assignments import assignment_chain_for, endpoint_for
+from malspark.core.config import Settings
+from malspark.core.model_assignments import assignment_chain_for, endpoint_for
 
 
 def _settings(**llm: Any) -> Settings:
@@ -116,13 +116,13 @@ class TestHowAnEndpointIsNamedToAReader:
     """
 
     def test_a_label_is_the_scheme_and_the_host(self) -> None:
-        from maljan.core.model_assignments import endpoint_label
+        from malspark.core.model_assignments import endpoint_label
 
         assert endpoint_label("http://box:8080/v1") == "http://box:8080"
         assert endpoint_label("https://api.example.com/v1/chat") == "https://api.example.com"
 
     def test_userinfo_never_reaches_a_label(self) -> None:
-        from maljan.core.model_assignments import endpoint_label
+        from malspark.core.model_assignments import endpoint_label
 
         secret = "hunter2"
         assert secret not in endpoint_label("http://user:" + secret + "@llm.internal:8080/v1")
@@ -133,7 +133,7 @@ class TestHowAnEndpointIsNamedToAReader:
     def test_a_scheme_less_address_is_still_cut(self) -> None:
         """``urlsplit`` finds no host without a scheme, and returning the input
         put the credential straight back into the sentence."""
-        from maljan.core.model_assignments import endpoint_label
+        from malspark.core.model_assignments import endpoint_label
 
         secret = "hunter2"
         assert endpoint_label("user:" + secret + "@llm.internal:8080/v1") == "llm.internal:8080"
@@ -141,13 +141,13 @@ class TestHowAnEndpointIsNamedToAReader:
 
     def test_an_ipv6_host_keeps_its_brackets(self) -> None:
         """Without them the label is an address nobody can type back in."""
-        from maljan.core.model_assignments import endpoint_label
+        from malspark.core.model_assignments import endpoint_label
 
         assert endpoint_label("http://[::1]:8080/v1") == "http://[::1]:8080"
         assert endpoint_label("http://[2001:db8::2]/v1") == "http://[2001:db8::2]"
 
     def test_an_ipv6_host_behind_credentials_keeps_both_properties(self) -> None:
-        from maljan.core.model_assignments import endpoint_label
+        from malspark.core.model_assignments import endpoint_label
 
         secret = "hunter2"
         assert endpoint_label("http://user:" + secret + "@[::1]:8080/v1") == "http://[::1]:8080"
@@ -155,20 +155,20 @@ class TestHowAnEndpointIsNamedToAReader:
 
     def test_a_label_can_be_looked_up_against_the_endpoint_it_names(self) -> None:
         """The label and the folded endpoint spell one host one way."""
-        from maljan.core.model_assignments import endpoint_label, normalised_endpoint
+        from malspark.core.model_assignments import endpoint_label, normalised_endpoint
 
         endpoint = normalised_endpoint("http://[::1]:8080/v1")
         assert endpoint == "http://[::1]:8080/v1"
         assert endpoint.startswith(endpoint_label(endpoint))
 
     def test_a_vendor_api_is_its_own_label(self) -> None:
-        from maljan.core.model_assignments import endpoint_label
+        from malspark.core.model_assignments import endpoint_label
 
         assert endpoint_label("the Anthropic API") == "the Anthropic API"
         assert endpoint_label("ollama") == "ollama"
 
     def test_something_that_is_no_address_at_all_says_so(self) -> None:
-        from maljan.core.model_assignments import endpoint_label
+        from malspark.core.model_assignments import endpoint_label
 
         assert endpoint_label("@") == "(unparseable endpoint)"
         assert endpoint_label("") == ""
@@ -212,26 +212,26 @@ class TestOneSpellingOfOneServer:
     """
 
     def test_the_scheme_and_the_host_fold_to_lower_case(self) -> None:
-        from maljan.core.model_assignments import normalised_endpoint
+        from malspark.core.model_assignments import normalised_endpoint
 
         assert normalised_endpoint("HTTP://BOX:8080/v1") == "http://box:8080/v1"
 
     def test_the_default_port_of_the_scheme_is_dropped(self) -> None:
-        from maljan.core.model_assignments import normalised_endpoint
+        from malspark.core.model_assignments import normalised_endpoint
 
         assert normalised_endpoint("http://box:80/v1") == "http://box/v1"
         assert normalised_endpoint("https://box:443/v1") == "https://box/v1"
         assert normalised_endpoint("http://box:8080/v1") == "http://box:8080/v1"
 
     def test_a_trailing_slash_still_goes(self) -> None:
-        from maljan.core.model_assignments import normalised_endpoint
+        from malspark.core.model_assignments import normalised_endpoint
 
         assert normalised_endpoint("  http://box:8080/v1/  ") == "http://box:8080/v1"
 
     def test_the_path_and_the_credential_are_left_alone(self) -> None:
         """This value is the address a call is made to, not a label: cutting
         the path off it would send the call somewhere else."""
-        from maljan.core.model_assignments import normalised_endpoint
+        from malspark.core.model_assignments import normalised_endpoint
 
         secret = "hunter2"
         assert normalised_endpoint("http://u:" + secret + "@box:8080/v1") == (
@@ -239,13 +239,13 @@ class TestOneSpellingOfOneServer:
         )
 
     def test_a_vendor_name_is_untouched(self) -> None:
-        from maljan.core.model_assignments import normalised_endpoint
+        from malspark.core.model_assignments import normalised_endpoint
 
         assert normalised_endpoint("the Anthropic API") == "the Anthropic API"
         assert normalised_endpoint(None) == ""
 
     def test_an_ipv6_host_keeps_its_brackets(self) -> None:
-        from maljan.core.model_assignments import normalised_endpoint
+        from malspark.core.model_assignments import normalised_endpoint
 
         assert normalised_endpoint("http://[::1]:8080/v1") == "http://[::1]:8080/v1"
 
@@ -352,7 +352,7 @@ class TestTheGate:
 class TestWhoTheGateChecks:
     @staticmethod
     def _called(settings: Settings, stages: Any = None) -> list[str]:
-        from maljan.agents.composition import called_assignments
+        from malspark.agents.composition import called_assignments
 
         return list(dict.fromkeys(a.agent for a in called_assignments(settings, stages)))
 
@@ -413,7 +413,7 @@ class TestTheRolesWithNoDefinition:
 
     @staticmethod
     def _called(settings: Settings, stages: Any = None) -> dict[str, list[str]]:
-        from maljan.agents.composition import called_assignments
+        from malspark.agents.composition import called_assignments
 
         out: dict[str, list[str]] = {}
         for assignment in called_assignments(settings, stages):
@@ -820,7 +820,7 @@ class TestAnEntrysOwnEffort:
 
     def test_the_column_holds_the_widest_spelling_settings_accept(self) -> None:
         from app.models.model_probe import ModelProbe
-        from maljan.core.model_assignments import FILED_MODEL_MAX_CHARS
+        from malspark.core.model_assignments import FILED_MODEL_MAX_CHARS
 
         assert ModelProbe.__table__.c.model.type.length == FILED_MODEL_MAX_CHARS
 
@@ -852,7 +852,7 @@ class TestAnEntrysOwnEffort:
 
     @pytest.mark.asyncio
     async def test_a_row_taken_at_the_entry_s_effort_counts(self) -> None:
-        from maljan.core.model_assignments import filed_model
+        from malspark.core.model_assignments import filed_model
 
         rows = [_Row("http://box:8080/v1", filed_model("ds", "high"), True, "ok")]
 

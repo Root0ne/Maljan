@@ -17,10 +17,10 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-from maljan.schemas.stix_models import Bundle, Malware
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.schemas.stix_models import Bundle, Malware
 
 FAMILY = "Examplefamily"
 
@@ -137,7 +137,7 @@ def test_a_placeholder_family_is_no_family(placeholder: str) -> None:
 
 
 def test_the_report_and_the_export_read_a_family_with_one_reader() -> None:
-    from maljan.reporting.models import stated_family
+    from malspark.reporting.models import stated_family
 
     assert [stated_family(f) for f in ("Unknown", "N/A", "none", None, " Examplefamily ")] == [
         "",

@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.core.config import MCPServerConfig, Settings, ToolRef
-from maljan.providers.errors import ProviderConfigurationError
-from maljan.providers.servers import ServerHandle, ServerRegistry
+from malspark.core.config import MCPServerConfig, Settings, ToolRef
+from malspark.providers.errors import ProviderConfigurationError
+from malspark.providers.servers import ServerHandle, ServerRegistry
 
 
 class _T:
@@ -49,8 +49,8 @@ def patched(monkeypatch):
         return made[-1]
 
     factory.names = ["alpha", "beta"]
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", factory)
-    monkeypatch.setattr("maljan.providers.servers._run_async", _run_async_stub)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", factory)
+    monkeypatch.setattr("malspark.providers.servers._run_async", _run_async_stub)
     return factory, made
 
 
@@ -238,7 +238,7 @@ def test_a_failed_initialize_closes_the_partial_toolkit_and_a_later_open_works(m
         constructed.append(instance)
         return instance
 
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", failing_factory)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", failing_factory)
 
     handle = ServerHandle("x", MCPServerConfig(enabled=True, command="mcp"))
     with pytest.raises(RuntimeError, match="handshake failed"):
@@ -256,7 +256,7 @@ def test_a_failed_initialize_closes_the_partial_toolkit_and_a_later_open_works(m
         constructed.append(instance)
         return instance
 
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", working_factory)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", working_factory)
     handle.open("job-2")
     assert handle.is_open is True
     assert [t.name for t in handle.tools()] == ["alpha"]
@@ -278,7 +278,7 @@ async def test_aopen_closes_the_partial_toolkit_when_wait_for_cancels_it(monkeyp
     instance.get_tools = MagicMock(return_value=[])
     instance.cleanup = AsyncMock(return_value=None)
 
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", lambda *a, **kw: instance)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", lambda *a, **kw: instance)
 
     handle = ServerHandle("x", MCPServerConfig(enabled=True, command="mcp"))
     with pytest.raises(asyncio.TimeoutError):
@@ -295,7 +295,7 @@ def test_an_allow_listed_name_the_server_does_not_offer_logs_one_warning(patched
     handle = ServerHandle(
         "x", MCPServerConfig(enabled=True, command="mcp", tools=["alpha", "nope", "also-missing"])
     )
-    with caplog.at_level(logging.WARNING, logger="maljan"):
+    with caplog.at_level(logging.WARNING, logger="malspark"):
         handle.open("job-1")
 
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -346,7 +346,7 @@ def test_a_reference_matches_a_manifest_name_that_is_genuinely_prefixed(patched)
 
 
 def test_a_relative_cwd_inside_the_repository_resolves(tmp_path, monkeypatch):
-    monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr("malspark.core.paths.get_project_root", lambda *a, **k: tmp_path)
     (tmp_path / "sub").mkdir()
     handle = ServerHandle("x", MCPServerConfig(enabled=True, command="mcp", cwd="sub"))
     assert handle._resolve_cwd() == str((tmp_path / "sub").resolve())
@@ -375,7 +375,7 @@ def test_a_symlink_escaping_the_repository_root_is_refused(tmp_path, monkeypatch
     outside = tmp_path / "outside"
     outside.mkdir()
     (root / "escape").symlink_to(outside)
-    monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: root)
+    monkeypatch.setattr("malspark.core.paths.get_project_root", lambda *a, **k: root)
 
     handle = ServerHandle("x", MCPServerConfig(enabled=True, command="mcp", cwd="escape"))
     with pytest.raises(ProviderConfigurationError) as exc:
@@ -433,7 +433,7 @@ def _registry_with_fake_toolkits(monkeypatch, made: list) -> ServerRegistry:
         made.append(_LoopBoundToolkit())
         return made[-1]
 
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", factory)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", factory)
     return ServerRegistry(Settings(_env_file=None))
 
 
@@ -579,7 +579,7 @@ class TestAToolTheHostCannotRunIsNotOffered:
         return {"server": "analysis", "version": "1.0", "tools": list(cells)}
 
     def _handle(self, patched, names: list[str], manifest: dict) -> ServerHandle:
-        from maljan.tools.capabilities import ServerCapabilities
+        from malspark.tools.capabilities import ServerCapabilities
 
         factory, _made = patched
         factory.names = names
@@ -649,7 +649,7 @@ class TestAToolTheHostCannotRunIsNotOffered:
         assert [t.name for t in handle.tools()] == ["alpha", "beta"]
 
     def test_an_allow_list_and_the_manifest_both_apply(self, patched) -> None:
-        from maljan.tools.capabilities import ServerCapabilities
+        from malspark.tools.capabilities import ServerCapabilities
 
         factory, _made = patched
         factory.names = ["alpha", "beta", "macho_info"]

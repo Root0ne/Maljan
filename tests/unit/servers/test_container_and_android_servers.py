@@ -35,13 +35,13 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.tool_pinning import DELIVERY_TOOLS
-from maljan.core.config import Settings
-from maljan.core.declared_reading import builtin_tools
-from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
-from maljan.core.tool_declarations import ToolFacts
-from maljan.pipeline.artefacts import ArtefactStore
-from maljan.tools import staging
+from malspark.agents.tool_pinning import DELIVERY_TOOLS
+from malspark.core.config import Settings
+from malspark.core.declared_reading import builtin_tools
+from malspark.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+from malspark.core.tool_declarations import ToolFacts
+from malspark.pipeline.artefacts import ArtefactStore
+from malspark.tools import staging
 
 ROOT = Path(__file__).resolve().parents[3]
 SERVICES = ROOT / "services"
@@ -1062,7 +1062,7 @@ class TestTheDeclarations:
         (port,) = re.findall(r"MCP_PORT=(\d+)", dockerfile)
         assert block.url == f"http://{service}:{port}/mcp"
         assert f"EXPOSE {port}" in dockerfile
-        assert "MALJAN_SAMPLE_ROOTS=/data/samples" in dockerfile
+        assert "MALSPARK_SAMPLE_ROOTS=/data/samples" in dockerfile
         for base in re.findall(r"^FROM (\S+)", dockerfile, re.MULTILINE):
             assert re.search(r"@sha256:[0-9a-f]{64}$", base), base
         (user,) = re.findall(r"^USER (\S+)$", dockerfile, re.MULTILINE)

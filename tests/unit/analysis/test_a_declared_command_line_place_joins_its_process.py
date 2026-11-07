@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.analysis.evidence_roots import (
+from malspark.analysis.evidence_roots import (
     MATCH_UNPLACED,
     PROCESS_ROOT,
     SHARED_COMMAND,
@@ -19,8 +19,8 @@ from maljan.analysis.evidence_roots import (
     reading_branch,
     run_roots,
 )
-from maljan.core.declared_reading import facts_record
-from maljan.schemas.evidence import LedgerEntry
+from malspark.core.declared_reading import facts_record
+from malspark.schemas.evidence import LedgerEntry
 
 PS = "powershell -enc x"
 ANSWER = {"m": [{"cmd": PS, "t": "T1059.001"}]}

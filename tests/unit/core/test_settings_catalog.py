@@ -1,9 +1,9 @@
-from maljan.core import settings_catalog as cat
-from maljan.core.settings_annotations import ANNOTATIONS, GROUP_ORDER
+from malspark.core import settings_catalog as cat
+from malspark.core.settings_annotations import ANNOTATIONS, GROUP_ORDER
 
 
 def test_every_leaf_is_annotated_and_no_annotation_is_orphaned():
-    from maljan.memory.store_factory import registered_backends
+    from malspark.memory.store_factory import registered_backends
 
     leaves = {leaf.path for leaf in cat.core_leaves()}
     # A memory backend annotates its own leaves where it registers (Qdrant included).
@@ -168,14 +168,14 @@ def test_the_sandbox_selector_offers_rest():
 
 
 def test_every_group_has_a_description() -> None:
-    from maljan.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
+    from malspark.core.settings_annotations import GROUP_DESCRIPTIONS, GROUP_ORDER
 
     for key, _title in GROUP_ORDER:
         assert GROUP_DESCRIPTIONS.get(key), f"group {key!r} has no description"
 
 
 def test_subgroup_and_advanced_default_off_and_are_typed() -> None:
-    from maljan.core.settings_catalog import core_catalog
+    from malspark.core.settings_catalog import core_catalog
 
     entries = {e.key: e for e in core_catalog()}
     assert entries["core.negotiation.max_iterations"].subgroup is None
@@ -186,7 +186,7 @@ def test_subgroup_and_advanced_default_off_and_are_typed() -> None:
 
 
 def test_subgroup_and_advanced_assignments_follow_the_design() -> None:
-    from maljan.core.settings_catalog import core_catalog
+    from malspark.core.settings_catalog import core_catalog
 
     e = {x.key: x for x in core_catalog()}
     assert e["core.openai_api_key"].advanced and e["core.anthropic_api_key"].advanced

@@ -90,7 +90,7 @@ def fetch_ghidra_release_date(version: str) -> str | None:
             GHIDRA_RELEASES_API,
             headers={
                 "Accept": "application/vnd.github+json",
-                "User-Agent": "maljan-ghidra-manager",
+                "User-Agent": "malspark-ghidra-manager",
             },
         )
         # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected — GHIDRA_RELEASES_API is a module-level https:// constant, never user input  # noqa: E501

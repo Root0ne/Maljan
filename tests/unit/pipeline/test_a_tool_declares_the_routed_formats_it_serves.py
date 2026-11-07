@@ -21,18 +21,18 @@ from typing import Any
 
 import pytest
 
-from maljan.core import builtin_declarations, declared_reading
-from maljan.core.config import Settings
-from maljan.core.settings_overrides import build_settings
-from maljan.core.tool_declarations import (
+from malspark.core import builtin_declarations, declared_reading
+from malspark.core.config import Settings
+from malspark.core.settings_overrides import build_settings
+from malspark.core.tool_declarations import (
     CHANGES_FORM,
     CHANGES_MARK,
     ToolDeclarations,
     ToolFacts,
     strict_declarations,
 )
-from maljan.extractors.sample_identity import UNKNOWN_FORMAT, routed_formats
-from maljan.pipeline.nodes import _needed_for, reason_applies_to_format
+from malspark.extractors.sample_identity import UNKNOWN_FORMAT, routed_formats
+from malspark.pipeline.nodes import _needed_for, reason_applies_to_format
 
 # ``pipeline.nodes._FORMAT_TOOLS`` as origin/dev held it.
 DEV_FORMAT_TOOLS: dict[str, frozenset[str]] = {
@@ -258,7 +258,7 @@ def test_every_format_given_a_platform_is_a_routed_format() -> None:
     every label the detector gives, is
     ``tests/unit/extractors/test_every_routed_format_is_listed.py``.
     """
-    from maljan.extractors import sample_identity
+    from malspark.extractors import sample_identity
 
     formats = set(routed_formats())
     assert UNKNOWN_FORMAT in formats

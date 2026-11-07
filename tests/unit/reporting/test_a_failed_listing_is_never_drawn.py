@@ -7,10 +7,10 @@ is never drawn as "Decompiled ..." whatever the tool or its kind's source.
 
 from __future__ import annotations
 
-from maljan.reporting.figures import build_code_listings
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.schemas.evidence import LedgerEntry, build_entry
-from maljan.schemas.tool_evidence import CapturedToolOutput
+from malspark.reporting.figures import build_code_listings
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.schemas.evidence import LedgerEntry, build_entry
+from malspark.schemas.tool_evidence import CapturedToolOutput
 
 
 def _entry(seq: int, *, ok: bool, output: str, tool: str = "decompile_function") -> LedgerEntry:

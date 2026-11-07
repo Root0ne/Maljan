@@ -36,11 +36,11 @@ from langchain_anthropic.chat_models import convert_to_anthropic_tool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langchain_google_genai._function_utils import convert_to_genai_function_declarations
 
-from maljan.agents.argument_schema import STRUCTURAL
-from maljan.agents.mcp_client import MCPLangChainToolkit
-from maljan.agents.null_arguments import rules_of
-from maljan.agents.tool_pinning import _schema_without
-from maljan.llm.gemini_provider import gemini_tools
+from malspark.agents.argument_schema import STRUCTURAL
+from malspark.agents.mcp_client import MCPLangChainToolkit
+from malspark.agents.null_arguments import rules_of
+from malspark.agents.tool_pinning import _schema_without
+from malspark.llm.gemini_provider import gemini_tools
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 CORPUS = FIXTURES / "mcp_schema_corpus"
@@ -423,7 +423,7 @@ def test_a_hostile_property_costs_only_itself(case: str) -> None:
 def test_an_unusable_property_is_offered_as_its_plain_type_and_named(
     case: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.agents import mcp_client
+    from malspark.agents import mcp_client
 
     said: list[str] = []
     monkeypatch.setattr(mcp_client.logger, "warning", lambda msg, *a: said.append(msg % a))
@@ -636,8 +636,8 @@ class TestAReservedName:
     def test_a_tool_rebuilt_around_it_offers_and_sends_the_servers_name(
         self, kind: str, name: str
     ) -> None:
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-        from maljan.providers.declared_errors import ErrorPattern, with_declared_errors
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from malspark.providers.declared_errors import ErrorPattern, with_declared_errors
 
         schema = _named(name, {"type": "string"})
         tool, session = _build(schema)
@@ -651,7 +651,7 @@ class TestAReservedName:
 
 
 def test_the_ledger_records_cites_and_keys_a_call_by_what_was_sent() -> None:
-    from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
+    from malspark.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
 
     tool, session = _build(_named("class", {"type": "string"}))
     recorder = EvidenceRecorder("static")
@@ -670,7 +670,7 @@ def test_the_ledger_records_cites_and_keys_a_call_by_what_was_sent() -> None:
 
 
 def test_the_null_rules_read_an_argument_written_by_its_field_name() -> None:
-    from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+    from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
 
     schema = _named("class", OPTIONS, required=False)
     by_field = {"arg_class": {"mode": "f", "depth": None}}
@@ -694,8 +694,8 @@ def test_the_offered_schema_is_written_once() -> None:
 
 
 def test_a_guard_hides_and_fills_an_argument_by_the_servers_name() -> None:
-    from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-    from maljan.agents.tool_pinning import _pin_tool
+    from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+    from malspark.agents.tool_pinning import _pin_tool
 
     schema = {
         "type": "object",
@@ -885,7 +885,7 @@ class TestGeminiToolSchemas:
     def test_the_gemini_client_binds_through_the_adaptation(self) -> None:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        from maljan.llm.gemini_provider import _with_gemini_tool_schemas
+        from malspark.llm.gemini_provider import _with_gemini_tool_schemas
 
         tool, _ = _build(_one({"type": "integer", "enum": [1, 2]}))
         chat_class = _with_gemini_tool_schemas(ChatGoogleGenerativeAI)

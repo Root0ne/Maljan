@@ -26,9 +26,9 @@ import pytest
 from tests.conftest import ghidra_listing, r2_listing
 from tests.linear_cost import assert_scales
 
-from maljan.core import derived_declarations as dd
-from maljan.core.derived_declarations import discloses, program_readings_of
-from maljan.core.tool_declarations import THIRD_PARTY_BYTES
+from malspark.core import derived_declarations as dd
+from malspark.core.derived_declarations import discloses, program_readings_of
+from malspark.core.tool_declarations import THIRD_PARTY_BYTES
 
 PATH_LEAF = {"path": {"type": "string"}}
 CONTENT_LEAF = {"blob": {"type": "string", "contentEncoding": "base64"}}

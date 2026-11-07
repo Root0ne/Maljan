@@ -22,10 +22,10 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import BaseAnalyst, _run_coro_blocking
-from maljan.core.exceptions import AnalystError
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.generation_rate import ModelCallDeadline
+from malspark.agents.base_agent import BaseAnalyst, _run_coro_blocking
+from malspark.core.exceptions import AnalystError
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.generation_rate import ModelCallDeadline
 
 REPORT = "CLAIM: it reads its own strings\nEVIDENCE: ev_0001\nCONFIDENCE: 0.6\nTECHNIQUE: NONE"
 
@@ -87,7 +87,7 @@ def _analyst(model: _Model) -> _Analyst:
 
 
 def _run(agent: _Analyst) -> str:
-    with patch("maljan.agents.base_agent.loop_limits", return_value=(None, None)):
+    with patch("malspark.agents.base_agent.loop_limits", return_value=(None, None)):
         return agent.execute_tool_loop([("system", "s"), ("human", "look at it")])
 
 
@@ -162,8 +162,8 @@ class _Mediator(BaseChatModel):
 def _run_the_judge(model: _Mediator) -> tuple[Any, str]:
     import asyncio
 
-    from maljan.agents.judge_agent import JudgeAgent
-    from maljan.core.config import Settings
+    from malspark.agents.judge_agent import JudgeAgent
+    from malspark.core.config import Settings
 
     def lookup(what: str = "") -> str:
         return f"{what} is a technique"
@@ -174,8 +174,8 @@ def _run_the_judge(model: _Mediator) -> tuple[Any, str]:
     ]
     cfg = Settings(_env_file=None)
     with (
-        patch("maljan.agents.base_agent.get_settings", lambda: cfg),
-        patch("maljan.agents.judge_agent.get_settings", lambda: cfg),
+        patch("malspark.agents.base_agent.get_settings", lambda: cfg),
+        patch("malspark.agents.judge_agent.get_settings", lambda: cfg),
     ):
         reasoning = asyncio.run(judge.execute_tool_loop([("system", "s"), ("human", "mediate")]))
     return judge, reasoning
@@ -193,8 +193,8 @@ class TestTheJudgesMediationLoop:
     def test_with_nothing_gathered_the_record_still_names_the_call_deadline(self) -> None:
         import asyncio
 
-        from maljan.agents.judge_agent import JudgeAgent
-        from maljan.core.config import Settings
+        from malspark.agents.judge_agent import JudgeAgent
+        from malspark.core.config import Settings
 
         judge = JudgeAgent(llm=_Mediator(dies_on=1))
 
@@ -208,8 +208,8 @@ class TestTheJudgesMediationLoop:
         ]
         cfg = Settings(_env_file=None)
         with (
-            patch("maljan.agents.base_agent.get_settings", lambda: cfg),
-            patch("maljan.agents.judge_agent.get_settings", lambda: cfg),
+            patch("malspark.agents.base_agent.get_settings", lambda: cfg),
+            patch("malspark.agents.judge_agent.get_settings", lambda: cfg),
             pytest.raises(ModelCallDeadline),
         ):
             asyncio.run(judge.execute_tool_loop([("system", "s"), ("human", "mediate")]))

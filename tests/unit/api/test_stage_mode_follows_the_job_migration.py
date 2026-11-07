@@ -172,7 +172,7 @@ def test_the_downgrade_writes_the_old_mode_back_and_takes_auto_away():
 
 
 def test_the_migrated_document_loads_with_the_stage_unset():
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     team = _team("sequential")
     team["stages"] = [s for s in team["stages"] if s["kind"] != "report"] + [

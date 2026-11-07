@@ -29,8 +29,8 @@ from langchain_core.tools import StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.llm import context_window as cw
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.llm import context_window as cw
 
 PROSE = "The file looks like a loader; it reads its configuration from a resource."
 REPORT = "CLAIM: it reads a file\nEVIDENCE: ev_0002\nCONFIDENCE: 0.6\nTECHNIQUE: T1005\n"
@@ -98,7 +98,7 @@ class _Analyst(BaseAnalyst):
 
 @contextlib.contextmanager
 def _settings() -> Iterator[None]:
-    with patch("maljan.agents.base_agent.get_settings") as settings:
+    with patch("malspark.agents.base_agent.get_settings") as settings:
         cfg = settings.return_value
         cfg.react_agent_timeout = None
         cfg.react_agent_timeout_overrides = {}

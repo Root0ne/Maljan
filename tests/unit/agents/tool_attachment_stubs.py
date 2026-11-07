@@ -31,7 +31,7 @@ class FakeTool:
 
     def __init__(self, name: str, server: str = "") -> None:
         self.name = name
-        self.metadata = {"maljan_server": server} if server else None
+        self.metadata = {"malspark_server": server} if server else None
 
     def model_copy(self, *, update: dict) -> FakeTool:
         copy = FakeTool(update.get("name", self.name))

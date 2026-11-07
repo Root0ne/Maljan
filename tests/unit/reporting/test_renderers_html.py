@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.figures import build_figures
-from maljan.reporting.models import (
+from malspark.reporting.figures import build_figures
+from malspark.reporting.models import (
     DynamicBehavior,
     Figure,
     FileHashes,
@@ -27,8 +27,8 @@ from maljan.reporting.models import (
     SampleIdentity,
     StaticAnalysis,
 )
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.pdf import PdfRenderer, PdfUnavailableError
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.pdf import PdfRenderer, PdfUnavailableError
 
 # Mirrors REQUIRED_HEADINGS in test_renderers_markdown.py. Duplicated on
 # purpose: if a heading is renamed, the figure anchors in html.py silently stop
@@ -171,7 +171,7 @@ class TestEscaping:
     def test_failed_section_becomes_a_visible_note_not_an_escaped_comment(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.reporting.renderers import markdown as md_mod
+        from malspark.reporting.renderers import markdown as md_mod
 
         def _boom(self: Any, report: MalwareReport) -> str:
             raise RuntimeError("synthetic")

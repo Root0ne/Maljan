@@ -1,0 +1,699 @@
+"""The reference knowledge an analyst consults, as lookups rather than layers.
+
+ATT&CK, the API-behaviour catalog, the LOLBin table and the three vector
+indices all existed already; each was wired into exactly one pipeline stage and
+reachable from nowhere else. Here they are questions an agent can ask at any
+point: is this technique id real, what does this API do, what family does this
+profile look like.
+
+Every index is built on first call and kept for the process lifetime — a
+sidecar answers many calls and the ATT&CK bundle is fifty megabytes. Anything
+that needs Qdrant or an embedding model returns an empty result with a
+``reason`` when the dependency is not there. Nothing in this module raises for
+a missing backend: a knowledge lookup that cannot answer is a thinner report,
+never a failed job.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+from typing import TYPE_CHECKING, Any
+
+from malspark.core.logger import logger
+from malspark.core.paths import resolve_data
+
+if TYPE_CHECKING:
+    from malspark.memory.long_term_memory import FunctionHashIndex
+
+# The catalogs the pipeline ships. Passed as explicit arguments everywhere, so
+# an operator with their own catalog hands the tool the path and this module
+# never reads ``Settings``.
+DEFAULT_API_BEHAVIOUR_MAP = "data/api_behaviour_map_v1.json"
+DEFAULT_API_ATTCK_MAP = "data/api_attck_map_v1.json"
+DEFAULT_FAMILY_CATALOG = "data/family_fingerprints_v1.json"
+DEFAULT_CASE_CORPUS = "data/attck_case_corpus_v1.json"
+
+_INDEX_LOCK = threading.Lock()
+_HYBRID_INDEX: Any = None
+_HYBRID_FAILED: str = ""
+_HYBRID_FAILED_AT: float = 0.0
+
+# How long a failed index build is believed before another is attempted. A
+# network blip used to cost the worker its index for the life of the process,
+# so every later job in it ran without the hybrid index and nothing said why.
+# 0 means never re-attempt, which is that behaviour. Set from
+# ``validation.index_retry_seconds``; this module reads no settings itself.
+_RETRY_AFTER_SECONDS: float = 900.0
+
+# How the setting reaches a tool sidecar, which has an environment and no
+# settings store. The knowledge server is the process where the build actually
+# happens, so it is the one the operator's value has to arrive at.
+INDEX_RETRY_ENV = "MALSPARK_INDEX_RETRY_SECONDS"
+# The run's sample sha256, which the platform gives a server that asks for it so
+# that a case lookup leaves out the sample's own earlier case.
+SAMPLE_SHA256_ENV = "MALSPARK_SAMPLE_SHA256"
+
+
+def set_index_retry_after(seconds: float) -> None:
+    """How long to wait after a failed index build before attempting another."""
+    global _RETRY_AFTER_SECONDS
+    with _INDEX_LOCK:
+        _RETRY_AFTER_SECONDS = max(0.0, float(seconds))
+
+
+def reset_indices() -> None:
+    """Drop the warm index. For tests and for a refresh.
+
+    The attempt is dropped with it, so the next lookup builds rather than
+    waiting out the retry interval. ``_WARM_STARTED`` goes too: it is the
+    memory of a build having been started, and a caller that has just thrown
+    the index away is asking for the cold state — leaving the flag set would
+    disarm the background warmer for the rest of the process with nothing able
+    to arm it again.
+    """
+    global _HYBRID_INDEX, _HYBRID_FAILED, _HYBRID_FAILED_AT, _WARM_STARTED
+    with _INDEX_LOCK:
+        _HYBRID_INDEX = None
+        _HYBRID_FAILED = ""
+        _HYBRID_FAILED_AT = 0.0
+        _WARM_STARTED = False
+
+
+def _hybrid_index() -> tuple[Any, str]:
+    """The hybrid ATT&CK index, or ``(None, reason)`` when it cannot be built.
+
+    A failure is remembered with the moment it happened: a box that cannot
+    reach MITRE would otherwise retry a fifty-megabyte download on every single
+    lookup. It is remembered for ``_RETRY_AFTER_SECONDS`` and no longer, so a
+    blip costs one interval rather than the worker's whole life; with the
+    interval at zero it is remembered for good.
+
+    The build runs outside the lock — it is seconds long and every other
+    lookup would queue behind it — and the decision to start one is taken
+    inside it, with the failure's timestamp moved forward before the attempt.
+    Two lookups arriving together therefore start one build, not two, and the
+    second is answered the standing reason rather than waiting.
+    """
+    global _HYBRID_INDEX, _HYBRID_FAILED, _HYBRID_FAILED_AT
+    with _INDEX_LOCK:
+        if _HYBRID_INDEX is not None:
+            return _HYBRID_INDEX, ""
+        if _HYBRID_FAILED:
+            waited = time.monotonic() - _HYBRID_FAILED_AT
+            if _RETRY_AFTER_SECONDS <= 0.0 or waited < _RETRY_AFTER_SECONDS:
+                return None, _HYBRID_FAILED
+            # Claim the attempt here, so the lookups arriving while it runs are
+            # answered the standing reason instead of starting builds of their own.
+            _HYBRID_FAILED_AT = time.monotonic()
+            logger.info(
+                "knowledge: re-attempting the ATT&CK index build, %.0f s after the last failure.",
+                waited,
+            )
+    try:
+        from malspark.memory.hybrid_attck_index import HybridATTCKIndex
+
+        index = HybridATTCKIndex.from_loader()
+    except Exception as exc:  # noqa: BLE001 — a knowledge lookup degrades, never raises
+        reason = f"the ATT&CK index is unavailable: {type(exc).__name__}: {exc}"
+        logger.warning("knowledge: %s", reason)
+        with _INDEX_LOCK:
+            _HYBRID_FAILED = reason
+            _HYBRID_FAILED_AT = time.monotonic()
+        return None, reason
+    with _INDEX_LOCK:
+        _HYBRID_INDEX = index
+        _HYBRID_FAILED = ""
+    return index, ""
+
+
+def index_is_warm() -> bool:
+    """Whether this process has already built the hybrid ATT&CK index."""
+    with _INDEX_LOCK:
+        return _HYBRID_INDEX is not None
+
+
+# Set under ``_INDEX_LOCK`` by the call that starts a background build. A
+# build that failed is remembered as attempted, so no later run starts another
+# while the failure still stands and every later caller is answered ``False``.
+_WARM_STARTED = False
+
+
+def warm_index_in_background() -> bool:
+    """Start building the hybrid index on a daemon thread, once per process.
+
+    For the caller that may not wait: the alignment gate on a worker that has
+    not built the index yet. ``True`` when a build was started by this call,
+    ``False`` when one was already started in this process — running or
+    finished — or the index is already there. Check and set happen under one
+    lock, so two analysts in parallel start one build, not two.
+
+    A build whose failure the retry interval has outlived is started again:
+    the flag is the memory of an attempt, and an attempt the module is willing
+    to repeat should not be the thing that stops the repeat.
+    """
+    global _WARM_STARTED
+    with _INDEX_LOCK:
+        if _HYBRID_INDEX is not None:
+            return False
+        stale = bool(_HYBRID_FAILED) and 0.0 < _RETRY_AFTER_SECONDS <= (
+            time.monotonic() - _HYBRID_FAILED_AT
+        )
+        if _WARM_STARTED and not stale:
+            return False
+        _WARM_STARTED = True
+
+    threading.Thread(target=_hybrid_index, name="malspark-attck-index", daemon=True).start()
+    return True
+
+
+def catalogue_available() -> bool:
+    """Whether the vendored technique universe could be read at all.
+
+    The validity check answers from it, and a check that answers "nothing
+    unknown" because it had no universe to compare against did not run.
+    """
+    from malspark.memory.attck_loader import valid_ids
+
+    try:
+        return bool(valid_ids())
+    except Exception as exc:  # noqa: BLE001 — an unreadable universe is an absent one
+        logger.warning("knowledge: the ATT&CK id universe is unavailable (%s).", exc)
+        return False
+
+
+def technique_alignment(text: str, technique_id: str, k: int = 5) -> dict[str, Any] | None:
+    """The index's gate score for ``technique_id`` against ``text``, and its candidates.
+
+    ``None`` when the index is not built in this process, or cannot score the
+    claimed id: this never builds
+    it, because the caller is an analyst's validation turn and a build there
+    would cost every run on a cold worker seconds it did not budget. The
+    ranking is the same ``resolve_technique`` gives; the one addition is the
+    claimed id's own ``score_gate``, whether or not the index ranked it.
+    """
+    if not index_is_warm():
+        return None
+    index, _reason = _hybrid_index()
+    if index is None:
+        return None
+    tid = (technique_id or "").strip().upper()
+    answer = resolve_technique(text, k=k)
+    candidates = [
+        {"technique_id": c["technique_id"], "score_gate": c["score_gate"], "score": c["score"]}
+        for c in answer.get("candidates") or []
+    ]
+    try:
+        gate_score = round(float(index.validate_and_score(tid, text)), 4)
+    except Exception as exc:  # noqa: BLE001 — a gate that cannot score has no answer
+        # A score of 0.0 would read as "aligns with nothing" and challenge the
+        # claim; a failure is no score at all.
+        logger.debug("knowledge: no gate score for %s (%s).", tid, exc)
+        return None
+    return {"technique_id": tid, "gate_score": gate_score, "candidates": candidates}
+
+
+# ---------------------------------------------------------------------------
+# ATT&CK
+# ---------------------------------------------------------------------------
+
+
+def resolve_technique(text: str, k: int = 5, domain: str | None = None) -> dict[str, Any]:
+    """Candidate techniques for a behavioural description, best first.
+
+    Two numbers per candidate, because the two indices are good at different
+    things. ``score`` is the semantic ranking, which orders candidates well but
+    crowds every value near 0.7 whether the match is right or not. ``score_gate``
+    is the TF-IDF alignment, which ranks worse but scores near zero for
+    unrelated evidence — so it is the one to threshold on.
+    """
+    index, reason = _hybrid_index()
+    if index is None:
+        return {"candidates": [], "reason": reason}
+    from malspark.memory.attck_loader import domain_of
+
+    wanted = (domain or "").strip().lower() or None
+    # Over-fetch when a domain filter is on: the ranking is domain-blind, so
+    # asking for k and then filtering would routinely return fewer than k.
+    results = index.search(text, top_k=k * 4 if wanted else k)
+    candidates: list[dict[str, Any]] = []
+    for result in results:
+        tid = result.technique.technique_id
+        owner = domain_of(tid)
+        if wanted and owner != wanted:
+            continue
+        candidates.append(
+            {
+                "technique_id": tid,
+                "name": result.technique.name,
+                "domain": owner,
+                "score": round(float(result.score), 4),
+                "score_gate": round(float(index.validate_and_score(tid, text)), 4),
+            }
+        )
+        if len(candidates) >= k:
+            break
+    return {"candidates": candidates}
+
+
+def attck_lookup(technique_id: str) -> dict[str, Any]:
+    """One technique's catalogue entry, and whether it exists at all.
+
+    Answered from the vendored technique table, which carries the name, the
+    tactics, the domain and the platforms for every id in the catalogue. A
+    dictionary question costs a file read: the fifty-megabyte STIX bundle is
+    what ``resolve_technique`` ranks over, and nothing else here loads it.
+    """
+    from malspark.memory.attck_loader import (
+        domain_of,
+        platforms_for,
+        retired_in,
+        retired_reason,
+        revoked_by,
+        technique_entry,
+        valid_ids,
+    )
+
+    tid = (technique_id or "").strip().upper()
+    if not tid:
+        return {"valid": False, "technique_id": "", "reason": "no technique id given"}
+    technique = technique_entry(tid)
+    out: dict[str, Any] = {
+        "valid": tid in valid_ids(),
+        "technique_id": tid,
+        "name": technique.name if technique else "",
+        "domain": (technique.domain if technique else None) or domain_of(tid),
+        # Through ``platforms_for`` rather than off the row, so this and
+        # ``attck_scope`` answer the same thing for a valid id the table does
+        # not carry — a checkout whose id catalogue is newer than its table.
+        "platforms": list(platforms_for(tid)),
+        "tactics": list(technique.tactics) if technique else [],
+        # The form the bundle's own external reference uses, for every one of
+        # the catalogued ids, so a stored report's link does not change shape.
+        "url": f"https://attack.mitre.org/techniques/{tid.replace('.', '/')}",
+    }
+    if technique is None:
+        retired = retired_in(tid)
+        successor = revoked_by(tid)
+        out["reason"] = retired_reason(tid) or "the ATT&CK catalogue has no entry for this id"
+        if retired:
+            out["retired_in"] = retired
+        if successor:
+            out["revoked_by"] = successor
+    return out
+
+
+def attck_retired_reason(technique_id: str) -> str | None:
+    """What happened to a retired id (``attck_loader.retired_reason``); ``None`` otherwise."""
+    from malspark.memory.attck_loader import retired_reason
+
+    return retired_reason(technique_id)
+
+
+def attck_retired_in(technique_id: str) -> str | None:
+    """The ATT&CK release that retired the id, from the vendored set; ``None`` otherwise."""
+    from malspark.memory.attck_loader import retired_in
+
+    return retired_in(technique_id)
+
+
+def attck_scope(technique_id: str) -> dict[str, Any]:
+    """The domain and platforms the vendored catalogue gives a technique.
+
+    Answered from the two vendored files alone — the id catalogue and the
+    technique table — so a validation turn that asks it loads no STIX bundle
+    and touches no network. ``attck_lookup`` is the fuller answer, with the
+    name, the tactics and the retirement, and it costs no more than this one.
+    """
+    from malspark.memory.attck_loader import domain_of, platforms_for
+
+    tid = (technique_id or "").strip().upper()
+    return {"technique_id": tid, "domain": domain_of(tid), "platforms": list(platforms_for(tid))}
+
+
+def attck_validate(ids: list[str]) -> dict[str, Any]:
+    """Which of the given ids are not real techniques, and what was probably meant.
+
+    Only the invalid ones come back. A validator that echoed every id would
+    make the caller diff two lists to find the one that matters.
+
+    Both the check and the suggestions come out of the vendored id universe,
+    which costs a file read. Nothing here loads a STIX bundle, so this is
+    cheap enough to call inside an analyst's own loop.
+    """
+    from malspark.memory.attck_loader import retired_in, retired_reason, revoked_by, valid_ids
+
+    known = valid_ids()
+    unknown = [t for t in (str(raw).strip().upper() for raw in ids or []) if t and t not in known]
+    if not unknown:
+        return {"invalid": [], "checked": len(ids or [])}
+    invalid: list[dict[str, Any]] = []
+    for tid in unknown:
+        row: dict[str, Any] = {"id": tid, "suggestions": []}
+        # An id a previous catalogue had is retired, not invented; the release
+        # that retired it is the fact a reader of an older report needs.
+        retired = retired_in(tid)
+        if retired:
+            row["retired_in"] = retired
+        # What happened to it, as every surface says it, and what replaced it
+        # where the bundle names a replacement.
+        reason = retired_reason(tid)
+        if reason:
+            row["reason"] = reason
+        successor = revoked_by(tid)
+        if successor:
+            row["revoked_by"] = successor
+        # The parent of a bogus sub-technique is the single most likely intent,
+        # and it is a string operation rather than a search — a suggestion that
+        # cost an embedding model would be worse than no suggestion.
+        parent = tid.split(".")[0]
+        if parent != tid and parent in known:
+            row["suggestions"].append(parent)
+        # Then the parent's real sub-techniques, which is where an id like
+        # ``T1055.999`` was reaching for.
+        row["suggestions"].extend(
+            sorted(
+                other
+                for other in known
+                if other.startswith(f"{parent}.") and other not in row["suggestions"]
+            )[:3]
+        )
+        if not known:
+            row["reason"] = "the ATT&CK catalogue is unavailable"
+        invalid.append(row)
+    return {"invalid": invalid, "checked": len(ids or [])}
+
+
+# ---------------------------------------------------------------------------
+# API behaviour
+# ---------------------------------------------------------------------------
+
+
+# How a name the caller resolved from a stored value, rather than read in the
+# import table, is said wherever the answer and the report name it.
+RESOLVED_AT_RUNTIME = "resolved at runtime from hashes"
+
+
+def api_capability(
+    api_names: list[str],
+    behaviour_map: str = DEFAULT_API_BEHAVIOUR_MAP,
+    attck_map: str = DEFAULT_API_ATTCK_MAP,
+    platform: str = "windows",
+    resolved_names: list[str] | None = None,
+) -> dict[str, Any]:
+    """What each named API does, and which techniques the catalogue associates it with.
+
+    ``platform`` picks the vocabulary: ``windows`` for a PE's imports,
+    ``linux`` for an ELF's dynamic symbols. The two overlap by name —
+    ``connect``, ``send``, ``system`` are in both — so asking the wrong one
+    gives a libc symbol a Win32 category, and a platform the catalogue has no
+    block for answers empty rows and a ``reason`` rather than the other
+    platform's answers.
+
+    A reference lookup, not an observation: the catalogue lists ``BitBlt``
+    and ``CreateCompatibleDC`` under screen capture, and every GUI program
+    imports them. What comes back is an association a reader may weigh; it
+    is never counted as a rule match or a source.
+
+    The whole set is matched once, so a rule fires on the set and not on the
+    name a row hangs under. Almost every rule needs two or more names; a rule
+    whose one name *is* the act sets ``min_apis`` to one. An API the table has
+    never heard of gets empty lists, not a guess.
+
+    Read every measured number in the one direction it was measured in: it says
+    how often this *rule* fires on software that is not a sample. None of them
+    is a probability that *this* sample is benign, and nothing here is evidence
+    about this sample at all. None of the corpora carry technique-level ground
+    truth either, so what a malware number says is that a combination separates
+    binaries already known to be bad from binaries already known to be good,
+    never that this sample performs the technique. An association nobody
+    measured carries no ``measured`` key rather than a zero — an absent key is
+    "not measured" and never "never fires".
+
+    ``catalog_flags`` carries the catalogue's own labels (``suspicious`` for a
+    category it tiers high or medium, where its ``flags_with`` combination is
+    in the set too), named as the catalogue's. A bare ``suspicious: true``
+    would be a verdict, and the tools state facts. ``corroborated_by`` lists
+    the APIs that would give weight to a row whose category means nothing on
+    its own (drawing, a message queue).
+
+    ``resolved_names`` are names got by resolving the file's stored values
+    (``resolve_api_hashes``), not read in the import table: matched with the
+    rest and marked, ``obtained`` on the row and ``resolved_at_runtime_from_hashes``
+    in the answer, since a function resolved at runtime is not an import.
+    """
+    from malspark.analysis.api_capability_db import (
+        canonical_name,
+        load_api_attck_map,
+        load_api_behaviour_db,
+    )
+
+    names = [str(n).strip() for n in (api_names or []) if str(n).strip()]
+    resolved = [str(n).strip() for n in (resolved_names or []) if str(n).strip()]
+    names = list(dict.fromkeys([*names, *resolved]))
+    resolved_set = set(resolved)
+    wanted = str(platform or "").strip().lower() or "windows"
+    behaviours = load_api_behaviour_db(str(resolve_data(behaviour_map)), wanted)
+    techniques = load_api_attck_map(str(resolve_data(attck_map)), wanted)
+    cleared = techniques.match(set(names)) if techniques is not None and names else []
+    rows: list[dict[str, Any]] = []
+    # What every rate in this answer is a share of. Collected once: the same
+    # corpus sentence repeated under three hundred imports is three hundred
+    # copies of one fact, and the answer travels to a model with a budget.
+    corpora: dict[str, str] = {}
+    behaviour_rates: dict[str, dict[str, Any]] = {}
+    for name in names:
+        # The label is decided against the whole set, not against the one
+        # name: a category the catalogue gates says nothing until what would
+        # give it weight is there too. The accessor does that, so a reader
+        # that asks it about one name alone gets the same answer.
+        category, suspicious = behaviours.classify(name, names) if behaviours else (None, False)
+        cited: list[dict[str, Any]] = []
+        for rule, matched in cleared:
+            # Compared by the A/W-folded key, so an import table holding both
+            # spellings has both rows cite the rule, in every process alike.
+            if canonical_name(name) not in {canonical_name(m) for m in matched}:
+                continue
+            row_cited: dict[str, Any] = {
+                "technique_id": rule.technique_id,
+                "name": rule.name,
+                "matched": list(matched),
+                "min_apis": rule.min_apis,
+            }
+            if rule.rule:
+                row_cited["rule"] = rule.rule
+            if rule.ordinary_use:
+                row_cited["ordinary_use"] = rule.ordinary_use
+            if rule.measured is not None:
+                row_cited["measured"] = rule.measured.rates()
+                corpora.update(rule.measured.corpora())
+            cited.append(row_cited)
+        row: dict[str, Any] = {
+            "api": name,
+            "category": category,
+            "behaviours": [category] if category else [],
+            "techniques": cited,
+            "catalog_flags": ["suspicious"] if suspicious else [],
+        }
+        if name in resolved_set:
+            row["obtained"] = RESOLVED_AT_RUNTIME
+        corroborators = behaviours.corroborated_by(category) if behaviours else ()
+        if corroborators:
+            row["corroborated_by"] = list(corroborators)
+        gate = behaviours.flags_with(category) if behaviours else ()
+        if gate and not suspicious:
+            row["flagged_with"] = list(gate)
+        rate = behaviours.measured_for(category) if behaviours else None
+        if category and rate is not None:
+            behaviour_rates[category] = rate.rates()
+            corpora.update(rate.corpora())
+        rows.append(row)
+    out: dict[str, Any] = {"capabilities": rows, "platform": wanted}
+    if resolved:
+        out["resolved_at_runtime_from_hashes"] = list(dict.fromkeys(resolved))
+    if behaviour_rates:
+        out["behaviour_rates"] = behaviour_rates
+    if corpora:
+        out["corpora"] = corpora
+    if behaviours is None:
+        out["reason"] = f"the API behaviour catalog at {behaviour_map} has no {wanted} categories"
+    return out
+
+
+def lolbin_lookup(command_lines: list[str]) -> dict[str, Any]:
+    """Command lines that match a known signed-proxy-execution shape.
+
+    The table's rule is that presence is not enough — ``rundll32`` runs on
+    every Windows box every minute — so a hit needs a remote URL, a scriptlet,
+    an ordinal export or a payload under a user-writable path. The hit says
+    which binary and which technique; there is no confidence number, because
+    the match either holds or it does not.
+    """
+    from malspark.analysis.lolbin_layer import classify_lolbin
+
+    hits: list[dict[str, Any]] = []
+    for raw in command_lines or []:
+        command = str(raw)
+        if not command.strip():
+            continue
+        classified = classify_lolbin(command)
+        if classified is None:
+            continue
+        technique_id, binary = classified
+        hits.append({"binary": binary, "technique_id": technique_id, "pattern": command})
+    return {"hits": hits, "checked": len(command_lines or [])}
+
+
+# ---------------------------------------------------------------------------
+# Retrieval over prior cases
+# ---------------------------------------------------------------------------
+
+
+def family_lookup(
+    query: str, k: int = 5, catalog: str = DEFAULT_FAMILY_CATALOG, min_score: float = 0.0
+) -> dict[str, Any]:
+    """Families whose fingerprint description is closest to the query text.
+
+    Needs the embedding model. Without it, or without a catalog, this answers
+    an empty list and a ``reason`` — a family attribution that silently becomes
+    "no families matched" is worse than one that says it could not look.
+    """
+    from malspark.memory.family_fingerprint_index import load_family_index
+
+    path = str(resolve_data(catalog))
+    try:
+        index = load_family_index(path)
+    except Exception as exc:  # noqa: BLE001
+        return {"families": [], "reason": f"the family catalog could not be read: {exc}"}
+    if index is None:
+        return {"families": [], "reason": f"no family fingerprint catalog at {path}"}
+    try:
+        candidates = index.search(query, top_k=max(0, int(k)), min_score=float(min_score))
+    except Exception as exc:  # noqa: BLE001 — the embedding backend is optional
+        return {"families": [], "reason": f"the embedding backend is unavailable: {exc}"}
+    return {
+        "families": [
+            {
+                "family": c.family,
+                "score": round(float(c.score), 4),
+                "malware_category": c.malware_category,
+                "sample_count": c.sample_count,
+            }
+            for c in candidates
+        ]
+    }
+
+
+def similar_cases(
+    query: str,
+    k: int = 5,
+    corpus: str = DEFAULT_CASE_CORPUS,
+    min_score: float = 0.0,
+    exclude_sample_id: str = "",
+) -> dict[str, Any]:
+    """Prior cases whose behavioural summary is closest to the query text.
+
+    Returns both the neighbours and the techniques they agree on: ``support``
+    is how many of the retrieved cases exhibited the technique, which is the
+    number that says whether a candidate is a pattern or one case's quirk.
+    ``exclude_sample_id`` is the sample's own hash: its own earlier case is not
+    a prior one.
+    """
+    from malspark.memory.attck_case_index import load_attck_case_index
+
+    path = str(resolve_data(corpus))
+    try:
+        index = load_attck_case_index(path)
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "cases": [],
+            "techniques": [],
+            "reason": f"the case corpus could not be read: {exc}",
+        }
+    if index is None:
+        return {"cases": [], "techniques": [], "reason": f"no ATT&CK case corpus at {path}"}
+    top_k = max(0, int(k))
+    try:
+        own = (exclude_sample_id or "").strip()
+        neighbours = index.search(
+            query, top_k=top_k, min_score=float(min_score), exclude_sample_id=own
+        )
+        techniques = index.recommend_techniques(
+            query,
+            top_k=top_k,
+            min_score=float(min_score),
+            max_techniques=top_k,
+            exclude_sample_id=own,
+        )
+    except Exception as exc:  # noqa: BLE001 — the embedding backend is optional
+        return {
+            "cases": [],
+            "techniques": [],
+            "reason": f"the embedding backend is unavailable: {exc}",
+        }
+    return {
+        "cases": [
+            {
+                "sample_id": n.sample_id,
+                "score": round(float(n.score), 4),
+                "technique_ids": list(n.technique_ids),
+                "malware_category": n.malware_category,
+            }
+            for n in neighbours
+        ],
+        "techniques": [
+            {
+                "technique_id": c.technique_id,
+                "support": c.support,
+                "score": round(float(c.score), 4),
+            }
+            for c in techniques
+        ],
+    }
+
+
+# The answer's ``reason`` when the configured memory backend keeps no
+# function-hash store; it becomes the ledger entry's error.
+NO_FUNCTION_HASH_STORE = "the configured memory backend keeps no function hashes"
+
+
+def function_matches(
+    func_hashes: list[str],
+    store: FunctionHashIndex | None,
+    exclude_sample_id: str = "",
+    owner: str | None = None,
+) -> dict[str, Any]:
+    """Stored samples that share a function hash with this one.
+
+    Exact-match attribution: two binaries sharing a compiled function body is
+    a much stronger signal than two binaries scoring alike on prose. ``store``
+    is the configured memory backend's function-hash store
+    (``malspark.memory.store_factory.build_function_hash_store``); ``None`` is a
+    backend that keeps none, and the answer says so instead of raising, as it
+    does for a store that cannot be reached. Only ``owner``'s samples are
+    matched, the unscoped ones for ``None`` (``long_term_memory.recall``).
+    """
+    wanted = [str(h).strip() for h in (func_hashes or []) if str(h).strip()]
+    if not wanted:
+        return {"matches": []}
+    if store is None:
+        return {"matches": [], "reason": NO_FUNCTION_HASH_STORE}
+    try:
+        from malspark.memory.long_term_memory import match_functions
+
+        found = match_functions(
+            store, wanted, exclude_sample_id=exclude_sample_id or None, owner=owner
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"matches": [], "reason": f"the function-hash store is unavailable: {exc}"}
+    return {
+        "matches": [
+            {
+                "func_hash": m.func_hash,
+                "family": m.family,
+                "sample_id": m.sample_id,
+                "func_name": m.func_name,
+            }
+            for m in found
+        ]
+    }

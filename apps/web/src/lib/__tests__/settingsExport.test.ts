@@ -16,7 +16,7 @@ afterEach(() => {
 
 describe("the keys an export left out", () => {
   it("are read from the document", () => {
-    const doc = { format: "maljan-settings/2", values: {}, unreadable: { "core.k": REASON } };
+    const doc = { format: "malspark-settings/2", values: {}, unreadable: { "core.k": REASON } };
     expect(exportUnreadable(JSON.stringify(doc))).toEqual({ "core.k": REASON });
     expect(exportUnreadable(JSON.stringify({ values: {} }))).toEqual({});
     expect(exportUnreadable("not json")).toEqual({});
@@ -34,7 +34,7 @@ describe("the keys an export left out", () => {
   });
 
   it("come back from the export call", async () => {
-    const doc = { format: "maljan-settings/2", values: {}, unreadable: { "core.k": REASON } };
+    const doc = { format: "malspark-settings/2", values: {}, unreadable: { "core.k": REASON } };
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(doc))));
     const created = vi.fn(() => "blob:x");
     vi.stubGlobal("URL", { ...URL, createObjectURL: created, revokeObjectURL: vi.fn() });

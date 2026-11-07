@@ -10,7 +10,7 @@ follows the lookup (``mediator_system_prompt``).
 
 from __future__ import annotations
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     MEDIATOR_LOOKUP_ONCE,
     MEDIATOR_LOOKUP_ONCE_BY_HASH,
 )

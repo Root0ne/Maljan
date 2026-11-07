@@ -25,8 +25,8 @@ from pathlib import Path
 
 import pytest
 
-from maljan.pipeline import events as ev
-from maljan.pipeline.events import safe_finding_value, scrub, scrub_keeping_layout
+from malspark.pipeline import events as ev
+from malspark.pipeline.events import safe_finding_value, scrub, scrub_keeping_layout
 from tests.credential_shapes import password
 from tests.unit.pipeline.test_live_event_schema import _every_key_shape
 

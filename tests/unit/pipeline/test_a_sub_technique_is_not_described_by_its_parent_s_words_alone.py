@@ -14,14 +14,14 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     claim_does_not_describe_violation,
     sibling_named_instead,
     validate_isr,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.tools import knowledge
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.tools import knowledge
 
 PE = {"platform": "windows", "file_type": "pe"}
 SIBLING_SENTENCE = "The loader persists by registering its own accessibility features handler."

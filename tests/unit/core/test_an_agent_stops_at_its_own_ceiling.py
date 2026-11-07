@@ -17,17 +17,17 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import ValidationError
 
-from maljan.analysis.run_summary import usage_totals
-from maljan.core.config import AgentLLMConfig, Settings
-from maljan.core.spend import (
+from malspark.analysis.run_summary import usage_totals
+from malspark.core.config import AgentLLMConfig, Settings
+from malspark.core.spend import (
     AGENT_CEILING_RECORD,
     AgentCeilingStop,
     SpendCeilingStop,
     SpendMeter,
 )
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.agent_ceiling import AgentCeiling, attach_agent_ceiling, carry_agent_ceiling
-from maljan.llm.fallback import FallbackChatModel
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.agent_ceiling import AgentCeiling, attach_agent_ceiling, carry_agent_ceiling
+from malspark.llm.fallback import FallbackChatModel
 
 # One USD per million tokens either way: a call of 10 input and 2 output
 # tokens costs 0.000012 USD.
@@ -236,7 +236,7 @@ class TestTheModels:
 
 class TestWhatCounts:
     def test_a_billed_failed_attempt_counts_toward_the_agent(self) -> None:
-        from maljan.llm.transient import attach_retry_recorder, recorder_of
+        from malspark.llm.transient import attach_retry_recorder, recorder_of
 
         ledger, _ = _ledger(mediator=(0.00001, None))
         model = _Model()
@@ -261,7 +261,7 @@ class TestWhatCounts:
     def test_an_answer_ended_while_it_streamed_counts_its_estimate(self) -> None:
         from langchain_core.outputs import LLMResult
 
-        from maljan.llm.stream_watch import ESTIMATED_USAGE_KEY
+        from malspark.llm.stream_watch import ESTIMATED_USAGE_KEY
 
         ledger, _ = _ledger(static=(0.00001, None))
         ceiling = AgentCeiling(ledger, "static", "priced-model")
@@ -288,7 +288,7 @@ class TestACeilingOnlyEntry:
             AgentLLMConfig(max_spend_usd=1.0, temperature=0.3)
 
     def test_the_agent_s_model_is_built_as_with_no_entry(self) -> None:
-        from maljan.llm.registry import LLMProviderRegistry
+        from malspark.llm.registry import LLMProviderRegistry
 
         plain = Settings(_env_file=None, llm={"provider": "ollama"})
         bounded = Settings(
@@ -349,7 +349,7 @@ class TestTheDump:
 
 class TestTheSummary:
     def test_each_agent_ceiling_is_a_line(self) -> None:
-        from maljan.analysis.run_summary import spend_lines
+        from malspark.analysis.run_summary import spend_lines
 
         meter = SpendMeter(None, _PRICES, table={})
         meter.set_agent_ceiling("static", 0.01)

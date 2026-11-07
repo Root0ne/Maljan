@@ -34,11 +34,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.core.config import Settings
-from maljan.core.token_ledger import turn_usage
-from maljan.llm.anthropic_history import _without_markers
-from maljan.llm.anthropic_provider import AnthropicProvider
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.core.config import Settings
+from malspark.core.token_ledger import turn_usage
+from malspark.llm.anthropic_history import _without_markers
+from malspark.llm.anthropic_provider import AnthropicProvider
 
 from .anthropic_wire import MODEL, Wire, install, message
 
@@ -232,7 +232,7 @@ class TestTheAnalystsLoop:
 
 class TestTheJudgeAndTheComposer:
     def test_the_judge_s_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.llm.registry import LLMProviderRegistry
+        from malspark.llm.registry import LLMProviderRegistry
 
         wire = Wire(
             lambda _body: message([{"type": "text", "text": "{}"}], stop="end_turn", usage=USAGE)

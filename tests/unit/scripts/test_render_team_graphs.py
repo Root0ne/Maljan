@@ -19,7 +19,7 @@ from render_team_graphs import TEAMS, asset_path, render  # noqa: E402
 
 
 def _profiles() -> dict:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     return Settings(_env_file=None).agents.profiles
 

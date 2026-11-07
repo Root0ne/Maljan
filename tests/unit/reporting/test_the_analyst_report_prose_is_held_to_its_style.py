@@ -23,7 +23,7 @@ from unittest.mock import patch
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     CHANNEL_BINDING_CODE,
     KEPT_WITH_A_FINDING,
     MARKED_IN_PLACE,
@@ -33,9 +33,9 @@ from maljan.pipeline.validation import (
     VALUE_NOT_CARRIED_CODE,
     EntryTexts,
 )
-from maljan.reporting import composer as composer_module
-from maljan.reporting.composer import _EXAMPLES, _INSTRUCTIONS, ReportComposer
-from maljan.reporting.composer_pro import (
+from malspark.reporting import composer as composer_module
+from malspark.reporting.composer import _EXAMPLES, _INSTRUCTIONS, ReportComposer
+from malspark.reporting.composer_pro import (
     MAX_SUMMARY_BULLETS,
     channel_binding_violations,
     conclusion_shape_violations,
@@ -47,7 +47,7 @@ from maljan.reporting.composer_pro import (
     summary_shape_violations,
     summary_value_violations,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     C2Channel,
     CapabilityBullet,
     CapabilityCell,
@@ -70,11 +70,11 @@ from maljan.reporting.models import (
     TechniqueProcedure,
     TTPMapping,
 )
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.layout import ANALYST, BUNDLE
-from maljan.reporting.renderers.markdown import MarkdownRenderer, confidence_word
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.layout import ANALYST, BUNDLE
+from malspark.reporting.renderers.markdown import MarkdownRenderer, confidence_word
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _report(**over: Any) -> MalwareReport:
@@ -929,7 +929,7 @@ class TestADroppedValueIsAskedAbout:
         assert procedure_value_violations(kept, firsts) == []
 
     def test_the_finding_is_kept_not_marked_and_asked_on_a_parsed_answer(self) -> None:
-        from maljan.reporting.composer import ASKED_ON_A_PARSED_ANSWER
+        from malspark.reporting.composer import ASKED_ON_A_PARSED_ANSWER
 
         assert VALUE_NOT_CARRIED_CODE in KEPT_WITH_A_FINDING
         assert VALUE_NOT_CARRIED_CODE not in MARKED_IN_PLACE
@@ -969,12 +969,12 @@ class TestAProcedureIsHeldToItsOwnBehaviour:
     """T-495: a procedure is asked for its technique's behaviour, not the claim's first words."""
 
     def _firsts(self, *cells: CapabilityCell) -> dict[str, Any]:
-        from maljan.reporting.composer_pro import first_claim_sentences
+        from malspark.reporting.composer_pro import first_claim_sentences
 
         return first_claim_sentences(_report(capability_matrix=list(cells), ttp_mappings=[]))
 
     def _unit(self, tid: str, name: str, claim: str, *published: str) -> str:
-        from maljan.reporting.composer_pro import behaviour_sentence
+        from malspark.reporting.composer_pro import behaviour_sentence
 
         return behaviour_sentence(tid, name, claim, {tid, *published})
 
@@ -1120,7 +1120,7 @@ class TestAProcedureIsHeldToItsOwnBehaviour:
 
     # A4: the dotless twin of a section name, and a lone one-byte key.
     def test_a_section_s_dotless_twin_and_a_lone_byte_key(self) -> None:
-        from maljan.reporting.composer_pro import identifying_values
+        from malspark.reporting.composer_pro import identifying_values
 
         assert identifying_values([".UPX0", "UPX0", "0x3000"]) == ["0x3000"]
         assert identifying_values(["0x5a"]) == ["0x5a"]
@@ -1163,7 +1163,7 @@ class TestThePlatformsOwnTextExemptsNothing:
         assert comp._shown["introduction"] == ""
 
     def test_the_exemption_is_the_tool_outputs_and_the_code(self) -> None:
-        from maljan.reporting.composer_pro import evidence_text
+        from malspark.reporting.composer_pro import evidence_text
 
         bundle = {
             "claims": [{"claim": "the ledger"}],
@@ -1183,7 +1183,7 @@ class TestThePlatformsOwnTextExemptsNothing:
 
 class TestWhatCountsAsAValue:
     def test_the_shapes_that_are_always_values(self) -> None:
-        from maljan.reporting.composer_pro import ValueReader, carried_values
+        from malspark.reporting.composer_pro import ValueReader, carried_values
 
         text = (
             "It injects into explorer.exe, writes HKCU\\Software\\Qz\\run, mails "
@@ -1201,14 +1201,14 @@ class TestWhatCountsAsAValue:
             assert value in found, value
 
     def test_the_attributed_family_is_a_value(self) -> None:
-        from maljan.reporting.composer_pro import ValueReader, carried_values
+        from malspark.reporting.composer_pro import ValueReader, carried_values
 
         reader = ValueReader(family="IcedID")
         assert "IcedID" in carried_values("Some engines label the file IcedID.", reader)
         assert carried_values("Some engines label the file.", reader) == []
 
     def test_no_attack_id_generic_token_or_ordinary_quoted_word(self) -> None:
-        from maljan.reporting.composer_pro import ValueReader, carried_values
+        from malspark.reporting.composer_pro import ValueReader, carried_values
 
         reader = ValueReader()
         assert carried_values("It maps to T1055 and TA0005.", reader) == []
@@ -1217,7 +1217,7 @@ class TestWhatCountsAsAValue:
         assert carried_values("It calls it 'sample'.", reader) == []
 
     def test_an_identifier_counts_only_where_the_run_s_entries_hold_it(self) -> None:
-        from maljan.reporting.composer_pro import ValueReader, carried_values
+        from malspark.reporting.composer_pro import ValueReader, carried_values
 
         reader = ValueReader(sample="createmutexw qz_mutex_771")
         found = carried_values("It calls CreateMutexW for QZ_MUTEX_771 via GetProcAddress.", reader)
@@ -1239,12 +1239,12 @@ class TestWhatCountsAsAValue:
         assert "explorer.exe" in summary
 
     def test_a_defanged_value_is_carried(self) -> None:
-        from maljan.reporting.composer_pro import values_not_carried
+        from malspark.reporting.composer_pro import values_not_carried
 
         assert values_not_carried(["ops@drop.example"], "mail ops[@]drop[.]example") == []
 
     def test_a_sentence_s_stop_is_no_part_of_a_key_path_or_file_name(self) -> None:
-        from maljan.reporting.composer_pro import ValueReader, carried_values, values_not_carried
+        from malspark.reporting.composer_pro import ValueReader, carried_values, values_not_carried
 
         text = (
             "It writes HKCU\\Software\\Qz\\Run. It drops C:\\Temp\\a.bin; then b.dll, then c.exe:"
@@ -1257,7 +1257,7 @@ class TestWhatCountsAsAValue:
         assert values_not_carried(found, printed) == []
 
     def test_a_quoted_word_the_sample_holds_is_a_value(self) -> None:
-        from maljan.reporting.composer_pro import ValueReader, carried_values
+        from malspark.reporting.composer_pro import ValueReader, carried_values
 
         text = "It decrypts its strings with the key 'secretkey'."
         assert carried_values(text, ValueReader(sample="key: secretkey")) == ["secretkey"]

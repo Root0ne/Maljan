@@ -76,7 +76,7 @@ def _probe(client: TestClient, entry: dict) -> dict:
             {
                 "enabled": True,
                 "transport": "stdio",
-                "command": "maljan-no-such-binary-uiaudit",
+                "command": "malspark-no-such-binary-uiaudit",
             },
         ),
         (

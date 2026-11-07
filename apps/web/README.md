@@ -1,6 +1,6 @@
-# Maljan web UI
+# Malspark web UI
 
-Next.js App Router frontend for the Maljan analysis platform.
+Next.js App Router frontend for the Malspark analysis platform.
 
 This file used to be the untouched `create-next-app` boilerplate, which told you
 to run `npm run dev` and promised "the page auto-updates as you edit". That is

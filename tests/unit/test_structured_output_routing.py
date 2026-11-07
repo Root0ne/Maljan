@@ -30,7 +30,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.llm.registry import structured_output_supported
+from malspark.llm.registry import structured_output_supported
 
 
 def _config(provider: str, base_url: str | None) -> SimpleNamespace:

@@ -1,4 +1,4 @@
-"""``maljan.tools.pcap`` is the whole-capture view, and it never raises.
+"""``malspark.tools.pcap`` is the whole-capture view, and it never raises.
 
 The summary itself belongs to ``analysis/pcap_summary`` and is tested there.
 What is this module's own is the tool contract: a missing file, an unreadable
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maljan.tools import pcap
+from malspark.tools import pcap
 
 
 def test_a_missing_capture_is_an_error_and_not_an_exception() -> None:

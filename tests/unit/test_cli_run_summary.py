@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.cli import _print_run_summary_inline
+from malspark.cli import _print_run_summary_inline
 
 
 def _summary(corroboration: dict) -> dict:
@@ -45,7 +45,7 @@ class TestCorroborationInTheTerminal:
 
 class TestTheLegacySummaryNamesBothBundles:
     def test_the_exported_count_and_the_judge_s_are_both_written(self, tmp_path) -> None:
-        from maljan.cli import _write_markdown_report
+        from malspark.cli import _write_markdown_report
 
         summary = {
             **_summary({}),

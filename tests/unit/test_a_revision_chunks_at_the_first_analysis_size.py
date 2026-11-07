@@ -11,8 +11,8 @@ Every value is synthetic.
 
 from __future__ import annotations
 
-from maljan.loaders.binary_chunker import head_room
-from maljan.pipeline.nodes import _build_revision_context
+from malspark.loaders.binary_chunker import head_room
+from malspark.pipeline.nodes import _build_revision_context
 from tests.unit._chunking_doubles import _container, _cuts, _room, _rows
 
 

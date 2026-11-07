@@ -25,17 +25,17 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.callees_question import CalleesFound
-from maljan.agents.function_callees import named_unread
-from maljan.agents.function_map import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.callees_question import CalleesFound
+from malspark.agents.function_callees import named_unread
+from malspark.agents.function_map import (
     NAMED_IN_CLAIMS,
     NAMED_UNREAD_HEAD,
     NAMED_UNREAD_SHOWN,
     build_function_map,
     function_map_block,
 )
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 from tests.linear_cost import assert_scales
 
 BASE = 0x2470000
@@ -249,7 +249,7 @@ def test_at_a_tight_room_the_index_line_keeps_half_of_what_it_had_before() -> No
 def test_a_failure_reading_the_named_functions_leaves_the_rest_of_the_map(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.agents import function_callees
+    from malspark.agents import function_callees
 
     def _raise(*_a: Any, **_k: Any) -> Any:
         raise RuntimeError("boom")
@@ -320,7 +320,7 @@ def _decompiler(calls: list[dict[str, Any]]) -> StructuredTool:
         description="Decompile one function.",
         args_schema=_Args,
         infer_schema=False,
-        metadata={"maljan_server": "ghidra"},
+        metadata={"malspark_server": "ghidra"},
     )
 
 
@@ -375,7 +375,7 @@ class _Analyst(BaseAnalyst):
 
 @pytest.fixture(autouse=True)
 def _no_suggestions(monkeypatch: pytest.MonkeyPatch) -> None:
-    from maljan.tools import knowledge
+    from malspark.tools import knowledge
 
     monkeypatch.setattr(knowledge, "resolve_technique", lambda *a, **k: {"candidates": []})
 
@@ -384,8 +384,8 @@ class _Container:
     """The job's container as the loop reads it: the default settings and the budget they make."""
 
     def __init__(self, window_tokens: int) -> None:
-        from maljan.core.config import Settings
-        from maljan.llm.context_window import ContextBudget, WindowFact, generation_reserve
+        from malspark.core.config import Settings
+        from malspark.llm.context_window import ContextBudget, WindowFact, generation_reserve
 
         self.config = Settings()
         # The default settings' own reply reserve, over a window measured small.
@@ -412,7 +412,7 @@ def _run_loop(window_tokens: int) -> tuple[list[dict[str, Any]], str]:
     analyst._container = _Container(window_tokens)
     # The question about the unread callees after the loop (T-558) is tested
     # apart; here the loop's own calls are counted.
-    with patch("maljan.agents.base_agent.callees_to_read", return_value=CalleesFound()):
+    with patch("malspark.agents.base_agent.callees_to_read", return_value=CalleesFound()):
         analyst.safe_analyze_isr("the task")
     last = [str(m.content) for m in model.seen[-1] if isinstance(m, ToolMessage)][-1]
     return calls, last

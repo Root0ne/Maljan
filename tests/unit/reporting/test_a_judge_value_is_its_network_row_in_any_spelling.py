@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     FileHashes,
     JudgeIndicator,
     MalwareReport,
@@ -20,7 +20,7 @@ from maljan.reporting.models import (
     NetworkURL,
     SampleIdentity,
 )
-from maljan.reporting.renderers.stix_renderer import judge_value_answer, one_reading
+from malspark.reporting.renderers.stix_renderer import judge_value_answer, one_reading
 
 
 def _report(kind: str, row: str, judged: str) -> MalwareReport:
@@ -62,7 +62,7 @@ def test_the_judge_s_spelling_finds_the_sandbox_s_row(kind: str, row: str, judge
 
 
 def test_a_url_key_folds_its_scheme_and_host_and_keeps_its_path() -> None:
-    from maljan.reporting.ledger_projection import value_key
+    from malspark.reporting.ledger_projection import value_key
 
     assert (
         value_key("url", "HTTP://Evil-C2.TOP./Gate.PHP?Id=A") == "http://evil-c2.top/Gate.PHP?Id=A"

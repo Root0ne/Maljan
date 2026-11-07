@@ -19,23 +19,23 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     VERDICT_FALLBACK_CODE,
     JudgeAgent,
     JudgeVerdict,
     stated_indicators_in,
 )
-from maljan.core.config import get_settings
-from maljan.pipeline.outcome import decide_from_bundle, verdict_reading
-from maljan.reporting.models import FileHashes, JudgeIndicator, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.core.config import get_settings
+from malspark.pipeline.outcome import decide_from_bundle, verdict_reading
+from malspark.reporting.models import FileHashes, JudgeIndicator, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.stix_renderer import (
     emulation_from_ledger,
     exported_indicator_values,
     judge_indicator_rows,
     publishes,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 C2_URL = "https://relay7.example.net/gate/"
 INVENTED = "https://nowhere-in-the-run.example.org/x/"
@@ -49,7 +49,7 @@ def _indicator(label: str, pattern: str) -> dict[str, Any]:
         "pattern": pattern,
         "pattern_type": "stix",
         "indicator_types": ["malicious-activity"],
-        "x_maljan_confidence": 0.9,
+        "x_malspark_confidence": 0.9,
     }
 
 
@@ -59,7 +59,7 @@ def _cut_answer(verdict: str = "Malware") -> str:
         {
             "type": "bundle",
             "id": "bundle--1",
-            "x_maljan_assessment": {"verdict": verdict, "confidence": 0.9},
+            "x_malspark_assessment": {"verdict": verdict, "confidence": 0.9},
             "objects": [
                 _indicator("indicator--1", f"[url:value = '{C2_URL}']"),
                 _indicator("indicator--2", f"[url:value = '{INVENTED}']"),
@@ -157,7 +157,7 @@ class TestTheIndicatorsAnAnswerWroteWhole:
             f"[url:value = '{C2_URL}']",
             f"[url:value = '{INVENTED}']",
         ]
-        assert found[0]["x_maljan_confidence"] == 0.9
+        assert found[0]["x_malspark_confidence"] == 0.9
 
     def test_one_the_cap_cut_is_not_read(self) -> None:
         text = _cut_answer()
@@ -198,7 +198,7 @@ class TestTheIndicatorsAnAnswerWroteWhole:
         text = json.dumps(
             {
                 "type": "bundle",
-                "x_maljan_assessment": {"verdict": "Malware", "rationale": inner},
+                "x_malspark_assessment": {"verdict": "Malware", "rationale": inner},
                 "objects": [{"type": "malware", "id": "malware--1", "name": "m"}],
             }
         )
@@ -209,7 +209,7 @@ class TestTheIndicatorsAnAnswerWroteWhole:
         text = json.dumps(
             {
                 "type": "bundle",
-                "x_maljan_assessment": {
+                "x_malspark_assessment": {
                     "verdict": "Malware",
                     "objects": [_indicator("indicator--8", "[url:value = 'https://a.example/']")],
                 },

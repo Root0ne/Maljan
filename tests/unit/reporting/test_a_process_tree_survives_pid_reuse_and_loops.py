@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from maljan.reporting.ledger_projection import _as_tree
-from maljan.reporting.models import ProcessNode
+from malspark.reporting.ledger_projection import _as_tree
+from malspark.reporting.models import ProcessNode
 
 
 def _flat(root: ProcessNode) -> list[int]:

@@ -22,14 +22,14 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.exceptions import SampleNotOpened
-from maljan.pipeline.events import describe_exception
-from maljan.providers.base import prepare_sample
-from maljan.providers.sample_open import SampleNotes
-from maljan.providers.server_guard import ServerGuard
-from maljan.providers.static.ghidra import provider as ghidra_provider
-from maljan.providers.static.ghidra.provider import GhidraStaticProvider
+from malspark.core.config import Settings
+from malspark.core.exceptions import SampleNotOpened
+from malspark.pipeline.events import describe_exception
+from malspark.providers.base import prepare_sample
+from malspark.providers.sample_open import SampleNotes
+from malspark.providers.server_guard import ServerGuard
+from malspark.providers.static.ghidra import provider as ghidra_provider
+from malspark.providers.static.ghidra.provider import GhidraStaticProvider
 
 URL = "http://ghidra.invalid"
 HELD = "/data/samples/.work/s.exe"
@@ -207,7 +207,7 @@ class TestTheLoadBeforeTheLoop:
     def test_a_job_cancelled_while_its_open_waits_sends_no_load(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.cancellation import Cancellation, JobCancelled, bound
+        from malspark.core.cancellation import Cancellation, JobCancelled, bound
 
         ghidra = _Ghidra()
         provider = _provider(monkeypatch, ghidra)
@@ -384,7 +384,7 @@ class TestTheTeardownClose:
 
 class TestGuardedVerbs:
     def test_get_and_post_are_the_wrapped_client_s_own_held(self) -> None:
-        from maljan.providers.server_guard import guarded_http
+        from malspark.providers.server_guard import guarded_http
 
         made: list[str] = []
 

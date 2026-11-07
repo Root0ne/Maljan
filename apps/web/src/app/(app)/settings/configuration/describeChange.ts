@@ -228,7 +228,7 @@ const SERVER_FIELDS = [
   "label",
   "agents",
   "call_timeout_seconds",
-  // The server's declaration (`maljan.core.tool_declarations`).
+  // The server's declaration (`malspark.core.tool_declarations`).
   "sample_open",
   "sample_mount",
   "work_dir",

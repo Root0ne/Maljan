@@ -29,12 +29,12 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis.function_hash_attribution import aggregate_matches
-from maljan.core.exceptions import MemoryStoreError
-from maljan.memory import embeddings
-from maljan.memory.function_hash_store import FunctionHashStore, FunctionMatch
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import (
+from malspark.analysis.function_hash_attribution import aggregate_matches
+from malspark.core.exceptions import MemoryStoreError
+from malspark.memory import embeddings
+from malspark.memory.function_hash_store import FunctionHashStore, FunctionMatch
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.memory.long_term_memory import (
     NO_MEMORY,
     StoredCase,
     family_key,
@@ -42,7 +42,7 @@ from maljan.memory.long_term_memory import (
     memory_owner_of,
     recall,
 )
-from maljan.memory.qdrant_store import BACKEND_KEY, OWNER_KEY, QdrantStore, _stable_id
+from malspark.memory.qdrant_store import BACKEND_KEY, OWNER_KEY, QdrantStore, _stable_id
 
 ALICE, BOB = "user-alice", "user-bob"
 TEXT = "ransomware encrypts files deletes shadow copies T1486 T1490"
@@ -275,8 +275,8 @@ def test_no_container_reads_nothing_not_the_unscoped_pool(
 
 
 def _container(owner: str | None, store: Any) -> Any:
-    from maljan.core.config import Settings
-    from maljan.core.container import ServiceContainer
+    from malspark.core.config import Settings
+    from malspark.core.container import ServiceContainer
 
     container = ServiceContainer(Settings(_env_file=None), mock=True, memory_owner=owner)
     container.get_memory_store = lambda: store  # type: ignore[method-assign]
@@ -322,7 +322,7 @@ def test_function_hashes_are_one_owner_s(model: None) -> None:
 
 
 def test_the_knowledge_tool_matches_the_owner_s_samples_only() -> None:
-    from maljan.tools import knowledge
+    from malspark.tools import knowledge
 
     index = FunctionHashStore(
         url="http://qdrant.test:6333", collection="fh", client=_local_client()
@@ -419,7 +419,7 @@ def _report(verdict: str, family: str | None, source: str | None = "judge") -> A
     ],
 )
 def test_the_report_node_files_only_the_published_family(report: Any, kept: bool) -> None:
-    from maljan.pipeline.nodes import _file_only_the_published_family
+    from malspark.pipeline.nodes import _file_only_the_published_family
 
     container = _Container("AgentTesla")
     _file_only_the_published_family(container, report)
@@ -430,7 +430,7 @@ def test_the_report_node_files_only_the_published_family(report: Any, kept: bool
 def test_a_completed_job_s_functions_are_matched_by_the_next_sample(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.memory import store_factory
+    from malspark.memory import store_factory
 
     monkeypatch.setattr(store_factory, "release_function_hash_store", lambda _store: None)
     index = FunctionHashStore(
@@ -449,7 +449,7 @@ def test_a_completed_job_s_functions_are_matched_by_the_next_sample(
 
 
 def test_the_container_lets_go_of_a_dropped_write(monkeypatch: pytest.MonkeyPatch) -> None:
-    from maljan.memory import store_factory
+    from malspark.memory import store_factory
 
     released: list[Any] = []
     monkeypatch.setattr(store_factory, "release_function_hash_store", released.append)
@@ -533,7 +533,7 @@ def test_a_name_that_only_contains_a_placeholder_word_is_still_a_family() -> Non
 def _repair_fixture(qdrant: QdrantStore) -> Any:
     from qdrant_client.models import Distance, PointStruct, VectorParams
 
-    from maljan.memory.function_hash_store import _point_id
+    from malspark.memory.function_hash_store import _point_id
 
     qdrant._ensure_collection(VectorParams, Distance)
     query = embeddings.encode(TEXT)
@@ -577,7 +577,7 @@ def test_the_repair_relabels_old_vectors_and_deletes_ungated_hashes_once(
 ) -> None:
     from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-    from maljan.memory.memory_repair import ALREADY_DONE, repair_memory
+    from malspark.memory.memory_repair import ALREADY_DONE, repair_memory
 
     index = _repair_fixture(qdrant)
     gated = Filter(must=[FieldCondition(key="sample_id", match=MatchValue(value="gated"))])
@@ -604,7 +604,7 @@ def test_the_repair_relabels_old_vectors_and_deletes_ungated_hashes_once(
 def test_the_relabel_never_overwrites_a_restored_case_nor_revives_a_purged_one(
     qdrant: QdrantStore, model: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.memory.memory_repair import repair_memory
+    from malspark.memory.memory_repair import repair_memory
 
     _repair_fixture(qdrant)
     real = embeddings.encode_batch_with_backend
@@ -638,7 +638,7 @@ def test_the_relabel_never_overwrites_a_restored_case_nor_revives_a_purged_one(
 def test_a_case_stored_between_the_check_and_the_write_keeps_its_own_vector(
     qdrant: QdrantStore, model: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.memory import memory_repair
+    from malspark.memory import memory_repair
 
     _repair_fixture(qdrant)
     real = memory_repair._still_unlabelled
@@ -662,7 +662,7 @@ def test_a_case_stored_between_the_check_and_the_write_keeps_its_own_vector(
 def test_the_read_back_after_the_write_is_one_read_not_a_loop(
     qdrant: QdrantStore, model: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.memory import memory_repair
+    from malspark.memory import memory_repair
 
     _repair_fixture(qdrant)
     reads: list[int] = []
@@ -685,7 +685,7 @@ def test_a_backend_that_changed_meanwhile_is_logged_and_the_vector_left(
 ) -> None:
     import logging
 
-    from maljan.memory import memory_repair
+    from malspark.memory import memory_repair
 
     _repair_fixture(qdrant)
     real_still = memory_repair._still_unlabelled
@@ -709,7 +709,7 @@ def test_a_backend_that_changed_meanwhile_is_logged_and_the_vector_left(
 def test_without_the_model_the_repair_waits_and_leaves_no_marker(
     qdrant: QdrantStore, model: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.memory.memory_repair import REPAIR_COLLECTION, SKIPPED_NO_MODEL, repair_memory
+    from malspark.memory.memory_repair import REPAIR_COLLECTION, SKIPPED_NO_MODEL, repair_memory
 
     _repair_fixture(qdrant)
     monkeypatch.setattr(embeddings, "_try_load_fastembed", lambda: False)
@@ -763,7 +763,7 @@ def _hash_index() -> tuple[Any, FunctionHashStore]:
 
 
 def test_a_sample_whose_owner_holds_hashes_keeps_none_of_the_ownerless_ones(model: None) -> None:
-    from maljan.memory.memory_repair import adopt_unowned
+    from malspark.memory.memory_repair import adopt_unowned
 
     client, index = _hash_index()
     index.upsert_sample("s1", "FamilyU", [("h1", "f1"), ("h2", "f2")])
@@ -794,7 +794,7 @@ def _case_at(sample: str, when: datetime, owner: str | None = None, text: str = 
 def test_the_newer_case_wins_and_a_newer_ownerless_one_replaces_the_owners_hashes(
     model: None, qdrant: QdrantStore
 ) -> None:
-    from maljan.memory.memory_repair import adopt_unowned
+    from malspark.memory.memory_repair import adopt_unowned
 
     old, new = datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 6, 1, tzinfo=UTC)
     qdrant.store(_case_at("ownerless-newer", new))
@@ -829,7 +829,7 @@ def test_the_newer_case_wins_and_a_newer_ownerless_one_replaces_the_owners_hashe
 
 
 def test_the_owner_point_is_read_again_before_the_write(model: None, qdrant: QdrantStore) -> None:
-    from maljan.memory import memory_repair
+    from malspark.memory import memory_repair
 
     old, new = datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 6, 1, tzinfo=UTC)
     qdrant.store(_case_at("raced", old))
@@ -871,7 +871,7 @@ def test_a_point_with_no_sample_id_is_skipped_and_counted(model: None, qdrant: Q
 
 
 def test_a_failure_part_way_carries_the_partial_counts(model: None, qdrant: QdrantStore) -> None:
-    from maljan.memory.memory_repair import AdoptionFailed
+    from malspark.memory.memory_repair import AdoptionFailed
 
     qdrant.store(_case("one"))
     real = qdrant._client.upsert
@@ -889,8 +889,8 @@ def test_a_failure_part_way_carries_the_partial_counts(model: None, qdrant: Qdra
 
 
 def test_a_rerun_after_a_failure_mid_sample_adopts_every_remaining_hash(model: None) -> None:
-    from maljan.memory import memory_repair
-    from maljan.memory.memory_repair import AdoptionFailed, adopt_unowned
+    from malspark.memory import memory_repair
+    from malspark.memory.memory_repair import AdoptionFailed, adopt_unowned
 
     client, index = _hash_index()
     index.upsert_sample("s1", "FamilyU", [("h1", "f1"), ("h2", "f2"), ("h3", "f3")])

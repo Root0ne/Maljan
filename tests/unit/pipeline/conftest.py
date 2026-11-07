@@ -1,6 +1,6 @@
 """The ATT&CK index is process-wide, so a test that builds one hands it on.
 
-``maljan.tools.knowledge`` caches the hybrid index, the catalogue and the
+``malspark.tools.knowledge`` caches the hybrid index, the catalogue and the
 memory of a background build having been started in module globals, which is
 right for a worker process and wrong for a test session: one validation test
 that passes the real knowledge module builds the index for real, and every
@@ -19,7 +19,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from maljan.tools import knowledge
+from malspark.tools import knowledge
 
 
 @pytest.fixture(autouse=True)

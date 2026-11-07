@@ -29,8 +29,8 @@ from collections.abc import Iterator
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.pipeline import events as ev
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.pipeline import events as ev
 from tests.unit.pipeline.test_live_event_schema import _every_key_shape
 
 # A real export past the length floor, a pair of real algorithm ids, and a name

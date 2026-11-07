@@ -17,7 +17,7 @@ import time
 
 import pytest
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkDomain,
@@ -28,7 +28,7 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.renderers.markdown import (
+from malspark.reporting.renderers.markdown import (
     MarkdownRenderer,
     _defanged_text,
     _reference_spans,
@@ -222,7 +222,7 @@ def test_a_file_shaped_name_the_run_recorded_is_defanged() -> None:
 
 def _sandbox_report(text: str) -> MalwareReport:
     """Every surface that prints a sandbox's or the model's value in a code span."""
-    from maljan.reporting.models import (
+    from malspark.reporting.models import (
         CliFlag,
         DynamicBehavior,
         PersistenceMechanism,
@@ -280,7 +280,7 @@ def test_every_surface_of_the_sweep_holds_the_payload() -> None:
 
 
 def test_a_draft_rule_s_body_still_prints_as_it_compiles() -> None:
-    from maljan.reporting.models import DetectionRule
+    from malspark.reporting.models import DetectionRule
 
     body = 'rule Example { strings: $s1 = "https://relay.example.net/live/" condition: $s1 }'
     report = MalwareReport(

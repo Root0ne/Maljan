@@ -1,8 +1,8 @@
-"""``maljan.tools.arguments`` reads one pair of quotes off a search argument, and says so."""
+"""``malspark.tools.arguments`` reads one pair of quotes off a search argument, and says so."""
 
 from __future__ import annotations
 
-from maljan.tools import arguments
+from malspark.tools import arguments
 
 
 class TestUnquoted:

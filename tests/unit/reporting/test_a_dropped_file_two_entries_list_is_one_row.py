@@ -11,8 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from maljan.reporting.ledger_projection import dynamic_from_ledger
-from maljan.schemas.evidence import build_entry
+from malspark.reporting.ledger_projection import dynamic_from_ledger
+from malspark.schemas.evidence import build_entry
 from tests.linear_cost import TIME_RATIO_LIMIT, calls, cpu_seconds
 
 DROPPED = [

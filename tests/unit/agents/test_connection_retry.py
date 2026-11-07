@@ -23,7 +23,7 @@ from unittest.mock import MagicMock
 import pytest
 from openai import APIConnectionError, APIStatusError
 
-from maljan.agents.base_agent import retry_on_connection_error
+from malspark.agents.base_agent import retry_on_connection_error
 
 
 def _conn_error() -> APIConnectionError:
@@ -296,7 +296,7 @@ class TestATransientProviderAnswerIsRetried:
 
     def test_the_log_line_carries_no_provider_body(self) -> None:
         """A provider that quotes the request back has quoted the key back."""
-        from maljan.agents.base_agent import _provider_fault
+        from malspark.agents.base_agent import _provider_fault
 
         error = _status_error(401)
         error.body = {"error": {"message": "invalid api key sk-live-abcdef"}}
@@ -309,7 +309,7 @@ class TestATransientProviderAnswerIsRetried:
     ) -> None:
         """The chain ``repr()``s the exceptions behind this one, and behind a
         status error that is the provider's own answer."""
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         def _explode(_exc: BaseException) -> str:  # pragma: no cover - must not run
             raise AssertionError("the status branch must not read the cause chain")
@@ -364,10 +364,10 @@ class TestTheCallSitesActuallyUseIt:
     @pytest.mark.parametrize(
         ("module", "needle"),
         [
-            ("maljan.reporting.composer", "ReportComposer structured"),
-            ("maljan.reporting.composer", "ReportComposer raw"),
-            ("maljan.reporting.narrative_agent", "NarrativeAgent structured"),
-            ("maljan.reporting.narrative_agent", "NarrativeAgent raw"),
+            ("malspark.reporting.composer", "ReportComposer structured"),
+            ("malspark.reporting.composer", "ReportComposer raw"),
+            ("malspark.reporting.narrative_agent", "NarrativeAgent structured"),
+            ("malspark.reporting.narrative_agent", "NarrativeAgent raw"),
         ],
     )
     def test_each_unprotected_site_is_now_wrapped(self, module: str, needle: str) -> None:

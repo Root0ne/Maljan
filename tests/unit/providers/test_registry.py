@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.settings_catalog import core_catalog
-from maljan.core.settings_overrides import build_settings
-from maljan.providers import registry
+from malspark.core.config import Settings
+from malspark.core.settings_catalog import core_catalog
+from malspark.core.settings_overrides import build_settings
+from malspark.providers import registry
 
 
 def _choices(key: str) -> list[str]:
@@ -43,7 +43,7 @@ def test_default_settings_build_the_ghidra_and_mock_providers():
 
 
 def test_an_unknown_id_names_the_available_ones():
-    from maljan.providers.errors import ProviderConfigurationError
+    from malspark.providers.errors import ProviderConfigurationError
 
     cfg = Settings(_env_file=None)
     object.__setattr__(cfg.static, "provider", "nope")
@@ -53,7 +53,7 @@ def test_an_unknown_id_names_the_available_ones():
 
 
 def test_capability_defaults_are_conservative():
-    from maljan.providers.base import SandboxCapabilities, StaticCapabilities
+    from malspark.providers.base import SandboxCapabilities, StaticCapabilities
 
     s = StaticCapabilities()
     assert not any(

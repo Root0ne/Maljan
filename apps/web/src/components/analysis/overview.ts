@@ -129,7 +129,7 @@ export const CONFIDENCE_WHY = "How sure the analysis is of this verdict";
 /*
  * The five rungs a confidence number reads as, highest first: the floors and
  * words the exported report prints beside the same number
- * (`CONFIDENCE_WORDS` in `src/maljan/reporting/renderers/markdown.py`), so the
+ * (`CONFIDENCE_WORDS` in `src/malspark/reporting/renderers/markdown.py`), so the
  * page and the report never word one number two ways.
  */
 const CONFIDENCE_RUNGS: readonly (readonly [number, string])[] = [
@@ -620,11 +620,11 @@ export function fileName(report: ReportDetailDTO | null, job: JobDTO | null): st
   return report?.malware_report?.identity?.file_name || job?.sample_filename || "Unnamed sample";
 }
 
-/** The file names start with: "maljan-" and the first eight hex of the hash. */
+/** The file names start with: "malspark-" and the first eight hex of the hash. */
 export function exportBaseName(sha256: string | null | undefined, jobId: string): string {
   // Twelve characters, as the console's downloads have always been named.
   const head = (sha256 || jobId).replace(/[^0-9a-zA-Z]/g, "").slice(0, 12);
-  return `maljan-${head}`;
+  return `malspark-${head}`;
 }
 
 /* ── Citations in prose ────────────────────────────────────────────── */

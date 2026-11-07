@@ -65,11 +65,13 @@ ABOUT = (
 )
 
 # What the exported tree's interpreter prints: the default declaration and, per
-# block that ships declarations, its declarations.
+# block that ships declarations, its declarations. ``__PACKAGE__`` is the
+# package the release's own ``src`` holds (:func:`_package`): every release
+# here predates the product's rename (T-576), so it is not this tree's name.
 _DUMP = r"""
 import json
-from maljan.core.settings_overrides import build_settings
-from maljan.core.tool_declarations import ToolFacts
+from __PACKAGE__.core.settings_overrides import build_settings
+from __PACKAGE__.core.tool_declarations import ToolFacts
 
 
 
@@ -111,6 +113,16 @@ def _export(commit: str, into: Path) -> None:
         tar.extractall(into, filter="data")
 
 
+def _package(tree: Path) -> str:
+    """The one package the exported ``src`` holds, as that release named it.
+
+    Imported by its own name, so the interpreter reads the release's sources
+    and never an installed package of another name.
+    """
+    (package,) = [p.name for p in (tree / "src").iterdir() if (p / "__init__.py").is_file()]
+    return package
+
+
 def shipped_at(commit: str) -> dict[str, Any]:
     """The default declaration and each block's declarations as ``commit`` shipped them."""
     with tempfile.TemporaryDirectory(prefix="shipped-declarations-") as tmp:
@@ -120,7 +132,7 @@ def shipped_at(commit: str) -> dict[str, Any]:
         # to its packages and the tree's own sources.
         env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(tree / "src")}
         done = subprocess.run(
-            [sys.executable, "-c", _DUMP],
+            [sys.executable, "-c", _DUMP.replace("__PACKAGE__", _package(tree))],
             check=False,
             capture_output=True,
             text=True,

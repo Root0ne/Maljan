@@ -17,8 +17,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from maljan.agents.composition import capability_servers, mcp_refs_for
-from maljan.core.config import FORMER_SEED_TOOLS, Settings, ToolRef, _builtin_definitions
+from malspark.agents.composition import capability_servers, mcp_refs_for
+from malspark.core.config import FORMER_SEED_TOOLS, Settings, ToolRef, _builtin_definitions
 
 LOOKING_UP = ("static", "network", "judge", "triage", "android_static", "reverser")
 
@@ -52,8 +52,8 @@ def test_the_capability_counts_a_built_in_its_seed_binds_by_its_own_agents_list(
 
 def test_a_server_row_stored_with_a_lookup_s_former_kind_is_still_reached() -> None:
     """A row saved while the lookups declared ``file_reputation`` keeps its lookup."""
-    from maljan.core.declared_reading import declarations
-    from maljan.core.reputation import pack_lookups
+    from malspark.core.declared_reading import declarations
+    from malspark.core.reputation import pack_lookups
 
     settings = Settings.model_validate(
         {
@@ -180,7 +180,7 @@ def test_every_agent_under_every_team_resolves_as_dev_resolved_it(case: str) -> 
     import json
     from pathlib import Path
 
-    from maljan.agents.composition import servers_bound_to
+    from malspark.agents.composition import servers_bound_to
 
     golden = Path(__file__).resolve().parents[2] / "fixtures" / "golden" / "agents"
     dev = json.loads((golden / "servers_bound_to_stored_reputation_rows.json").read_text())
@@ -202,7 +202,7 @@ def test_the_capability_path_honours_the_server_s_tick_list(monkeypatch: Any) ->
     """A capability reference attaches the server's ticked tools, as a reference by key did."""
     from langchain_core.tools import StructuredTool
 
-    from maljan.providers.servers import ServerRegistry
+    from malspark.providers.servers import ServerRegistry
 
     settings = Settings.model_validate(
         {"mcp": {"servers": {"virustotal": {"enabled": True, "tools": ["get_file_report"]}}}}
@@ -223,8 +223,8 @@ def test_the_capability_path_honours_the_server_s_tick_list(monkeypatch: Any) ->
 
 def test_a_stored_lookup_with_no_rank_keeps_the_shipped_order() -> None:
     """An edited VirusTotal row written before ranks keeps VirusTotal ahead of the sidecar."""
-    from maljan.core.declared_reading import declarations
-    from maljan.core.reputation import pack_lookups
+    from malspark.core.declared_reading import declarations
+    from malspark.core.reputation import pack_lookups
 
     settings = Settings.model_validate(
         {
@@ -252,8 +252,8 @@ def test_a_stored_lookup_with_no_rank_keeps_the_shipped_order() -> None:
 
 
 def test_an_operator_lookup_with_no_rank_takes_the_default() -> None:
-    from maljan.core.declared_reading import declarations
-    from maljan.core.reputation import DEFAULT_RANK, pack_lookups
+    from malspark.core.declared_reading import declarations
+    from malspark.core.reputation import DEFAULT_RANK, pack_lookups
 
     settings = Settings.model_validate(
         {

@@ -16,8 +16,8 @@ import subprocess
 import threading
 import time
 
-from maljan.providers.server_guard import ServerGuard
-from maljan.tools import children
+from malspark.providers.server_guard import ServerGuard
+from malspark.tools import children
 
 MANIFEST = {
     "capa": {"name": "capa", "timeout_s": None, "long_running": True},
@@ -117,8 +117,8 @@ class TestAKillNeverReachesTheServer:
         from unittest.mock import patch
 
         with (
-            patch("maljan.tools.children.os.killpg") as killpg,
-            patch("maljan.tools.children.os.kill") as kill,
+            patch("malspark.tools.children.os.killpg") as killpg,
+            patch("malspark.tools.children.os.kill") as kill,
         ):
             for pid in (0, 1, -5, os.getpid(), os.getpgrp()):
                 children.kill_process_group(pid)
@@ -138,7 +138,7 @@ class TestAKillNeverReachesTheServer:
 
         from unittest.mock import patch
 
-        with patch("maljan.tools.children.kill_process_group") as killer:
+        with patch("malspark.tools.children.kill_process_group") as killer:
             with children.running_as(("floss", "done.dll")):
                 work()
                 children.kill(("floss", "done.dll"))

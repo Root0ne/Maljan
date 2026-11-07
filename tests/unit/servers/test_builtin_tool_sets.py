@@ -53,7 +53,7 @@ def test_the_live_sidecar_still_offers_exactly_the_pinned_tools(name: str) -> No
     """
     from scripts.goldens.capture_builtin_tool_sets import SIDECARS, enumerate_stdio_tools
 
-    from maljan.agents.subprocess_env import child_env
+    from malspark.agents.subprocess_env import child_env
 
     subdir, allow = SIDECARS[name]
     live = asyncio.run(
@@ -84,8 +84,8 @@ def test_the_registry_opens_the_real_network_built_in_with_the_pinned_tools() ->
     parameter dropped in the move (a missing ``cwd``, a stripped ``env_allow``
     entry) shows up here even before any analyst is wired to the registry.
     """
-    from maljan.core.config import Settings
-    from maljan.providers.servers import ServerRegistry
+    from malspark.core.config import Settings
+    from malspark.providers.servers import ServerRegistry
 
     registry = ServerRegistry(Settings(_env_file=None))
     handle = registry.get("network")
@@ -112,10 +112,10 @@ def test_the_built_in_child_env_is_byte_for_byte_the_pre_branch_child_env(name, 
     operator set, and a sidecar that reads a staging directory is the only kind
     of server that gets it.
     """
-    from maljan.agents.subprocess_env import child_env
-    from maljan.core.config import Settings
-    from maljan.providers.servers import ServerRegistry
-    from maljan.tools.staging import STAGING_JOB_ENV
+    from malspark.agents.subprocess_env import child_env
+    from malspark.core.config import Settings
+    from malspark.providers.servers import ServerRegistry
+    from malspark.tools.staging import STAGING_JOB_ENV
 
     monkeypatch.delenv("PYTHONIOENCODING", raising=False)
 
@@ -131,7 +131,7 @@ def test_the_built_in_child_env_is_byte_for_byte_the_pre_branch_child_env(name, 
         def get_tools(self):
             return []
 
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
 
     registry = ServerRegistry(Settings(_env_file=None))
     handle = registry.get(name)
@@ -158,8 +158,8 @@ def test_the_registry_attaches_exactly_the_pinned_tools(monkeypatch):
     threat-intel lookups are offered only with their keys (without one the
     manifest withholds them), so the keys are set: attaching asks no service.
     """
-    from maljan.core.config import Settings
-    from maljan.providers.servers import ServerRegistry
+    from malspark.core.config import Settings
+    from malspark.providers.servers import ServerRegistry
 
     monkeypatch.setenv("VIRUSTOTAL_API_KEY", "attach-only")
     monkeypatch.setenv("ABUSEIPDB_API_KEY", "attach-only")

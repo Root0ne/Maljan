@@ -100,7 +100,7 @@ async def _update(body: UserUpdateRequest, user: Any, db: Any, api_key: str | No
         response=Response(),
         user=user,
         api_key=api_key,
-        maljan_refresh=None,
+        malspark_refresh=None,
         db=db,
     )
 

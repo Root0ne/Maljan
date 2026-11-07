@@ -1,7 +1,7 @@
 """The installed provider plugins in the API: listed from metadata, loaded only to run their code.
 
 Listing, the provider choices, the settings pages and every check of a saved
-provider id read package metadata and the store (``maljan.core.plugins``):
+provider id read package metadata and the store (``malspark.core.plugins``):
 the API imports no plugin for them, and none at start or after a save. It
 loads an allowed plugin only where a request runs that plugin's own code, and
 that plugin alone: a save or import that changes a key of an LLM or memory
@@ -33,7 +33,7 @@ import time
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from maljan.core.plugins import (
+from malspark.core.plugins import (
     ALLOW_LIST_KEY,
     allowed_names,
     installed,
@@ -44,8 +44,8 @@ from maljan.core.plugins import (
     selections,
     usable_list,
 )
-from maljan.core.settings_annotations import group_for
-from maljan.core.settings_catalog import CatalogEntry
+from malspark.core.settings_annotations import group_for
+from malspark.core.settings_catalog import CatalogEntry
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.settings_service import SettingsService
@@ -86,7 +86,7 @@ def _forget_built_settings() -> None:
 async def load_in_background(allowed: Any, entries: Iterable[str], timeout: float) -> bool:
     """Load the plugins ``entries`` names that ``allowed`` names too, off the event loop.
 
-    Only those, each once (``maljan.core.plugins.load_named``); a plugin this
+    Only those, each once (``malspark.core.plugins.load_named``); a plugin this
     process loaded that ``allowed`` no longer names is withdrawn on the way.
     Waits at most ``timeout`` seconds, and not at all behind a load that has
     already run longer than that. True when each of them is tried as it

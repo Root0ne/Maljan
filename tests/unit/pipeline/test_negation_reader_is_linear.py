@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline import validation
+from malspark.pipeline import validation
 
 # --- The reference: the readings as they were, verbatim -----------------------
 

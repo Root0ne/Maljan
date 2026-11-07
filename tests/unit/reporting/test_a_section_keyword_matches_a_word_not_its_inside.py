@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from maljan.reporting.evidence_bundles import _SECTION_CLAIM_KEYWORDS, _filter_claims, mentions
+from malspark.reporting.evidence_bundles import _SECTION_CLAIM_KEYWORDS, _filter_claims, mentions
 
 
 def _claim(text: str) -> dict[str, str]:

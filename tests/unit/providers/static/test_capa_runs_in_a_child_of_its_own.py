@@ -31,10 +31,10 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.subprocess_env import BASE_KEYS
-from maljan.providers.static import capa_yara
-from maljan.tools import rules as tool
-from maljan.tools import staging
+from malspark.agents.subprocess_env import BASE_KEYS
+from malspark.providers.static import capa_yara
+from malspark.tools import rules as tool
+from malspark.tools import staging
 from tests.credential_shapes import lowercase_body, password
 
 # What the tool answers when the child gave no document, as it always has.
@@ -113,7 +113,7 @@ class TestTheEnvironment:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _job_capa: Path
     ) -> None:
         canaries = {
-            "DATABASE_URL": f"postgresql+asyncpg://maljan:{password()}@db:5432/maljan",
+            "DATABASE_URL": f"postgresql+asyncpg://malspark:{password()}@db:5432/malspark",
             "SETTINGS_ENCRYPTION_KEY": lowercase_body(44),
             "JWT_SECRET_KEY": lowercase_body(64),
             "MINIO_SECRET_KEY": password(24),
@@ -149,7 +149,7 @@ class TestTheEnvironment:
             return real(command, **kwargs)
 
         monkeypatch.setattr(capa_yara.subprocess, "Popen", spy)
-        monkeypatch.setenv("DATABASE_URL", f"postgresql://maljan:{password()}@db/maljan")
+        monkeypatch.setenv("DATABASE_URL", f"postgresql://malspark:{password()}@db/malspark")
         sample, rules = _sample_and_rules(tmp_path)
 
         capa_yara.run_capa_document(
@@ -168,7 +168,7 @@ class TestTheEnvironment:
         assert not kwargs.get("start_new_session") and not kwargs.get("process_group")
         # The entry imports nothing of the platform: the standard library and capa only.
         source = capa_yara._CHILD_ENTRY.read_text(encoding="utf-8")
-        assert "import maljan" not in source and "from maljan" not in source
+        assert "import malspark" not in source and "from malspark" not in source
 
 
 def _entry(tmp_path: Path, code: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -269,7 +269,7 @@ class TestTheScratch:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Run in this process: a file capa cannot read gives capa's error, written whole."""
-        from maljan.providers.static import capa_child
+        from malspark.providers.static import capa_child
 
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
         sample, rules = _sample_and_rules(tmp_path)
@@ -313,8 +313,8 @@ def _entry_code(body: str) -> str:
 _PARENT = (
     "import os, sys, threading, time\n"
     "from pathlib import Path\n"
-    "from maljan.providers.static import capa_yara\n"
-    "from maljan.tools import staging\n"
+    "from malspark.providers.static import capa_yara\n"
+    "from malspark.tools import staging\n"
     "child_code, pid_file, mode, job = sys.argv[1:5]\n"
     "sample = Path(pid_file).with_name('s.bin')\n"
     "sample.write_bytes(b'MZ')\n"
@@ -455,7 +455,7 @@ class TestTheChildDiesWithItsParent:
             parent.clean_up()
 
     def test_a_child_whose_parent_has_already_gone_leaves_at_once(self) -> None:
-        from maljan.providers.static.capa_child import PARENT_GONE_EXIT
+        from malspark.providers.static.capa_child import PARENT_GONE_EXIT
 
         code = _entry_code("capa_child.die_with_parent(1)\nraise SystemExit(0)\n")
 
@@ -509,7 +509,7 @@ class TestTheRunDirectoryGoesWithTheJob:
         assert seen is not None
         run = Path(seen["cwd"])
         assert run.parent == Path(tempfile.gettempdir())
-        assert run.name.startswith("maljan-capa-")
+        assert run.name.startswith("malspark-capa-")
         assert seen["mode"] == "0o700"
         assert not run.exists()
         # Nothing under the staging base, where no job's teardown would look.
@@ -518,7 +518,7 @@ class TestTheRunDirectoryGoesWithTheJob:
     def test_the_provider_runs_in_its_job_s_directory_which_the_teardown_removes(
         self, tmp_path: Path, _scratch_in_tmp: Path
     ) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         provider = capa_yara.CapaYaraStaticProvider.from_settings(Settings(_env_file=None))
         provider.job_key = JOB
@@ -540,10 +540,10 @@ class TestTheRunDirectoryGoesWithTheJob:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Opened under the capa server's base, recorded for the teardown; the args as before."""
-        from maljan.agents.evidence_recorder import EvidenceRecorder
-        from maljan.core.pack_steps import default_steps
-        from maljan.pipeline.triage_pack import PIPELINE, CapaSettings, PackInputs, run_pack
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.agents.evidence_recorder import EvidenceRecorder
+        from malspark.core.pack_steps import default_steps
+        from malspark.pipeline.triage_pack import PIPELINE, CapaSettings, PackInputs, run_pack
+        from malspark.schemas.evidence import EvidenceCounter
 
         handed: list[dict[str, Any]] = []
 
@@ -590,8 +590,8 @@ class TestTheRunDirectoryGoesWithTheJob:
         assert not job_dir.exists()
 
     def test_the_container_tells_the_provider_its_job(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         cfg = Settings(_env_file=None)
         cfg.static.provider = "capa_yara"
@@ -634,10 +634,10 @@ class TestTheRunDirectoryGoesWithTheJob:
     ) -> None:
         monkeypatch.setenv(staging.STAGING_TTL_ENV, "1")
         loose = Path(tempfile.gettempdir())
-        stale = loose / "maljan-capa-left"
+        stale = loose / "malspark-capa-left"
         (stale / ".cache").mkdir(parents=True)
         (stale / ".cache" / "capa.cache").write_bytes(b"x")
-        fresh = loose / "maljan-capa-running"
+        fresh = loose / "malspark-capa-running"
         fresh.mkdir()
         other = loose / "someone-else"
         other.mkdir()
@@ -650,13 +650,13 @@ class TestTheRunDirectoryGoesWithTheJob:
 
         # The stale one went; one touched within the TTL, and anything not a
         # capa run's, stays; the run's own directory went when it ended.
-        assert sorted(p.name for p in loose.iterdir()) == ["maljan-capa-running", "someone-else"]
+        assert sorted(p.name for p in loose.iterdir()) == ["malspark-capa-running", "someone-else"]
 
     def test_a_ttl_of_zero_sweeps_nothing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv(staging.STAGING_TTL_ENV, "0")
-        stale = Path(tempfile.gettempdir()) / "maljan-capa-left"
+        stale = Path(tempfile.gettempdir()) / "malspark-capa-left"
         stale.mkdir()
         os.utime(stale, (0, 0))
         sample, rules = _sample_and_rules(tmp_path)
@@ -669,7 +669,7 @@ class TestTheRunDirectoryGoesWithTheJob:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _job_capa: Path
     ) -> None:
         monkeypatch.setenv(staging.STAGING_TTL_ENV, "1")
-        stale = Path(tempfile.gettempdir()) / "maljan-capa-left"
+        stale = Path(tempfile.gettempdir()) / "malspark-capa-left"
         stale.mkdir()
         os.utime(stale, (0, 0))
         sample, rules = _sample_and_rules(tmp_path)

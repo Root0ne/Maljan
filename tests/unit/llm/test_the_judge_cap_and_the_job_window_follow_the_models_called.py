@@ -24,7 +24,7 @@ DEEPSEEK = "https://api.deepseek.com"
 
 
 def _settings(values: dict[str, Any]) -> Any:
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     return build_settings(values)
 
@@ -63,7 +63,7 @@ def _entry(model: str, *fallbacks: dict[str, Any]) -> dict[str, Any]:
 
 def _lead_team() -> list[str]:
     """The shipped lead team's lead and every specialist it can ask."""
-    from maljan.agents.composition import analyst_keys, reachable_agents
+    from malspark.agents.composition import analyst_keys, reachable_agents
 
     settings = _settings({"agents.profile": "team_lead"})
     team = reachable_agents(settings, analyst_keys(settings))
@@ -72,7 +72,7 @@ def _lead_team() -> list[str]:
 
 
 def _container(settings: Any) -> Any:
-    from maljan.core.container import ServiceContainer
+    from malspark.core.container import ServiceContainer
 
     return ServiceContainer(settings, mock=True)
 
@@ -129,8 +129,8 @@ class TestTheJudgesCap:
         assert "1000000-token context window" in cap.sentence
 
     def test_the_built_judge_model_carries_the_cap_of_its_entry(self) -> None:
-        from maljan.llm.context_window import built_output_cap
-        from maljan.llm.registry import LLMProviderRegistry
+        from malspark.llm.context_window import built_output_cap
+        from malspark.llm.registry import LLMProviderRegistry
 
         settings = _deepseek(
             "deepseek-v4-flash",
@@ -268,7 +268,7 @@ class TestTheJobsWindow:
 
 class TestTheWindowsModels:
     def test_every_role_is_read_on_the_role_its_builder_reads(self) -> None:
-        from maljan.agents.composition import window_assignments
+        from malspark.agents.composition import window_assignments
 
         settings = _deepseek("deepseek-v4-flash", "deepseek-v3")
 
@@ -280,8 +280,8 @@ class TestTheWindowsModels:
         assert {("static", "deepseek-v4-flash"), ("network", "deepseek-v4-flash")} <= read
 
     def test_a_job_on_one_model_asks_one_question(self) -> None:
-        from maljan.agents.composition import window_assignments
-        from maljan.llm.context_window import _questions
+        from malspark.agents.composition import window_assignments
+        from malspark.llm.context_window import _questions
 
         settings = _haiku_everywhere(**{"preprocessing.use_function_summarizer": True})
 
@@ -292,8 +292,8 @@ class TestTheWindowsModels:
         from collections.abc import Callable
         from types import SimpleNamespace
 
-        from maljan.agents.composition import window_assignments
-        from maljan.llm.context_window import _questions
+        from malspark.agents.composition import window_assignments
+        from malspark.llm.context_window import _questions
         from tests.linear_cost import TIME_RATIO_LIMIT, cpu_seconds
 
         def _walk(count: int) -> Callable[[], None]:
@@ -337,8 +337,8 @@ class TestAnEntryTheRegistryCannotBuild:
             )
 
     def test_a_provider_registered_later_is_read_as_built(self) -> None:
-        from maljan.core.model_assignments import assignment_chain_for
-        from maljan.llm.registry import _PROVIDER_REGISTRY
+        from malspark.core.model_assignments import assignment_chain_for
+        from malspark.llm.registry import _PROVIDER_REGISTRY
 
         _PROVIDER_REGISTRY["acme-plugged"] = object
         try:
@@ -356,9 +356,9 @@ class TestAnEntryTheRegistryCannotBuild:
     def test_a_registry_that_cannot_load_is_logged(self, monkeypatch: Any, caplog: Any) -> None:
         import logging
 
-        from maljan.core.logger import logger
-        from maljan.core.model_assignments import builds_provider
-        from maljan.llm import registry
+        from malspark.core.logger import logger
+        from malspark.core.model_assignments import builds_provider
+        from malspark.llm import registry
 
         def _broken() -> None:
             raise ImportError("a provider module is missing")
@@ -380,7 +380,7 @@ class TestAnEntryTheRegistryCannotBuild:
 
 class TestTheReporter:
     def test_it_is_called_only_while_reporting_is_on(self) -> None:
-        from maljan.agents.composition import called_assignments
+        from malspark.agents.composition import called_assignments
 
         on = _haiku_everywhere()
         off = _haiku_everywhere(**{"reporting.enabled": False})
@@ -389,7 +389,7 @@ class TestTheReporter:
         assert "reporter" not in {a.agent for a in called_assignments(off)}
 
     def test_the_pack_it_reads_fits_its_own_smaller_window(self, monkeypatch: Any) -> None:
-        from maljan.pipeline import nodes
+        from malspark.pipeline import nodes
 
         settings = _deepseek(
             "deepseek-v4-flash",
@@ -411,7 +411,7 @@ class TestTheReporter:
         assert cut == [job, own]
 
     def test_a_reporter_on_a_larger_window_keeps_the_job_s_cut(self, monkeypatch: Any) -> None:
-        from maljan.pipeline import nodes
+        from malspark.pipeline import nodes
 
         settings = _deepseek(
             "deepseek-v3",

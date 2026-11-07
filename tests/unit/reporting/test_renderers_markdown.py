@@ -12,10 +12,10 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import CapabilityCell, MalwareReport, TTPMapping
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import CapabilityCell, MalwareReport, TTPMapping
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.isr_models import UNVERIFIED_TECHNIQUE_MARKER
 from tests.unit._ledger_helpers import ledger_from_sandbox, persistence_isr
 
 # The headings every report carries, whatever the run gathered.
@@ -299,7 +299,7 @@ class TestRansomwareReport:
 
 class TestSeverityBadge:
     def test_the_severity_badge_uses_square_brackets(self) -> None:
-        from maljan.schemas.judgement import JudgeAssessment, SeverityVerdict
+        from malspark.schemas.judgement import JudgeAssessment, SeverityVerdict
 
         report = _build(
             final_decision="Suspicious",
@@ -322,7 +322,7 @@ class TestSectionFailureIsolation:
     wrapped so a single subtree failure cannot 500 the whole endpoint."""
 
     def test_malformed_notable_apis_does_not_500(self) -> None:
-        from maljan.reporting.models import DynamicBehavior
+        from malspark.reporting.models import DynamicBehavior
 
         report = _build()
         # Pydantic normally rejects non-dict entries; bypass with
@@ -421,7 +421,7 @@ class TestAnUnverifiedTechniqueIdIsPrintedWithItsMarker:
     def test_the_html_export_carries_it(self) -> None:
         """HTML is generated from the markdown, so the ampersand in "ATT&CK"
         arrives escaped. The marker is one string in one place either way."""
-        from maljan.reporting.renderers import HtmlRenderer
+        from malspark.reporting.renderers import HtmlRenderer
 
         html = HtmlRenderer().render(self._report_with_unverified())
 

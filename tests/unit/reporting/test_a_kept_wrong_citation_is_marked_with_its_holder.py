@@ -20,7 +20,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     CITATION_WRONG_ENTRY_CODE,
     MARKED_IN_PLACE,
     EntryTexts,
@@ -28,8 +28,8 @@ from maljan.pipeline.validation import (
     record_flagged_statements,
     wrong_entry_citations,
 )
-from maljan.reporting.composer import ReportComposer, _ProseOut
-from maljan.reporting.models import (
+from malspark.reporting.composer import ReportComposer, _ProseOut
+from malspark.reporting.models import (
     ConfigItem,
     FileHashes,
     MalwareReport,
@@ -37,8 +37,8 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import LedgerEntry
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import LedgerEntry
 
 # Invented values: a reply keyword one entry holds, and a mutex two entries hold.
 KEYWORD = "QUILLSTOP"
@@ -142,7 +142,7 @@ class TestTheReport:
         assert "cited to an entry" not in reads
 
     def test_a_key_finding_citing_by_its_ids_is_marked_after_them(self) -> None:
-        from maljan.reporting.models import KeyFinding
+        from malspark.reporting.models import KeyFinding
 
         finding = {"text": f"Replies end with `{KEYWORD}`.", "evidence_ids": ["ev_0105"]}
         report = _report(key_findings=[KeyFinding(**finding)])
@@ -182,7 +182,9 @@ def _invoke(*answers: str) -> tuple[_RawLLM, MalwareReport]:
     comp._report = report
     comp._entries = _texts()
     comp._citable = ["ev_0102", "ev_0105", "ev_0107", "ev_0109"]
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
+    ):
         asyncio.run(comp._invoke([HumanMessage(content="write it")], _ProseOut, section="x"))
     return llm, report
 
@@ -251,7 +253,7 @@ class TestTheLabel:
 def _narrative(*answers: str) -> MalwareReport:
     from unittest.mock import AsyncMock, MagicMock
 
-    from maljan.reporting.narrative_agent import NarrativeAgent
+    from malspark.reporting.narrative_agent import NarrativeAgent
 
     llm = MagicMock()
     structured = MagicMock()

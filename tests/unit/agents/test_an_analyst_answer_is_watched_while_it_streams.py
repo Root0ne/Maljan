@@ -17,10 +17,10 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.agents.base_agent import BaseAnalyst, _run_coro_blocking, claims_repeat_rule
-from maljan.core.config import Settings
-from maljan.llm.stream_watch import ENDED_KEY, current_rule, watching
-from maljan.pipeline.validation import (
+from malspark.agents.base_agent import BaseAnalyst, _run_coro_blocking, claims_repeat_rule
+from malspark.core.config import Settings
+from malspark.llm.stream_watch import ENDED_KEY, current_rule, watching
+from malspark.pipeline.validation import (
     ANALYST_REPEATED_CODE,
     ENDED_WHILE_STREAMING_SENTENCE,
     claims_repeated,
@@ -119,7 +119,7 @@ class TestTheRuleReachesTheAgentLoop:
         analyst = _Analyst(model)
         settings = Settings(_env_file=None, validation={"claim_repeat_margin": 0})
 
-        with patch("maljan.agents.base_agent.get_settings", return_value=settings):
+        with patch("malspark.agents.base_agent.get_settings", return_value=settings):
             analyst._invoke_llm_with_timeout([HumanMessage(content="go")], 5.0)
 
         (rule,) = model.rules
@@ -145,7 +145,7 @@ class TestTheEndedAnswerIsAskedOnce:
         analyst = _Asked(MagicMock())
         isr = analyst._text_to_isr(ENDED, 0)
         with (
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         ):
             kept = analyst._validate_isr(isr, "evidence")
@@ -172,7 +172,7 @@ class TestTheQuestionSaysTheAnswerWasEnded:
         analyst._record_usage(AIMessage(content=ENDED, response_metadata=metadata))
         isr = analyst._text_to_isr(ENDED, 0)
         with (
-            patch("maljan.agents.base_agent.validity_check_available", return_value=True),
+            patch("malspark.agents.base_agent.validity_check_available", return_value=True),
             patch.object(BaseAnalyst, "_fits_the_window", return_value=True),
         ):
             analyst._validate_isr(isr, "evidence")
@@ -196,7 +196,7 @@ class TestTheWatchIsTheAnalyst_sOwn:
     def test_a_tool_the_loop_runs_is_answered_outside_it(self) -> None:
         from langchain_core.tools import StructuredTool
 
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
 
         seen: list[Any] = []
 

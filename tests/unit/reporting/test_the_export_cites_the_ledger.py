@@ -5,7 +5,7 @@ a ledger id in a property, so every node said it carried none. The record
 already holds the ties. An analyst finding names its techniques and cites its
 entries, an asserting tool's entry names a technique in its own structured
 output, and the attribution cites the entries its family name was read from.
-The export writes those, as ``x_maljan_evidence_refs``, on the sample's
+The export writes those, as ``x_malspark_evidence_refs``, on the sample's
 ``uses`` edge to each technique and on a malware object it mints from the
 family. It writes nothing it would have to infer: no id read out of a
 sentence, no object matched by value, and no property where the record ties
@@ -20,21 +20,21 @@ from typing import Any
 
 from stix2validator import ValidationOptions, validate_instance
 
-from maljan.agents.judge_postprocess import (
+from malspark.agents.judge_postprocess import (
     PROPERTY_NOT_CARRIED_CODE,
     lift_misplaced_extensions,
     postprocess_judge_bundle,
 )
-from maljan.pipeline.evidence_summary import technique_evidence
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.pipeline.evidence_summary import technique_evidence
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers.stix_renderer import (
     EVIDENCE_REF_NOT_IN_LEDGER_CODE,
     ExtendedSTIXRenderer,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
-from maljan.schemas.stix_models import EVIDENCE_REFS_PROPERTY, Bundle, attack_pattern_id
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, Finding
+from malspark.schemas.stix_models import EVIDENCE_REFS_PROPERTY, Bundle, attack_pattern_id
 
 SHA256 = "36dabc40fa8983ce900a90b8156d2c754875fe1b5413a997843c4a0ef3908220"
 
@@ -181,7 +181,7 @@ def _judge() -> Bundle:
                         "relationship_type": "uses",
                         "source_ref": "malware--1",
                         "target_ref": "attack-pattern--1",
-                        "x_maljan_confidence": 0.9,
+                        "x_malspark_confidence": 0.9,
                     },
                     {
                         "type": "relationship",
@@ -429,7 +429,7 @@ def _report_of(bundle: Bundle) -> tuple[list[str], list[str]]:
 def test_the_official_validator_finds_no_error_and_no_new_kind_of_warning() -> None:
     """No error, and no warning of a kind the export did not already carry.
 
-    Every ``x_maljan_`` property draws the validator's best-practice note that
+    Every ``x_malspark_`` property draws the validator's best-practice note that
     a custom property should be declared through an extension definition, and
     this one draws the same note, once per object that carries it. Everything
     else the validator says about the bundle is unchanged.
@@ -478,9 +478,9 @@ class TestTheSupportMarkOnTheJudgesEdge:
         )
 
         edge = _uses(objects, "T1055")
-        assert edge["x_maljan_confidence"] == 0.9  # the judge's own edge
-        assert edge["x_maljan_support"] == "capability"
-        assert edge["x_maljan_support_note"].startswith("capability, not observed: 1 source")
-        assert "x_maljan_support" not in _uses(objects, "T1071")
+        assert edge["x_malspark_confidence"] == 0.9  # the judge's own edge
+        assert edge["x_malspark_support"] == "capability"
+        assert edge["x_malspark_support_note"].startswith("capability, not observed: 1 source")
+        assert "x_malspark_support" not in _uses(objects, "T1071")
         patterns = [o for o in objects if o["type"] == "attack-pattern"]
-        assert all("x_maljan_support" not in o for o in patterns)
+        assert all("x_malspark_support" not in o for o in patterns)

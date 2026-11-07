@@ -20,8 +20,8 @@ from app.services.server_map import TOKEN_MASK
 from app.services.settings_catalog_api import catalog_index, validate_editable_api_value
 from app.services.settings_probes import known_probe, run_probe
 from app.services.settings_service import SettingsService, SettingsValidationError
-from maljan.core import settings_secrets as box
-from maljan.enrichment.declared import effective_sources
+from malspark.core import settings_secrets as box
+from malspark.enrichment.declared import effective_sources
 
 HOST = ".".join(["rep", "example", "org"])
 
@@ -212,7 +212,7 @@ async def test_an_invented_source_is_tested_by_its_declared_request_with_its_own
     stored = {ENRICHMENT_SOURCES_KEY: {"domainrep": _invented(api_key=_own_key())}}
     assert known_probe("domainrep", stored)
     assert not known_probe("domainrep", {})
-    with patch("maljan.enrichment.declared.httpx.AsyncClient", client):
+    with patch("malspark.enrichment.declared.httpx.AsyncClient", client):
         result = await run_probe("domainrep", {}, stored)
         staged = {ENRICHMENT_SOURCES_KEY: {"domainrep": {"api_key": TOKEN_MASK}}}
         masked = await run_probe("domainrep", staged, stored)

@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents.composition import builtin_prompt, sample_format
-from maljan.agents.prompt_fragments import format_fragment
+from malspark.agents.composition import builtin_prompt, sample_format
+from malspark.agents.prompt_fragments import format_fragment
 
 
 class TestTheFragmentPerPlatform:
@@ -77,7 +77,7 @@ class TestTheAssembledPrompt:
         assert format_fragment("apk", "android") in prompt
 
     def test_the_static_assembly_keeps_head_fragment_provider_order(self) -> None:
-        from maljan.agents.static_analyst import _ISR_HEAD
+        from malspark.agents.static_analyst import _ISR_HEAD
 
         prompt = builtin_prompt(
             "static", _Container(("elf", "linux")), "ghidra", provider_expected=True

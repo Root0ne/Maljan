@@ -7,8 +7,8 @@ platform dropped nothing over them), and says nothing where there were none.
 
 from __future__ import annotations
 
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 
 def _render(*rows: dict[str, str]) -> str:

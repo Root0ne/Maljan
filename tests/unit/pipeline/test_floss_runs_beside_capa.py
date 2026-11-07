@@ -28,10 +28,10 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline import triage_pack
-from maljan.pipeline.triage_pack import DECLARED, MEASURED, cgroup_headroom_bytes, room_beside
-from maljan.providers.static import capa_yara
-from maljan.tools import emulated_strings, rules, staging
+from malspark.pipeline import triage_pack
+from malspark.pipeline.triage_pack import DECLARED, MEASURED, cgroup_headroom_bytes, room_beside
+from malspark.providers.static import capa_yara
+from malspark.tools import emulated_strings, rules, staging
 from tests.unit.pipeline.test_decoded_strings_in_the_pack import (
     ROWS,
     _answer,
@@ -320,7 +320,7 @@ def test_a_sample_that_is_not_a_pe_starts_nothing(
 
 
 def test_the_summary_says_how_floss_ran() -> None:
-    from maljan.analysis.run_summary import RunSummaryBuilder
+    from malspark.analysis.run_summary import RunSummaryBuilder
 
     summary = (
         RunSummaryBuilder(start_time=0.0)

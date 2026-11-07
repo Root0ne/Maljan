@@ -20,8 +20,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.builder import build_consolidated_iocs
-from maljan.reporting.models import (
+from malspark.reporting.builder import build_consolidated_iocs
+from malspark.reporting.models import (
     EmulatedStrings,
     EvidenceIndexRow,
     EvidenceSection,
@@ -30,8 +30,8 @@ from maljan.reporting.models import (
     MalwareReport,
     SampleIdentity,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.stix_renderer import (
     DECODED_FROM_THE_BYTES,
     RECOVERED_BY_EMULATION,
     ExtendedSTIXRenderer,
@@ -43,8 +43,8 @@ from maljan.reporting.renderers.stix_renderer import (
     publishes,
     recovered_by_words,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.stix_models import Bundle
 
 C2 = "relay7.example.net"
 C2_URL = f"https://{C2}/gate/"

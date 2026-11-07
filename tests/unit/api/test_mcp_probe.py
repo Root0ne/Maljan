@@ -177,9 +177,9 @@ def test_the_probe_is_registered_under_its_own_name():
 
 @pytest.mark.asyncio
 async def test_the_r2_probe_speaks_the_same_handshake(monkeypatch):
-    from maljan.core.settings_overrides import build_settings
-    from maljan.providers import servers
-    from maljan.providers.static import r2
+    from malspark.core.settings_overrides import build_settings
+    from malspark.providers import servers
+    from malspark.providers.static import r2
 
     provider = r2.R2StaticProvider.from_settings(build_settings({}))
     _Handle.made = []
@@ -203,7 +203,7 @@ class TestAServerThatDeclaresHowItsCredentialIsObtained:
 
     @pytest.mark.asyncio
     async def test_without_a_token_it_reports_that_no_credential_was_obtained(self):
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         entry = Settings(_env_file=None).mcp.servers["virustotal"].model_dump(mode="json")
         result = await probe_mcp({"name": "virustotal", "entry": entry})
@@ -229,7 +229,7 @@ class TestAServerThatDeclaresHowItsCredentialIsObtained:
 
     @pytest.mark.asyncio
     async def test_with_a_token_it_dials_the_endpoint_like_any_other_server(self):
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         entry = Settings(_env_file=None).mcp.servers["virustotal"].model_dump(mode="json")
         entry["auth_token"] = "vtai_" + "c" * 43
@@ -244,7 +244,7 @@ class _HandleWithManifest(_Handle):
     """A server that also answers ``capabilities``, as the registry keeps it."""
 
     async def aopen(self, job_id, **kw):
-        from maljan.tools.capabilities import ServerCapabilities
+        from malspark.tools.capabilities import ServerCapabilities
 
         self.capabilities = ServerCapabilities.from_payload(
             self.name,
@@ -286,8 +286,8 @@ async def test_a_server_without_a_manifest_has_no_details():
 async def test_a_built_in_is_probed_with_the_environment_names_it_cannot_run_without():
     """A row stored before a sidecar gained a variable must not make the
     connection test launch a different server than the run launches."""
-    from maljan.core.config import Settings
-    from maljan.tools.roots import SAMPLE_ROOTS_ENV
+    from malspark.core.config import Settings
+    from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
     stored = Settings(_env_file=None).mcp.servers["analysis"].model_dump(mode="json")
     stored.pop("auth_token", None)
@@ -301,7 +301,7 @@ async def test_a_built_in_is_probed_with_the_environment_names_it_cannot_run_wit
 
 @pytest.mark.asyncio
 async def test_a_server_the_operator_added_is_probed_with_exactly_its_own_names():
-    from maljan.tools.roots import SAMPLE_ROOTS_ENV
+    from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
     result = await run_mcp_probe(
         "r2custom",
@@ -322,7 +322,7 @@ async def test_a_server_the_operator_added_is_probed_with_exactly_its_own_names(
 async def test_a_built_in_is_probed_without_a_shipped_name_an_admin_took_away():
     """The console tests the server a run gets, and a run gets no intel key
     once the admin has emptied that list."""
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     stored = Settings(_env_file=None).mcp.servers["threatintel"].model_dump(mode="json")
     stored.pop("auth_token", None)
@@ -345,7 +345,7 @@ class _HandleThatDeclares(_Handle):
             {
                 "name": "scan",
                 "inputSchema": {"type": "object"},
-                "_meta": {"maljan/tool_facts": {"kind": "identification", "rows": "/d/*"}},
+                "_meta": {"malspark/tool_facts": {"kind": "identification", "rows": "/d/*"}},
             }
         ]
 
@@ -366,7 +366,7 @@ async def test_what_a_server_declares_is_proposed_as_far_as_its_block_trusts_it(
 
 @pytest.mark.asyncio
 async def test_a_repointed_built_in_does_not_post_back_its_shipped_trust(monkeypatch):
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     monkeypatch.setattr("app.services.settings_probes.ServerHandle", _HandleThatDeclares)
     entry = Settings(_env_file=None).mcp.servers["analysis"].model_dump(mode="json")
@@ -387,7 +387,7 @@ async def test_a_repointed_built_in_is_probed_as_trusted_only_where_the_operator
 ):
     """An operator's tick (``""``) holds for the server the entry points at;
     the grant of another launch, carried through a repoint, does not."""
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     monkeypatch.setattr("app.services.settings_probes.ServerHandle", _HandleThatDeclares)
     entry = Settings(_env_file=None).mcp.servers["analysis"].model_dump(mode="json")

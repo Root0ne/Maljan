@@ -14,8 +14,8 @@ import json
 import time
 from typing import Any
 
-from maljan.reporting.evidence_bundles import bundle_for, value_entries
-from maljan.reporting.models import (
+from malspark.reporting.evidence_bundles import bundle_for, value_entries
+from malspark.reporting.models import (
     EvidenceIndexRow,
     EvidenceSection,
     FileHashes,
@@ -167,7 +167,7 @@ def test_a_huge_answer_keeps_only_the_wanted_values_in_memory() -> None:
 def test_the_sections_of_one_report_read_its_answers_once() -> None:
     from unittest import mock
 
-    from maljan.reporting import evidence_bundles
+    from malspark.reporting import evidence_bundles
 
     report = _big_answer(10)
     wraps = evidence_bundles._value_holders

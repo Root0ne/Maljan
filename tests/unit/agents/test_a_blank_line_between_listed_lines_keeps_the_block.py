@@ -34,14 +34,14 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
-from maljan.agents.judge_agent import JudgeAgent, read_contradictions_block
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.pipeline import events
-from maljan.pipeline.debate_facts import carries_line_field, read_marks
-from maljan.pipeline.events import remember_secret_values
-from maljan.pipeline.mediation_models import MediatorVerdict
-from maljan.pipeline.state import AgentArgument
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.judge_agent import JudgeAgent, read_contradictions_block
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.pipeline import events
+from malspark.pipeline.debate_facts import carries_line_field, read_marks
+from malspark.pipeline.events import remember_secret_values
+from malspark.pipeline.mediation_models import MediatorVerdict
+from malspark.pipeline.state import AgentArgument
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.credential_shapes import lowercase_body
 from tests.linear_cost import TIME_RATIO_LIMIT, calls, cpu_seconds
 

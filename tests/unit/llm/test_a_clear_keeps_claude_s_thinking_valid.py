@@ -20,8 +20,8 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
 
 from .anthropic_wire import Wire, install, message
 from .test_a_replayed_thinking_block_stays_valid import _model
@@ -94,7 +94,7 @@ class _Analyst(BaseAnalyst):
 def test_a_refusal_clears_resends_and_the_salvage_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.agents import base_agent
+    from malspark.agents import base_agent
 
     wire = _LengthWire(_answer)
     install(monkeypatch, wire)

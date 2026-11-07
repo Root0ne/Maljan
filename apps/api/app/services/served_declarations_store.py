@@ -1,6 +1,6 @@
 """What each tool server last declared of its own tools, kept in the database.
 
-The process half is ``maljan.core.served_declarations``: what a server
+The process half is ``malspark.core.served_declarations``: what a server
 declares when it is listed is held there, and read by every reader of the
 declarations in force. This module keeps it past the process, in
 ``served_tool_declarations`` (``app.models.served_declaration``):
@@ -44,7 +44,7 @@ logger = get_logger(__name__)
 
 async def load(db: AsyncSession) -> int:
     """Read every kept declaration into this process; the number of rows read, -1 on failure."""
-    from maljan.core.served_declarations import install_persisted
+    from malspark.core.served_declarations import install_persisted
 
     try:
         rows = (await db.execute(select(ServedDeclaration))).scalars().all()
@@ -77,7 +77,7 @@ _LOAD_FAILURE: list[str | None] = [None]
 
 async def save(db: AsyncSession) -> int:
     """Write back what this process listed or forgot since; the rows written, -1 on failure."""
-    from maljan.core.served_declarations import mark_saved, unsaved
+    from malspark.core.served_declarations import mark_saved, unsaved
 
     rows = unsaved()
     if not rows:
@@ -174,7 +174,7 @@ def refresh_failure() -> str | None:
 
 async def read_through_stored(db: AsyncSession) -> None:
     """Have this process read its built-in servers through the stored settings' blocks."""
-    from maljan.core.declared_reading import read_through_settings
+    from malspark.core.declared_reading import read_through_settings
 
     from app.services.settings_service import effective_core_settings
 
@@ -183,7 +183,7 @@ async def read_through_stored(db: AsyncSession) -> None:
 
 def launches(settings: Any) -> dict[str, str]:
     """Each source's block launch identity under ``settings``: its servers and providers."""
-    from maljan.core.tool_declarations import ToolDeclarations
+    from malspark.core.tool_declarations import ToolDeclarations
 
     return {
         str(declared.source): declared.launch
@@ -198,7 +198,7 @@ async def prepare_job(db_session: Any, settings: Any) -> None:
     Reaches no server. Never raises: a store that cannot be read or written
     leaves each server read as undeclared until it attaches.
     """
-    from maljan.core.served_declarations import forget_moved
+    from malspark.core.served_declarations import forget_moved
 
     try:
         async with db_session() as db:
@@ -217,7 +217,7 @@ async def list_before_run(db_session: Any, settings: Any) -> None:
     Only for a job that runs for real: a mock run reaches no server of its
     own accord (``providers.served_listing``).
     """
-    from maljan.providers.served_listing import list_unlisted
+    from malspark.providers.served_listing import list_unlisted
 
     try:
         listed = await list_unlisted(settings)
@@ -230,7 +230,7 @@ async def list_before_run(db_session: Any, settings: Any) -> None:
 
 async def keep(db_session: Any) -> None:
     """Save what this process listed or forgot since; never raises."""
-    from maljan.core.served_declarations import unsaved
+    from malspark.core.served_declarations import unsaved
 
     if not unsaved():
         return
@@ -249,7 +249,7 @@ def probed_as_saved(server: str, stored: dict[str, Any], values: dict[str, Any])
     is the saved block in force, every field compared, its environment and
     token included. An entry no saved settings hold is never the saved one.
     """
-    from maljan.core.settings_overrides import build_settings, split_key
+    from malspark.core.settings_overrides import build_settings, split_key
 
     from app.services.settings_probes import _merge_server_entry
 
@@ -287,7 +287,7 @@ async def keep_probe_listing(
     it was, never saved over the saved block's row. Whether it was kept;
     never raises.
     """
-    from maljan.core.served_declarations import restore_served
+    from malspark.core.served_declarations import restore_served
 
     source = f"mcp:{server}"
     try:

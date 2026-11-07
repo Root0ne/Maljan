@@ -17,10 +17,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.core.config import ChunkingConfig
-from maljan.llm.context_window import UNKNOWN_WINDOW_CHUNK_TOKENS
-from maljan.loaders.binary_chunker import _CHARS_PER_TOKEN, BinaryChunker, header_chars
-from maljan.pipeline.nodes import _build_revision_context, _revision_input_is_absent
+from malspark.core.config import ChunkingConfig
+from malspark.llm.context_window import UNKNOWN_WINDOW_CHUNK_TOKENS
+from malspark.loaders.binary_chunker import _CHARS_PER_TOKEN, BinaryChunker, header_chars
+from malspark.pipeline.nodes import _build_revision_context, _revision_input_is_absent
 
 SHIPPED = UNKNOWN_WINDOW_CHUNK_TOKENS * _CHARS_PER_TOKEN
 

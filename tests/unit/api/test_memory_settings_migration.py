@@ -76,8 +76,8 @@ def test_the_revision_follows_the_head_it_was_written_on() -> None:
 
 
 def test_every_moved_key_is_one_the_catalogue_holds() -> None:
-    from maljan.core.settings_annotations import RENAMED_SETTINGS
-    from maljan.core.settings_catalog import core_catalog
+    from malspark.core.settings_annotations import RENAMED_SETTINGS
+    from malspark.core.settings_catalog import core_catalog
 
     keys = {e.key for e in core_catalog()}
     memory = {o: n for o, n in RENAMED_SETTINGS.items() if o.startswith("core.memory.")}
@@ -108,7 +108,7 @@ def test_upgrade_renames_each_row_keeping_everything_it_holds() -> None:
 
 
 def test_the_upgraded_rows_read_back_as_the_same_configuration() -> None:
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     conn = _connect()
     _seed(conn)

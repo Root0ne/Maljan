@@ -20,8 +20,8 @@ from collections.abc import Iterator
 import numpy as np
 import pytest
 
-from maljan.tools import string_blobs as sb
-from maljan.tools.pe_image import Image, Section
+from malspark.tools import string_blobs as sb
+from malspark.tools.pe_image import Image, Section
 
 # -- the replaced sweeps, as they were ----------------------------------------
 

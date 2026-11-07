@@ -224,7 +224,7 @@ const browserTransport: RunTransport = {
     const token =
       typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
     const url = `${defaultWsBase()}/ws/analysis/${jobId}?since=${since}`;
-    const protocols = token ? ["maljan.v1", `maljan.v1.${token}`] : ["maljan.v1"];
+    const protocols = token ? ["malspark.v1", `malspark.v1.${token}`] : ["malspark.v1"];
     const ws = new WebSocket(url, protocols);
 
     ws.onopen = () => handlers.onOpen();

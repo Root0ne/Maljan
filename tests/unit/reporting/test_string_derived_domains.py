@@ -13,10 +13,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.reporting.ledger_projection import network_from_ledger
-from maljan.reporting.models import NetworkDomain, NetworkIOCs
-from maljan.reporting.renderers.stix_renderer import _indicator_for_domain, publishes
-from maljan.schemas.evidence import build_entry
+from malspark.reporting.ledger_projection import network_from_ledger
+from malspark.reporting.models import NetworkDomain, NetworkIOCs
+from malspark.reporting.renderers.stix_renderer import _indicator_for_domain, publishes
+from malspark.schemas.evidence import build_entry
 
 
 def _entry(seq: int, tool: str, payload: dict[str, object]) -> object:
@@ -108,7 +108,7 @@ class TestNoStringDerivedDomainReachesTheBundle:
     """
 
     def _report(self) -> Any:
-        from maljan.reporting.builder import MalwareReportBuilder
+        from malspark.reporting.builder import MalwareReportBuilder
 
         rows = [
             {"kind": "domain", "value": "rosoft.com", "notes": None, "source": "strings"},
@@ -137,8 +137,8 @@ class TestNoStringDerivedDomainReachesTheBundle:
         ).build_deterministic()
 
     def _patterns(self) -> list[str]:
-        from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-        from maljan.schemas.stix_models import Indicator
+        from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+        from malspark.schemas.stix_models import Indicator
 
         bundle = ExtendedSTIXRenderer().render(self._report(), base_bundle=None)
         return [o.pattern for o in bundle.objects if isinstance(o, Indicator)]
@@ -168,7 +168,7 @@ class TestTheReportSaysWhereEachNameCameFrom:
     """
 
     def _markdown(self) -> str:
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         report = TestNoStringDerivedDomainReachesTheBundle()._report()
         return MarkdownRenderer().render(report)
@@ -189,7 +189,7 @@ def _a_v3_onion() -> str:
     import base64
     import hashlib
 
-    public_key = hashlib.sha256(b"maljan test onion service key").digest()
+    public_key = hashlib.sha256(b"malspark test onion service key").digest()
     version = b"\x03"
     checksum = hashlib.sha3_256(b".onion checksum" + public_key + version).digest()[:2]
     return base64.b32encode(public_key + checksum + version).decode().lower() + ".onion"
@@ -206,9 +206,9 @@ class TestATorAddressCorroboratesItself:
     """
 
     def _patterns(self, value: str) -> list[str]:
-        from maljan.reporting.builder import MalwareReportBuilder
-        from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-        from maljan.schemas.stix_models import Indicator
+        from malspark.reporting.builder import MalwareReportBuilder
+        from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+        from malspark.schemas.stix_models import Indicator
 
         rows = [{"kind": "domain", "value": value, "notes": "tor_hidden_service"}]
         report = MalwareReportBuilder(
@@ -247,15 +247,15 @@ class TestATorAddressCorroboratesItself:
         assert not any("rosoft" in pattern for pattern in self._patterns("rosoft.com"))
 
     def test_the_indicator_says_why_it_was_let_through(self) -> None:
-        from maljan.reporting.models import NetworkDomain
-        from maljan.reporting.renderers.stix_renderer import _indicator_for_domain
+        from malspark.reporting.models import NetworkDomain
+        from malspark.reporting.renderers.stix_renderer import _indicator_for_domain
 
         indicator = _indicator_for_domain(NetworkDomain(fqdn=_a_v3_onion(), source="strings"))
         assert indicator is not None
         assert "hidden service" in (indicator.description or "").lower()
 
     def test_it_is_still_labelled_a_string_and_never_looked_up(self) -> None:
-        from maljan.enrichment.orchestrator import _is_public_fqdn
+        from malspark.enrichment.orchestrator import _is_public_fqdn
 
         assert _is_public_fqdn(_a_v3_onion()) is False
 
@@ -278,8 +278,8 @@ class TestAnIndicatorWithNothingToSaySaysNothing:
     def test_a_domain_with_no_reason_carries_no_description_key(self) -> None:
         """An empty description is noise in a published bundle, and the key
         was absent before there was anything to put in it."""
-        from maljan.reporting.models import NetworkDomain
-        from maljan.reporting.renderers.stix_renderer import _indicator_for_domain
+        from malspark.reporting.models import NetworkDomain
+        from malspark.reporting.renderers.stix_renderer import _indicator_for_domain
 
         indicator = _indicator_for_domain(NetworkDomain(fqdn="c2.evil.tld", source="sandbox"))
         assert indicator is not None
@@ -287,8 +287,8 @@ class TestAnIndicatorWithNothingToSaySaysNothing:
         assert "description" not in indicator.model_dump(exclude_none=True)
 
     def test_a_domain_with_a_reason_still_carries_it(self) -> None:
-        from maljan.reporting.models import NetworkDomain
-        from maljan.reporting.renderers.stix_renderer import _indicator_for_domain
+        from malspark.reporting.models import NetworkDomain
+        from malspark.reporting.renderers.stix_renderer import _indicator_for_domain
 
         domain = NetworkDomain(fqdn="c2.evil.tld", source="sandbox", reason="Newly registered")
         indicator = _indicator_for_domain(domain)

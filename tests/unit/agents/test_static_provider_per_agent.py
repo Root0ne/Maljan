@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
 
 
 def _container(**agents) -> ServiceContainer:
@@ -30,7 +30,7 @@ def test_a_clone_reads_its_own_provider():
 
 def test_an_analyst_without_a_container_still_falls_back_to_the_global_provider():
     """Standalone use (tests, scripts) keeps working with no container at all."""
-    from maljan.agents.static_analyst import StaticAnalyst
+    from malspark.agents.static_analyst import StaticAnalyst
 
     agent = StaticAnalyst(llm=None, name="static")  # type: ignore[arg-type]
     assert agent._provider().id == "ghidra"

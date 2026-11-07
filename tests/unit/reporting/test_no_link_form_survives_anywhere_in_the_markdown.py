@@ -17,8 +17,8 @@ import re
 
 import pytest
 
-from maljan.core.paths import resolve_data
-from maljan.reporting.models import (
+from malspark.core.paths import resolve_data
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkIOCs,
@@ -29,7 +29,7 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer, _defanged_text
+from malspark.reporting.renderers.markdown import MarkdownRenderer, _defanged_text
 
 # A reference service's own lookup, the one form that stays a link.
 _KEPT = re.compile(
@@ -194,7 +194,7 @@ def _as_a_viewer_reads_it(markdown: str) -> tuple[str, list[str]]:
 
 @pytest.mark.parametrize("payload", REFERENCE_FORMS)
 def test_a_link_form_spelled_with_references_is_no_link_once_decoded(payload: str) -> None:
-    from maljan.reporting.renderers.html import HtmlRenderer
+    from malspark.reporting.renderers.html import HtmlRenderer
 
     report = _reference_report(f"Before {payload} after.")
     markdown = MarkdownRenderer().render(report)
@@ -210,7 +210,7 @@ def test_a_link_form_spelled_with_references_is_no_link_once_decoded(payload: st
 
 
 def test_the_html_report_links_no_target_whose_source_held_an_ampersand() -> None:
-    from maljan.reporting.renderers.html import _report_link
+    from malspark.reporting.renderers.html import _report_link
 
     assert not _report_link("https&#58;//evil&#46;example/")
     assert not _report_link("https://evil.example/?a=1&b=2")
@@ -230,7 +230,7 @@ def test_the_html_report_links_no_target_whose_source_held_an_ampersand() -> Non
     ],
 )
 def test_a_reference_in_code_prints_byte_for_byte(text: str) -> None:
-    from maljan.reporting.renderers.markdown import _escaped_references
+    from malspark.reporting.renderers.markdown import _escaped_references
 
     assert _escaped_references(text) == text
 
@@ -256,7 +256,7 @@ def test_a_reference_in_code_prints_byte_for_byte(text: str) -> None:
 def test_a_reference_outside_code_or_where_code_is_unsure_is_escaped(
     text: str, written: str
 ) -> None:
-    from maljan.reporting.renderers.markdown import _escaped_references
+    from malspark.reporting.renderers.markdown import _escaped_references
 
     assert _escaped_references(text) == written
 
@@ -269,7 +269,7 @@ def test_a_line_that_may_open_an_html_block_reads_no_code_anywhere() -> None:
 
 
 def test_a_fence_and_a_code_span_holding_references_print_byte_for_byte() -> None:
-    from maljan.reporting.models import RansomNote
+    from malspark.reporting.models import RansomNote
 
     report = _report("plain")
     report.static.pdb_path = "C:\\a&amp;b&#169;.pdb"
@@ -290,7 +290,7 @@ def test_a_fence_and_a_code_span_holding_references_print_byte_for_byte() -> Non
     ],
 )
 def test_an_escaped_text_is_cut_by_what_a_reader_sees(text: str, length: int, written: str) -> None:
-    from maljan.reporting.renderers.markdown import _truncate_escaped
+    from malspark.reporting.renderers.markdown import _truncate_escaped
 
     assert _truncate_escaped(text, length) == written
 
@@ -307,7 +307,7 @@ BRACKET_BEFORE_A_SPAN = (
 
 @pytest.mark.parametrize("prose", BRACKET_BEFORE_A_SPAN)
 def test_a_bracket_before_a_span_keeps_no_reference_live(prose: str) -> None:
-    from maljan.reporting.renderers.html import HtmlRenderer
+    from malspark.reporting.renderers.html import HtmlRenderer
 
     report = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),
@@ -321,7 +321,7 @@ def test_a_bracket_before_a_span_keeps_no_reference_live(prose: str) -> None:
 
 
 def test_a_block_with_one_unsure_line_is_escaped_whole() -> None:
-    from maljan.reporting.renderers.markdown import _escaped_references
+    from malspark.reporting.renderers.markdown import _escaped_references
 
     assert _escaped_references("`&#58;`\n`\n\n`&#58;`") == "`\\&#58;`\n`\n\n`&#58;`"
 
@@ -342,7 +342,7 @@ def test_a_fence_opened_after_spaces_keeps_no_reference_live(text: str) -> None:
 
     from markdown_it import MarkdownIt
 
-    from maljan.reporting.renderers.markdown import _escaped_references
+    from malspark.reporting.renderers.markdown import _escaped_references
 
     html = MarkdownIt("commonmark").render(_escaped_references(text))
     # A viewer may link the escaped text beside the page; never to the host.

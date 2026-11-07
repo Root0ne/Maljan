@@ -16,9 +16,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.providers import sandbox_tools
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
-from maljan.schemas.isr_models import AgentISR, Artifact
+from malspark.providers import sandbox_tools
+from malspark.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
+from malspark.schemas.isr_models import AgentISR, Artifact
 
 _SANDBOX_TOOLS = (
     "sandbox_processes",

@@ -15,8 +15,8 @@ the bare form otherwise. In haiku5 the reverser's round-2 disassembly was bare
 
 from __future__ import annotations
 
-from maljan.agents.evidence_recorder import RepeatGuard, seeded_repeat_guard
-from maljan.schemas.evidence import build_entry
+from malspark.agents.evidence_recorder import RepeatGuard, seeded_repeat_guard
+from malspark.schemas.evidence import build_entry
 
 LISTING = "0x1360bc03868: PUSH RBX\n..."
 

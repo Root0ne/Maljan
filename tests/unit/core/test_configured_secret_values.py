@@ -12,7 +12,7 @@ from __future__ import annotations
 from pydantic import BaseModel, SecretStr
 from tests.credential_shapes import password
 
-from maljan.core.settings_catalog import configured_secret_values
+from malspark.core.settings_catalog import configured_secret_values
 
 
 class _Server(BaseModel):
@@ -25,7 +25,7 @@ class _Section(BaseModel):
     api_key: SecretStr | None = None
     auth_token: str = ""
     base_url: str = ""
-    session_dir: str = "/var/lib/maljan/sessions"
+    session_dir: str = "/var/lib/malspark/sessions"
 
 
 class _Settings(BaseModel):
@@ -40,7 +40,7 @@ def test_every_secret_kind_value_is_collected() -> None:
     settings = _Settings(
         llm=_Section(api_key=SecretStr(llm_key), auth_token=ghidra),
         servers=[_Server(env={"VT_API_KEY": vt}, headers={"Authorization": f"Bearer {header}"})],
-        database_url="postgresql+asyncpg://maljan:" + db + "@db.example:5432/maljan",
+        database_url="postgresql+asyncpg://malspark:" + db + "@db.example:5432/malspark",
         minio_secret_key=SecretStr(minio),
     )
 
@@ -52,7 +52,7 @@ def test_every_secret_kind_value_is_collected() -> None:
 def test_what_is_not_a_secret_is_not_collected() -> None:
     found = configured_secret_values(_Settings(llm=_Section(base_url="http://127.0.0.1:8080")))
 
-    assert "/var/lib/maljan/sessions" not in found
+    assert "/var/lib/malspark/sessions" not in found
     assert "run-the-server" not in found
     assert "http://127.0.0.1:8080" not in found
     assert "" not in found
@@ -157,7 +157,7 @@ def test_each_credential_key_is_collected() -> None:
 
 
 def test_a_disabled_setting_leaves_the_word_in_a_report() -> None:
-    from maljan.pipeline import events as ev
+    from malspark.pipeline import events as ev
 
     ev.remember_secret_values(
         configured_secret_values(_Settings(servers=[_Server(env={"AUTH_MODE": "disabled"})]))
@@ -185,8 +185,8 @@ def test_a_configured_url_gives_every_credential_it_carries() -> None:
 
 def test_every_sandbox_api_token_stays_secret_by_the_generic_rules() -> None:
     """No sandbox's token needs its own name in the secret list: its type or its key covers it."""
-    from maljan.core.config import Settings
-    from maljan.core.settings_catalog import core_catalog, names_a_credential_value
+    from malspark.core.config import Settings
+    from malspark.core.settings_catalog import core_catalog, names_a_credential_value
 
     tokens = [e for e in core_catalog() if e.path.startswith("sandbox.") and "token" in e.path]
     assert tokens and all(entry.secret for entry in tokens)
@@ -224,7 +224,7 @@ def test_a_block_kept_as_an_extra_key_is_scrubbed() -> None:
 
 
 def test_an_unregistered_provider_block_in_the_settings_is_scrubbed() -> None:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     secret = password(variant=4)
     built = Settings(_env_file=None, llm={"someplugin": {"api_key": secret}})

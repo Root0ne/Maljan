@@ -6,7 +6,7 @@
 
 import type { EffortOptions } from "@/types/settings";
 
-/** One model of an agent's list, mirroring `maljan.core.config.ModelChoice`. */
+/** One model of an agent's list, mirroring `malspark.core.config.ModelChoice`. */
 export interface ModelChoice {
   provider: string;
   model: string;

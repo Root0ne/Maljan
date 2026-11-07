@@ -21,8 +21,8 @@ import io
 import zipfile
 from pathlib import Path
 
-from maljan.extractors import sample_identity
-from maljan.extractors.sample_identity import detect_file_type, routed_formats
+from malspark.extractors import sample_identity
+from malspark.extractors.sample_identity import detect_file_type, routed_formats
 
 FILLER = b"\x00" * 64
 

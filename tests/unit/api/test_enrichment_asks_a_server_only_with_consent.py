@@ -21,7 +21,7 @@ from app.services.enrichment_sources import (
     reputation_server_sources,
 )
 from app.services.settings_catalog_api import API_DEFAULTS, catalog_index
-from maljan.core.config import MCPServerConfig
+from malspark.core.config import MCPServerConfig
 
 LOOKUP = "-".join(["acme", "intel"])
 HOST = ".".join(["intel", "acme-labs", "net"])

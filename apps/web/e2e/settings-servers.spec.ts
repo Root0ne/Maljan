@@ -232,7 +232,7 @@ test.describe("tool servers and the REST sandbox", () => {
     await page.locator('[data-server="network"]').click();
     const detail = page.locator('[data-server-detail="network"]');
     await expect(
-      detail.getByText("Always passed: MALJAN_STAGING_DIR, MALJAN_SAMPLE_ROOTS")
+      detail.getByText("Always passed: MALSPARK_STAGING_DIR, MALSPARK_SAMPLE_ROOTS")
     ).toBeVisible();
     const box = detail.getByLabel("network env allow");
     await expect(box).toHaveValue("");
@@ -256,8 +256,8 @@ test.describe("tool servers and the REST sandbox", () => {
     // What is sent is what the API stores and what the child is started with:
     // the fixed names, then the typed one.
     expect(body.changes["core.mcp.servers"].network.env_allow).toEqual([
-      "MALJAN_STAGING_DIR",
-      "MALJAN_SAMPLE_ROOTS",
+      "MALSPARK_STAGING_DIR",
+      "MALSPARK_SAMPLE_ROOTS",
       "MY_OWN_VARIABLE",
     ]);
   });

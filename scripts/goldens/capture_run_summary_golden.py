@@ -33,7 +33,7 @@ GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "run_summary_keys.json"
 
 
 def _claim(technique_id: str, confidence: float) -> Any:
-    from maljan.schemas.isr_models import ClaimEvidence
+    from malspark.schemas.isr_models import ClaimEvidence
 
     return ClaimEvidence(
         claim=f"claim for {technique_id}",
@@ -44,7 +44,7 @@ def _claim(technique_id: str, confidence: float) -> Any:
 
 
 def _isr(agent_id: str, domain: str) -> Any:
-    from maljan.schemas.isr_models import AgentISR
+    from malspark.schemas.isr_models import AgentISR
 
     return AgentISR(
         agent_id=agent_id,
@@ -57,7 +57,7 @@ def _isr(agent_id: str, domain: str) -> Any:
 
 def default_profile_summary() -> dict[str, Any]:
     """A default-profile run with every optional section of the dataclass filled."""
-    from maljan.analysis.run_summary import RunSummaryBuilder
+    from malspark.analysis.run_summary import RunSummaryBuilder
 
     analysts = ["static", "dynamic", "network"]
     isr_reports = {key: _isr(key, key) for key in analysts}
@@ -135,7 +135,7 @@ def default_profile_summary() -> dict[str, Any]:
     builder.set_failed_analysts([])
     # Through the ledger a run records on, so the golden follows its shape:
     # one reported call with a cost, one a fallback answered with none.
-    from maljan.core.token_ledger import TokenLedger
+    from malspark.core.token_ledger import TokenLedger
 
     ledger = TokenLedger()
     ledger.add(
@@ -148,7 +148,7 @@ def default_profile_summary() -> dict[str, Any]:
     builder.set_server_rests(
         [{"server": "analysis", "failures": 3, "cooldown_s": 60.0, "reason": "timed out"}]
     )
-    from maljan.llm.generation_rate import GenerationRates
+    from malspark.llm.generation_rate import GenerationRates
 
     rates = GenerationRates()
     rates.observe("qwen", 380, 100.0, "ollama eval_count/eval_duration")
@@ -178,7 +178,7 @@ def default_profile_summary() -> dict[str, Any]:
 
 def _ledger() -> list[Any]:
     """One call that answered and one that did not, so ``failures`` has a row."""
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.schemas.evidence import LedgerEntry
 
     return [
         LedgerEntry(id="ev_0001", agent="static", tool="pe_info", ok=True, output="{}", seq=1),
@@ -207,7 +207,7 @@ def _disclosure(summary: dict[str, Any]) -> dict[str, Any]:
     worker names it and as its job adds what it asked: the summary a run is
     stored with once both have written it.
     """
-    from maljan.analysis.disclosure import (
+    from malspark.analysis.disclosure import (
         STAGING_DONE,
         disclosure_record,
         rdap_row,
@@ -217,7 +217,7 @@ def _disclosure(summary: dict[str, Any]) -> dict[str, Any]:
         with_enrichment,
         with_enrichment_asked,
     )
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.schemas.evidence import LedgerEntry
 
     snapshot = {
         "llm.provider": "openai",
@@ -313,9 +313,9 @@ def _efficiency(tokens: dict[str, Any] | None = None) -> dict[str, Any]:
 
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-    from maljan.analysis.efficiency import efficiency_record
-    from maljan.core.input_meter import InputMeter, request_parts
-    from maljan.core.token_ledger import TokenLedger
+    from malspark.analysis.efficiency import efficiency_record
+    from malspark.core.input_meter import InputMeter, request_parts
+    from malspark.core.token_ledger import TokenLedger
 
     meter = InputMeter()
     loop = object()
@@ -337,8 +337,8 @@ def _efficiency(tokens: dict[str, Any] | None = None) -> dict[str, Any]:
         model="openai/qwen",
         call="validation retry",
     )
-    from maljan.agents.composition import ResolvedAgent
-    from maljan.core.settings_overrides import build_settings
+    from malspark.agents.composition import ResolvedAgent
+    from malspark.core.settings_overrides import build_settings
 
     container = SimpleNamespace(
         input_meter=meter,
@@ -360,9 +360,9 @@ def _efficiency(tokens: dict[str, Any] | None = None) -> dict[str, Any]:
         setup_server_versions=lambda: {"analysis": {"name": "analysis-mcp", "version": "1.2.0"}},
         config=build_settings({}),
     )
-    from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
-    from maljan.schemas.evidence import LedgerEntry
-    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+    from malspark.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+    from malspark.schemas.evidence import LedgerEntry
+    from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
     cites = ClaimEvidence(claim="imports", evidence_ref="pe_info [ev_0001]", confidence=0.8)
     # The static analyst read the first entry back by its id.
@@ -374,7 +374,7 @@ def _efficiency(tokens: dict[str, Any] | None = None) -> dict[str, Any]:
         repeated_of="ev_0001",
         seq=3,
     )
-    from maljan.analysis.run_summary import spend_blocks
+    from malspark.analysis.run_summary import spend_blocks
 
     record = efficiency_record(
         container,
@@ -396,9 +396,9 @@ def _coverage() -> dict[str, Any]:
     citing nothing; one claim kept after the absence question; an unreadable
     row; a stopped run's reason.
     """
-    from maljan.analysis.coverage import coverage_record
-    from maljan.schemas.evidence import LedgerEntry
-    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+    from malspark.analysis.coverage import coverage_record
+    from malspark.schemas.evidence import LedgerEntry
+    from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
     sample = "/samples/sample.exe"
     path = {"v": 1, "kind": "strings", "arguments": {"path": "path", "carved": "carved_path"}}
@@ -594,9 +594,9 @@ def _coverage() -> dict[str, Any]:
 
 def stored_summary() -> dict[str, Any]:
     """The dataclass, plus every key written onto the dict after it exists."""
-    from maljan.pipeline.nodes import evidence_summary
-    from maljan.qa.fp_linter import FPWarning
-    from maljan.reporting.dedupe import MergeTally
+    from malspark.pipeline.nodes import evidence_summary
+    from malspark.qa.fp_linter import FPWarning
+    from malspark.reporting.dedupe import MergeTally
 
     summary = default_profile_summary()
 

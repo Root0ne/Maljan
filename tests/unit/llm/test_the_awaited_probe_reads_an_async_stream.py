@@ -21,8 +21,8 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.llm import context_window as cw
-from maljan.llm import model_output_limits
+from malspark.llm import context_window as cw
+from malspark.llm import model_output_limits
 
 MODEL = "deepseek-flash"
 WINDOW = 1_048_576

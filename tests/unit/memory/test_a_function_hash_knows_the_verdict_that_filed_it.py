@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.memory.function_hash_store import FunctionHashStore
-from maljan.memory.long_term_memory import match_functions
+from malspark.memory.function_hash_store import FunctionHashStore
+from malspark.memory.long_term_memory import match_functions
 
 
 def _index() -> FunctionHashStore:

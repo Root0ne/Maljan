@@ -1,6 +1,6 @@
 """Static analysis over stdio MCP: identify, strings, structure, rules.
 
-Every tool is a one-line delegation to ``maljan.tools`` — the sidecar runs in
+Every tool is a one-line delegation to ``malspark.tools`` — the sidecar runs in
 the same uv environment as the pipeline, so it imports the implementation
 rather than carrying a copy of it. What this file adds is the two things a
 tool server owes a model: an error is *returned*, never raised (an exception
@@ -10,14 +10,14 @@ manifest so the model learns why it is empty instead of never seeing the
 capability at all.
 
 ``put_sample`` implements the remote-delivery convention (see
-``maljan.agents.sample_staging``): a caller on another host uploads the bytes
+``malspark.agents.sample_staging``): a caller on another host uploads the bytes
 and gets back the path to pass to every other tool here.
 
 Started by the worker it serves over stdio; with ``--http``, over streamable
 HTTP behind its own token, from a container of its own (``MCP_BIND_ADDRESS``,
 ``MCP_PORT``, ``MCP_AUTH_TOKEN``, the shared sidecar plumbing's), where
 ``run_reader`` runs the triage pack's own readings of the sample
-(``maljan.tools.readers``), which the worker then does not run itself.
+(``malspark.tools.readers``), which the worker then does not run itself.
 """
 
 from __future__ import annotations
@@ -38,16 +38,19 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from maljan.core.stdio_safe import route_logging_to_stderr
+from malspark.core.stdio_safe import route_logging_to_stderr
 
 # Only when run as the stdio server: a test or tool that imports this module
 # in-process keeps its own logging.
 if __name__ == "__main__":
     route_logging_to_stderr()
+    from malspark.core.previous_name import warn_previous_environment
 
-from maljan.core.ctype_locale import pin_character_classification, say_on_stderr
-from maljan.core.paths import resolve_data
-from maljan.tools import (
+    warn_previous_environment()
+
+from malspark.core.ctype_locale import pin_character_classification, say_on_stderr
+from malspark.core.paths import resolve_data
+from malspark.tools import (
     api_hashes,
     children,
     crypto_constants,
@@ -59,16 +62,16 @@ from maljan.tools import (
     transforms,
     upx,
 )
-from maljan.tools import artefact_index as artefact_index_tools
-from maljan.tools import binary as binary_tools
-from maljan.tools import identify as identify_tools
-from maljan.tools import rules as rule_tools
-from maljan.tools import strings as string_tools
-from maljan.tools.arguments import SURROUNDING_QUOTES, read_unquoted, says_unquoted, with_read_as
-from maljan.tools.binary import carved_name_prefix
-from maljan.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
-from maljan.tools.declared_facts import NO_EFFECT, tool_declaration
-from maljan.tools.errors import (
+from malspark.tools import artefact_index as artefact_index_tools
+from malspark.tools import binary as binary_tools
+from malspark.tools import identify as identify_tools
+from malspark.tools import rules as rule_tools
+from malspark.tools import strings as string_tools
+from malspark.tools.arguments import SURROUNDING_QUOTES, read_unquoted, says_unquoted, with_read_as
+from malspark.tools.binary import carved_name_prefix
+from malspark.tools.capabilities import CAPABILITIES_TOOL, ToolNeeds, manifest
+from malspark.tools.declared_facts import NO_EFFECT, tool_declaration
+from malspark.tools.errors import (
     BAD_ARGUMENT,
     NO_SUCH_FILE,
     PATH_OUTSIDE_ROOTS,
@@ -76,8 +79,8 @@ from maljan.tools.errors import (
     normalise_error,
     tool_error,
 )
-from maljan.tools.roots import PathOutsideRoots, resolve_under, resolve_under_roots
-from maljan.tools.strings import DEFAULT_STRINGS_LIMIT
+from malspark.tools.roots import PathOutsideRoots, resolve_under, resolve_under_roots
+from malspark.tools.strings import DEFAULT_STRINGS_LIMIT
 
 # Pinned before the manifest below loads the YARA engine, whose ``nocase`` table
 # is built by the LC_CTYPE in force when it loads (``core.ctype_locale``). The
@@ -87,7 +90,7 @@ pin_character_classification(say=say_on_stderr)
 mcp = FastMCP("AnalysisMCP", stateless_http=True)
 
 # What each tool needs beyond the interpreter, probed once when the server
-# starts (``maljan.tools.sidecar_needs``, where a check made before a job reads
+# starts (``malspark.tools.sidecar_needs``, where a check made before a job reads
 # the same declaration), and the wall clock each long tool is given.
 TOOL_NEEDS: list[ToolNeeds] = sidecar_needs.ANALYSIS
 YARA_TIMEOUT_S = sidecar_needs.YARA_TIMEOUT_S
@@ -96,7 +99,7 @@ FLOSS_TIMEOUT_S: int | None = sidecar_needs.FLOSS_TIMEOUT_S
 CAPABILITIES = manifest("analysis", TOOL_NEEDS)
 
 # ---------------------------------------------------------------------------
-# What each tool declares of itself (``maljan.tools.declared_facts``)
+# What each tool declares of itself (``malspark.tools.declared_facts``)
 # ---------------------------------------------------------------------------
 
 # Where an asserting tool's answer names technique ids: under these keys within
@@ -758,7 +761,7 @@ def _guard(tool: str, call: Any, **kwargs: Any) -> dict[str, Any]:
     structure; a returned error is something it can read and route around,
     which is the difference between an agent that tries another tool and one
     that retries the same broken call until its step budget is gone. The
-    error carries a code and a remediation (``maljan.tools.errors``), and an
+    error carries a code and a remediation (``malspark.tools.errors``), and an
     implementation's flat ``{"error": "<text>"}`` is rewritten into the same
     shape on the way out.
 
@@ -1536,7 +1539,7 @@ def transform_bytes(
 
 
 def _staging_ttl_seconds() -> float:
-    """``MALJAN_STAGING_TTL_HOURS``, or a day (``staging.staging_ttl_seconds``).
+    """``MALSPARK_STAGING_TTL_HOURS``, or a day (``staging.staging_ttl_seconds``).
 
     How long a staged sample is kept. Every ``put_sample*`` call prunes, so a
     long-lived server does not accumulate malware bytes without bound.
@@ -1547,7 +1550,7 @@ def _staging_ttl_seconds() -> float:
 def _staging_base() -> Path:
     """The staging path this server is configured for, created or not.
 
-    The *base*, shared by every job on this host: ``MALJAN_STAGING_DIR`` or the
+    The *base*, shared by every job on this host: ``MALSPARK_STAGING_DIR`` or the
     default. Nothing is written here directly any more — see ``_staging_root``
     — but the sweep walks it, because the job directories are its children.
     """
@@ -1557,7 +1560,7 @@ def _staging_base() -> Path:
 def _staging_root() -> Path:
     """The directory this job may write and read, created or not.
 
-    ``<base>/<MALJAN_STAGING_JOB>`` when the process that spawned this server
+    ``<base>/<MALSPARK_STAGING_JOB>`` when the process that spawned this server
     named a job, and the base itself when nothing did — a server started by
     hand or by a settings probe, which has no job to be confined to.
 
@@ -1571,7 +1574,7 @@ def _staging_root() -> Path:
 def _private_dir(path: Path) -> Path:
     """``path`` as a directory only this user may enter, or an error.
 
-    The rule lives in ``maljan.tools.staging`` so the worker's capture
+    The rule lives in ``malspark.tools.staging`` so the worker's capture
     directory is opened under exactly the same checks this server opens its
     own staging directory under.
     """
@@ -1605,6 +1608,12 @@ def _prune_staging(base: Path) -> int:
     if ttl <= 0:
         return 0
     cutoff = time.time() - ttl
+    removed = _prune_base(base, cutoff)
+    return removed + _prune_legacy_captures(cutoff) + _prune_legacy_base(base, cutoff)
+
+
+def _prune_base(base: Path, cutoff: float) -> int:
+    """Sweep one staging base: its job directories, its flat files and its carved tree."""
     removed = 0
     for entry in base.iterdir():
         try:
@@ -1620,7 +1629,30 @@ def _prune_staging(base: Path) -> int:
         except OSError:  # a file another call already removed
             continue
     removed += _prune_carved(base / CARVED_DIRECTORY, cutoff)
-    return removed + _prune_legacy_captures(cutoff)
+    return removed
+
+
+def _prune_legacy_base(base: Path, cutoff: float) -> int:
+    """Sweep the default base a release before the product's rename staged into.
+
+    Swept as the current base is, with the same TTL, and removed once empty. A
+    link, or a directory this process does not own, is left alone: it is not
+    this project's to empty.
+    """
+    root = Path(tempfile.gettempdir()) / staging.LEGACY_BASE_NAME
+    if root == base or root.is_symlink() or not root.is_dir():
+        return 0
+    try:
+        if root.lstat().st_uid != os.getuid():
+            return 0
+    except OSError:
+        return 0
+    removed = _prune_base(root, cutoff)
+    with contextlib.suppress(OSError):  # only when the last of it has gone
+        (root / CARVED_DIRECTORY).rmdir()
+    with contextlib.suppress(OSError):
+        root.rmdir()
+    return removed
 
 
 def _prune_legacy_captures(cutoff: float) -> int:
@@ -1891,7 +1923,7 @@ def run_reader(
     A delivery primitive, never offered to a model: the worker's triage pack
     calls it when this server runs in a container of its own, so the reading
     opens the sample here and the worker reads only the answer
-    (``maljan.tools.readers``). Only a reading standing in for a tool this
+    (``malspark.tools.readers``). Only a reading standing in for a tool this
     server offers is run, its file arguments held to the sample roots and
     ``job``'s staging directory.
     """
@@ -1906,7 +1938,7 @@ def release_job(job: str) -> dict[str, Any]:
     a job whose readings ran here ends, so ``job``'s staging directory (capa's
     and FLOSS's scratch, the unpacker's carves) goes then rather than at the
     staging TTL. Only that job's directory, never a path the id could name
-    (``maljan.tools.readers.serve_release``).
+    (``malspark.tools.readers.serve_release``).
     """
     return readers.serve_release(job)
 

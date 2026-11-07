@@ -18,22 +18,22 @@ from typing import Any
 
 import pytest
 
-from maljan.parsers.network_parser import NetworkParser
-from maljan.providers.sandbox.readers import ReportReader
-from maljan.reporting.builder import ioc_table
-from maljan.reporting.evidence_bundles import sample_flow_fact
-from maljan.reporting.ledger_projection import network_from_sandbox_report
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-from maljan.schemas.sandbox_document import (
+from malspark.parsers.network_parser import NetworkParser
+from malspark.providers.sandbox.readers import ReportReader
+from malspark.reporting.builder import ioc_table
+from malspark.reporting.evidence_bundles import sample_flow_fact
+from malspark.reporting.ledger_projection import network_from_sandbox_report
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+from malspark.schemas.sandbox_document import (
     DNS_AS_WRITTEN_KEY,
     DNS_REQUEST_KEY,
     SAME_REQUEST_KEY,
     DnsAnswers,
     sandbox_document,
 )
-from maljan.schemas.sandbox_report import (
+from malspark.schemas.sandbox_report import (
     SandboxDnsRequest,
     SandboxNetwork,
     SandboxReport,
@@ -196,8 +196,8 @@ def test_an_alias_chain_leads_a_name_to_its_addresses() -> None:
 
 def _cape_upload(link_key: str) -> dict[str, Any]:
     """A CAPE report whose two DNS rows each carry ``link_key: 7``, read by the upload provider."""
-    from maljan.core.config import Settings
-    from maljan.providers.sandbox.upload import UploadSandboxProvider
+    from malspark.core.config import Settings
+    from malspark.providers.sandbox.upload import UploadSandboxProvider
 
     rows = [
         {
@@ -275,7 +275,7 @@ def test_only_an_address_record_names_an_address() -> None:
 
 
 def test_a_cut_is_stated_on_the_names_it_withheld_from() -> None:
-    from maljan.reporting.builder import _domain_context
+    from malspark.reporting.builder import _domain_context
 
     n = 300
     questions = [{"name": f"q{i}.relay-n4.net", "type": "A"} for i in range(n)]
@@ -295,7 +295,7 @@ def test_a_cut_is_stated_on_the_names_it_withheld_from() -> None:
 
 def _ledger_view(rows: list[dict[str, Any]], *, server: str | None, source: str | None) -> Any:
     """A ``sandbox_network`` ledger answer holding ``rows``, as one tool or another wrote it."""
-    from maljan.schemas.evidence import build_entry
+    from malspark.schemas.evidence import build_entry
 
     return build_entry(
         entry_id="ev_0001",
@@ -318,7 +318,7 @@ def _linked_rows() -> list[dict[str, Any]]:
 
 
 def _resolved_from(entries: list[Any]) -> dict[str, list[str]]:
-    from maljan.reporting.ledger_projection import network_from_ledger
+    from malspark.reporting.ledger_projection import network_from_ledger
 
     network = network_from_ledger(entries)
     assert network is not None
@@ -365,7 +365,7 @@ def test_two_views_of_one_report_withhold_the_count_once() -> None:
     request = {"domain_req": {"questions": questions}, "domain_resp": {"answers": answers}}
     rows = _document([request])["network"]["dns"]
     one = _ledger_view(rows, server=None, source="sandbox")
-    from maljan.reporting.ledger_projection import network_from_ledger
+    from malspark.reporting.ledger_projection import network_from_ledger
 
     single = {d.fqdn: d.resolved_ips_withheld for d in network_from_ledger([one]).domains}
     twice = network_from_ledger([one, one.model_copy(update={"id": "ev_0002", "seq": 2})])
@@ -590,7 +590,7 @@ class TestALinkOutsideTheDnsRowsIsNeverHonoured:
             assert _resolved_by(_FieldsDomainsReader(), payload)[UNRELATED] == []
 
     def test_the_platform_s_own_ledger_view_reads_a_domains_row_s_own_answers(self) -> None:
-        from maljan.schemas.evidence import build_entry
+        from malspark.schemas.evidence import build_entry
 
         rows = [
             {"request": "relay-a-s1.net", DNS_REQUEST_KEY: 0, "answers": [{"data": "45.33.32.50"}]},
@@ -659,7 +659,7 @@ class TestAKeptSourceKeepsItsStructuralRequests:
         assert document["network"]["dns"] == value
 
     def test_a_dns_value_no_row_reader_reads_is_no_row_and_no_indicator(self) -> None:
-        from maljan.providers.sandbox_tools import sandbox_network
+        from malspark.providers.sandbox_tools import sandbox_network
 
         shapeless = ({"weird": 1}, {"answers": []}, {"request": "  "})
         for value in ("N/A", "evil-string-c4.net", 0, 7, True, False, *shapeless):
@@ -719,7 +719,7 @@ class TestAKeptSourceKeepsItsStructuralRequests:
 
 class TestTheFillsAgreeWithTheDocument:
     def test_requests_with_no_place_fill_nothing(self) -> None:
-        from maljan.schemas.sandbox_report import report_fills
+        from malspark.schemas.sandbox_report import report_fills
 
         for network in ("unavailable", [1, 2], 5):
             payload = {"info": {"id": 1}, "network": network, "message": _two_name_message()}
@@ -729,7 +729,7 @@ class TestTheFillsAgreeWithTheDocument:
             assert "network.dns" not in report_fills(report)
 
     def test_requests_with_a_place_fill_the_dns_rows(self) -> None:
-        from maljan.schemas.sandbox_report import report_fills
+        from malspark.schemas.sandbox_report import report_fills
 
         for payload in (
             {"info": {"id": 1}, "message": _two_name_message()},
@@ -741,7 +741,7 @@ class TestTheFillsAgreeWithTheDocument:
             assert "network.dns" in report_fills(report)
 
     def test_a_laid_out_report_s_requests_fill_the_dns_rows(self) -> None:
-        from maljan.schemas.sandbox_report import report_fills
+        from malspark.schemas.sandbox_report import report_fills
 
         report = SandboxReport(provider="x", source_format="y")
         report.network.dns_requests.append(
@@ -758,7 +758,7 @@ _NAME_KEYS = ("request", "query", "hostname", "domain", "name")
 
 
 def _dns_item_root(row: dict[str, Any]) -> str:
-    from maljan.analysis.evidence_roots import SECTION_OF_PREFIX, _item_root, _Joins
+    from malspark.analysis.evidence_roots import SECTION_OF_PREFIX, _item_root, _Joins
 
     prefix = next(p for p, section in SECTION_OF_PREFIX.items() if section == "network")
     joins = _Joins()
@@ -769,8 +769,8 @@ def _dns_item_root(row: dict[str, Any]) -> str:
 class TestEveryReaderReadsADnsRowSNameAlike:
     @pytest.mark.parametrize("key", _NAME_KEYS)
     def test_a_row_naming_its_name_under_any_field_is_read_by_every_reader(self, key: str) -> None:
-        from maljan.parsers.dynamic_parser import DynamicParser
-        from maljan.schemas.sandbox_document import dns_row_name, reads_as_dns_row
+        from malspark.parsers.dynamic_parser import DynamicParser
+        from malspark.schemas.sandbox_document import dns_row_name, reads_as_dns_row
 
         row = {key: " own-z1.net ", "answers": [{"data": "45.33.32.81"}]}
         assert dns_row_name(row) == "own-z1.net"
@@ -800,7 +800,7 @@ class TestEveryReaderReadsADnsRowSNameAlike:
     def test_no_reader_holds_its_own_copy_of_the_name_fields(self) -> None:
         from pathlib import Path
 
-        root = Path(__file__).resolve().parents[4] / "src" / "maljan"
+        root = Path(__file__).resolve().parents[4] / "src" / "malspark"
         readers = (
             "parsers/network_parser.py",
             "parsers/dynamic_parser.py",
@@ -829,7 +829,7 @@ class TestEveryReaderReadsADnsRowSNameAlike:
         """
         from pathlib import Path
 
-        root = Path(__file__).resolve().parents[4] / "src" / "maljan"
+        root = Path(__file__).resolve().parents[4] / "src" / "malspark"
         allowed = {
             ("schemas/sandbox_document.py", "DNS_NAME_KEYS"),
             ("reporting/ledger_report.py", "_NON_DNS_ENDPOINT_KEYS"),
@@ -878,9 +878,9 @@ class TestEveryReaderReadsADnsRowSNameAlike:
     def test_the_markdown_network_table_prints_a_row_named_under_any_name_key(
         self, key: str
     ) -> None:
-        from maljan.reporting.ledger_report import build_sections
-        from maljan.schemas.evidence import LedgerEntry
-        from maljan.schemas.sandbox_document import DNS_NAME_KEYS
+        from malspark.reporting.ledger_report import build_sections
+        from malspark.schemas.evidence import LedgerEntry
+        from malspark.schemas.sandbox_document import DNS_NAME_KEYS
 
         assert key in DNS_NAME_KEYS
         row = {key: "own-z1.net", "type": "A", "answers": [{"data": "45.33.32.81"}]}
@@ -895,8 +895,8 @@ class TestEveryReaderReadsADnsRowSNameAlike:
         assert [r[:2] for r in table.rows] == [["dns", "own-z1.net"]]
 
     def test_a_query_row_with_an_interface_name_prints_the_query(self) -> None:
-        from maljan.reporting.ledger_report import build_sections
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.reporting.ledger_report import build_sections
+        from malspark.schemas.evidence import LedgerEntry
 
         row = {"query": "own-z1.net", "type": "A", "name": "eth0"}
         entry = LedgerEntry(
@@ -964,7 +964,7 @@ class TestOnePlaceDecision:
     @pytest.mark.parametrize("network", _ARRANGEMENTS, ids=repr)
     @pytest.mark.parametrize("with_request", [True, False])
     def test_the_place_decision_is_the_document_s(self, network: Any, with_request: bool) -> None:
-        from maljan.schemas.sandbox_document import dns_requests_have_place
+        from malspark.schemas.sandbox_document import dns_requests_have_place
 
         payload: dict[str, Any] = {"info": {"id": 1}}
         if network != "absent":
@@ -991,8 +991,8 @@ def test_a_bare_string_domains_row_is_projected_as_dev_projected_it() -> None:
 
     The expected rows were captured with dev's ``network_from_ledger``.
     """
-    from maljan.reporting.ledger_projection import network_from_ledger
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.reporting.ledger_projection import network_from_ledger
+    from malspark.schemas.evidence import LedgerEntry
 
     data = {
         "domains": ["own-m6.example", " spaced-m6.example ", {"domain": "row-m6.example"}],
@@ -1017,7 +1017,7 @@ def _name_field_copies(source: str) -> list[tuple[int, str]]:
     """
     import ast
 
-    from maljan.schemas.sandbox_document import DNS_NAME_KEYS
+    from malspark.schemas.sandbox_document import DNS_NAME_KEYS
 
     names = set(DNS_NAME_KEYS)
     tree = ast.parse(source)

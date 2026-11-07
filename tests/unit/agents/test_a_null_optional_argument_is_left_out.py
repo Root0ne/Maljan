@@ -30,19 +30,19 @@ from langchain_core.tools import StructuredTool
 from mcp.types import CallToolResult, TextContent
 from pydantic import ValidationError, create_model
 
-from maljan.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
-from maljan.agents.mcp_client import MCPLangChainToolkit
-from maljan.agents.null_arguments import (
+from malspark.agents.evidence_recorder import EvidenceRecorder, RepeatGuard, record_tools
+from malspark.agents.mcp_client import MCPLangChainToolkit
+from malspark.agents.null_arguments import (
     DROPPED_KEY,
     admits_null,
     drop_unset_nulls,
     rules_of,
     schema_rules,
 )
-from maljan.agents.tool_pinning import _pin_tool, _schema_without
-from maljan.pipeline.events import TOOL_CALL_STARTED
-from maljan.providers.static.ghidra.http_client import GhidraHTTPClient
-from maljan.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
+from malspark.agents.tool_pinning import _pin_tool, _schema_without
+from malspark.pipeline.events import TOOL_CALL_STARTED
+from malspark.providers.static.ghidra.http_client import GhidraHTTPClient
+from malspark.schemas.evidence import EvidenceCounter, LedgerEntry, build_entry
 
 DEFINITIONS = (
     Path(__file__).parents[2] / "fixtures" / "tools" / "reverser_ghidra_tool_definitions.json"

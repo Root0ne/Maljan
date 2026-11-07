@@ -32,7 +32,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 import redis.asyncio as aioredis
-from maljan.core.settings_overrides import redact_url
+from malspark.core.settings_overrides import redact_url
 
 from app.config import settings
 from app.logging_config import get_logger
@@ -42,7 +42,7 @@ from app.runtime_config import runtime_config
 from app.worker.queues import ANALYSIS_QUEUE, ENRICHMENT_QUEUE, build_redis_settings
 
 if TYPE_CHECKING:
-    from maljan.memory.long_term_memory import MemoryStore
+    from malspark.memory.long_term_memory import MemoryStore
 
 logger = get_logger("worker.enrich")
 
@@ -264,7 +264,7 @@ _memory_store: MemoryStore | None = None
 async def _get_memory_store() -> MemoryStore | None:
     """Lazily build the configured LTM store. Cached process-wide, never raises.
 
-    Built by ``maljan.memory.store_factory.build_memory_store`` from
+    Built by ``malspark.memory.store_factory.build_memory_store`` from
     ``core.memory`` — the backend and the settings the analysis path reads, so
     enrichment reads the store the runs wrote. Returns ``None`` when the store
     cannot be built, so the enrichment task degrades to reputation-only
@@ -275,8 +275,8 @@ async def _get_memory_store() -> MemoryStore | None:
         return _memory_store
 
     try:
-        from maljan.core.plugins import ALLOW_LIST_KEY, load_allowed, registry_changes
-        from maljan.memory.store_factory import build_memory_store, configured_backend
+        from malspark.core.plugins import ALLOW_LIST_KEY, load_allowed, registry_changes
+        from malspark.memory.store_factory import build_memory_store, configured_backend
 
         from app.services.settings_service import core_settings_cache
 
@@ -387,8 +387,8 @@ async def enrich_threat_intel(
         await db.commit()
 
     # Lazy import keeps the API/worker startup graph free of optional
-    # maljan-core dependencies.
-    from maljan.enrichment import enrich_malware_report
+    # malspark-core dependencies.
+    from malspark.enrichment import enrich_malware_report
 
     from app.services.enrichment_sources import (
         ENRICHMENT_SOURCES_PATH,
@@ -425,7 +425,7 @@ async def enrich_threat_intel(
     # counted as attempted before it goes out, and before the first one the
     # stored record is marked, so a job that dies after it never leaves
     # "nothing" standing.
-    from maljan.analysis.disclosure import (
+    from malspark.analysis.disclosure import (
         ENRICHMENT_DONE,
         ENRICHMENT_STOPPED,
         EnrichmentAsks,
@@ -663,7 +663,7 @@ def enrichment_laid_over(stored: dict[str, Any], enriched: dict[str, Any]) -> di
     written to the report during the lookups, another enrichment's results
     included, is kept.
     """
-    from maljan.enrichment.orchestrator import _has_successful_rep
+    from malspark.enrichment.orchestrator import _has_successful_rep
 
     out = dict(stored)
     network = dict(out.get("network") or {})
@@ -722,7 +722,7 @@ _NOT_ASKED_SECTIONS = {"domain": "domains", "ip": "ips"}
 
 def _questions_still_unasked(rows: Any, network: dict[str, Any]) -> list[dict[str, Any]]:
     """The not-asked rows, each with the questions its laid-over stored row still lacks."""
-    from maljan.enrichment.orchestrator import _has_successful_rep
+    from malspark.enrichment.orchestrator import _has_successful_rep
 
     if not isinstance(rows, list):
         return []
@@ -760,7 +760,7 @@ def disclosed(
     without a record (a run stored before the block existed) is left as it is,
     answered as ``None``; so is a payload without one.
     """
-    from maljan.analysis.disclosure import in_payload
+    from malspark.analysis.disclosure import in_payload
 
     updated = in_payload(payload, change)
     column = dict(run_summary) if isinstance(run_summary, dict) else None
@@ -785,7 +785,7 @@ def disclosed_enrichment(
     withheld (never asked, with the reason), and neither then says that
     nothing left the machine (:func:`disclosed`).
     """
-    from maljan.analysis.disclosure import with_enrichment_asked
+    from malspark.analysis.disclosure import with_enrichment_asked
 
     return disclosed(
         payload,

@@ -21,11 +21,11 @@ import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import BaseModel
 
-from maljan.core.token_ledger import TokenLedger, read_structured_reply
-from maljan.llm.fallback import FALLBACK_KEY, MODEL_KEY
-from maljan.pipeline.events import MODEL_FALLBACK
-from maljan.pipeline.validation import FEEDBACK_PREAMBLE
-from maljan.reporting.composer import COMPOSED_SECTIONS, ReportComposer
+from malspark.core.token_ledger import TokenLedger, read_structured_reply
+from malspark.llm.fallback import FALLBACK_KEY, MODEL_KEY
+from malspark.pipeline.events import MODEL_FALLBACK
+from malspark.pipeline.validation import FEEDBACK_PREAMBLE
+from malspark.reporting.composer import COMPOSED_SECTIONS, ReportComposer
 from tests.unit.reporting.test_the_composer_writes_its_sections_at_once import (
     _answer,
     _isr,
@@ -77,7 +77,9 @@ def _compose(answer: Any) -> tuple[_Model, ReportComposer, list[tuple[str, dict[
     events: list[tuple[str, dict[str, Any]]] = []
     composer = ReportComposer(llm=llm, per_section_timeout=60, token_ledger=TokenLedger())  # type: ignore[arg-type]
     composer.event_sink = lambda kind, data: events.append((kind, data))
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=True):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=True
+    ):
         asyncio.run(composer.compose(_report(), _isr(), facts_block=FACTS, concurrent=True))
     return llm, composer, events
 
@@ -123,7 +125,7 @@ class TestAModelSwitchOnAStructuredAnswer:
     def test_the_narrative_round_announces_its_kept_answer_once(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.reporting import narrative_agent
+        from malspark.reporting import narrative_agent
         from tests.unit.reporting.test_narrative_agent import _make_report, _valid_narrative
 
         text = _valid_narrative().model_dump_json()
@@ -145,8 +147,8 @@ class TestAModelSwitchOnAStructuredAnswer:
         from langchain_core.prompts import ChatPromptTemplate
         from langchain_core.runnables import RunnableLambda
 
-        from maljan.agents.judge_agent import JudgeAgent
-        from maljan.pipeline.mediation_models import MediatorVerdict
+        from malspark.agents.judge_agent import JudgeAgent
+        from malspark.pipeline.mediation_models import MediatorVerdict
 
         verdict = MediatorVerdict(contradictions=[], resolution_summary="Agreed.", confidence=0.9)
 
@@ -216,7 +218,7 @@ class TestADictTheSchemaRefuses:
     def test_the_narrative_keeps_it_as_its_first_answer(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.reporting import narrative_agent
+        from malspark.reporting import narrative_agent
         from tests.unit.reporting.test_narrative_agent import _make_report, _valid_narrative
 
         thin = _valid_narrative().model_dump()

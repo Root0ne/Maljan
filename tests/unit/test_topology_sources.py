@@ -18,12 +18,12 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SEARCHED = [ROOT / "src" / "maljan", ROOT / "apps" / "api" / "app"]
+SEARCHED = [ROOT / "src" / "malspark", ROOT / "apps" / "api" / "app"]
 
 # Where "which analysts exist" may be answered from. Task 7 reduces this to
 # the registry itself plus the parity test that compares it with the seeds.
 TOPOLOGY_SOURCES: set[str] = {
-    "src/maljan/agents/registry.py",
+    "src/malspark/agents/registry.py",
 }
 
 # Where an agent's *key* may be compared against a literal built-in name.

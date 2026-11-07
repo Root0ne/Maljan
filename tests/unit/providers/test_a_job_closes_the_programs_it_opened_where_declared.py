@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.config import SampleOpenConfig
-from maljan.providers.sample_open import (
+from malspark.core.config import SampleOpenConfig
+from malspark.providers.sample_open import (
     SampleNotes,
     aclose_job_programs,
     close_job_programs,

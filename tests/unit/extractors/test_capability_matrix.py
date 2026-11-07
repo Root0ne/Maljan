@@ -11,8 +11,8 @@ something that read none of the evidence.
 
 from __future__ import annotations
 
-from maljan.extractors.capability_matrix import build_capability_matrix
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.extractors.capability_matrix import build_capability_matrix
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _bundle(*, techniques: list[str], relationships: list[dict] | None = None) -> dict:
@@ -78,9 +78,9 @@ class TestItProjectsTheJudgeAndTheAnalysts:
             relationships=[
                 {
                     "type": "relationship",
-                    "x_maljan_technique_id": "T1055",
-                    "x_maljan_confidence": 0.77,
-                    "x_maljan_contributing_agents": ["static", "dynamic"],
+                    "x_malspark_technique_id": "T1055",
+                    "x_malspark_confidence": 0.77,
+                    "x_malspark_contributing_agents": ["static", "dynamic"],
                 }
             ],
         )
@@ -102,9 +102,9 @@ class TestItProjectsTheJudgeAndTheAnalysts:
             relationships=[
                 {
                     "type": "relationship",
-                    "x_maljan_technique_id": "T1055",
-                    "x_maljan_confidence": 0.9,
-                    "x_maljan_contributing_agents": ["static"],
+                    "x_malspark_technique_id": "T1055",
+                    "x_malspark_confidence": 0.9,
+                    "x_malspark_contributing_agents": ["static"],
                 }
             ],
         )
@@ -123,7 +123,7 @@ class TestItProjectsTheJudgeAndTheAnalysts:
     def test_a_finding_with_no_number_states_none(self) -> None:
         """A finding written without a confidence adds no 0.0 and names no
         producer; the confidence list and its producers stay in step."""
-        from maljan.schemas.isr_models import Finding
+        from malspark.schemas.isr_models import Finding
 
         isr = AgentISR(
             agent_id="static",
@@ -211,7 +211,7 @@ class TestAJudgeIdIsCheckedLikeAnAnalystClaim:
     @staticmethod
     def _catalogue(monkeypatch, known: set[str]) -> None:
         """Point the matrix's catalogue check at a stub, not at MITRE."""
-        import maljan.tools.knowledge as knowledge
+        import malspark.tools.knowledge as knowledge
 
         def _validate(ids: list[str]) -> dict[str, object]:
             return {"invalid": [{"id": t} for t in ids if t not in known], "checked": len(ids)}
@@ -240,9 +240,9 @@ class TestAJudgeIdIsCheckedLikeAnAnalystClaim:
             relationships=[
                 {
                     "type": "relationship",
-                    "x_maljan_technique_id": "T7777",
-                    "x_maljan_confidence": 0.9,
-                    "x_maljan_contributing_agents": ["static"],
+                    "x_malspark_technique_id": "T7777",
+                    "x_malspark_confidence": 0.9,
+                    "x_malspark_contributing_agents": ["static"],
                 }
             ],
         )
@@ -275,7 +275,7 @@ class TestAJudgeIdIsCheckedLikeAnAnalystClaim:
     def test_an_unreachable_catalogue_marks_nothing(self, monkeypatch) -> None:
         """Marking every id as invented because MITRE is unreachable would be a
         worse failure than marking none."""
-        import maljan.tools.knowledge as knowledge
+        import malspark.tools.knowledge as knowledge
 
         def _explode(ids: list[str]) -> dict[str, object]:
             raise RuntimeError("the catalogue is not readable")
@@ -299,9 +299,9 @@ class TestTheJudgeIsNotCountedAsCorroboration:
             relationships=[
                 {
                     "type": "relationship",
-                    "x_maljan_technique_id": "T1055",
-                    "x_maljan_confidence": 0.8,
-                    "x_maljan_contributing_agents": ["static"],
+                    "x_malspark_technique_id": "T1055",
+                    "x_malspark_confidence": 0.8,
+                    "x_malspark_contributing_agents": ["static"],
                 }
             ],
         )

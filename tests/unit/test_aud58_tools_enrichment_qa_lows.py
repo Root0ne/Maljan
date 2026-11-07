@@ -11,13 +11,13 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from maljan.analysis.disclosure import EnrichmentAsks
-from maljan.enrichment.declared import ReadySource, SourceAsker, effective_sources
-from maljan.enrichment.whois_client import _find_first_autnum
-from maljan.qa.fp_linter import lint_report
-from maljan.tools import emulated_strings, knowledge
-from maljan.tools.api_hashes import _values
-from maljan.utils.json_cleaner import extract_json, safe_parse_json
+from malspark.analysis.disclosure import EnrichmentAsks
+from malspark.enrichment.declared import ReadySource, SourceAsker, effective_sources
+from malspark.enrichment.whois_client import _find_first_autnum
+from malspark.qa.fp_linter import lint_report
+from malspark.tools import emulated_strings, knowledge
+from malspark.tools.api_hashes import _values
+from malspark.utils.json_cleaner import extract_json, safe_parse_json
 
 
 def test_tb12_an_entity_handle_that_merely_starts_with_as_is_no_autnum() -> None:
@@ -52,7 +52,7 @@ def test_tb15_a_check_that_failed_does_not_ground_the_section(
     def _fails(section: Any) -> bool:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("maljan.reporting.ledger_report.section_is_grounded", _fails)
+    monkeypatch.setattr("malspark.reporting.ledger_report.section_is_grounded", _fails)
     report = SimpleNamespace(
         capability_matrix=[],
         defensive_recommendations=[],
@@ -106,7 +106,7 @@ def _ready() -> ReadySource:
 @pytest.mark.asyncio
 async def test_tb18_an_error_answer_does_not_settle_a_question_as_answered() -> None:
     asks = EnrichmentAsks()
-    with patch("maljan.enrichment.whois_client._try_ipwhois", return_value=None):
+    with patch("malspark.enrichment.whois_client._try_ipwhois", return_value=None):
         transport = httpx.MockTransport(lambda request: httpx.Response(429))
         async with httpx.AsyncClient(transport=transport) as http:
             asker = SourceAsker(http=http, on_ask=asks)

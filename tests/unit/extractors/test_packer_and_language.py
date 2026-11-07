@@ -13,8 +13,8 @@ scanner carrying Rust signatures.
 
 from __future__ import annotations
 
-from maljan.extractors.sample_identity import _detect_language_or_compiler, _infer_platform
-from maljan.reporting.models import StaticAnalysis
+from malspark.extractors.sample_identity import _detect_language_or_compiler, _infer_platform
+from malspark.reporting.models import StaticAnalysis
 
 
 def _static(**kw: object) -> StaticAnalysis:
@@ -71,11 +71,11 @@ class TestPlatformDisambiguation:
 
 
 class TestThePdbPathIsExtracted:
-    """The single highest-value string in a PE, and Maljan was not reading it.
+    """The single highest-value string in a PE, and Malspark was not reading it.
 
     Found by diffing Qu1cksc0pe's report for the same sample, which contained
     ``E:\\xml-data\\build-dir\\CODRU-CL23M-SOURCES\\bin\\Win32\\Release\\BdUserHost.pdb``
-    where Maljan's had nothing. One field carrying the build machine's drive
+    where Malspark's had nothing. One field carrying the build machine's drive
     layout, the internal project name, the target architecture and the build
     configuration — and the internal name is frequently the family's own, before
     anyone in the industry chose one for it.
@@ -88,7 +88,7 @@ class TestThePdbPathIsExtracted:
     def test_the_debug_directory_is_requested(self) -> None:
         import inspect
 
-        from maljan.extractors import pe_extractor
+        from malspark.extractors import pe_extractor
 
         source = inspect.getsource(pe_extractor._parse_pe)
         assert "IMAGE_DIRECTORY_ENTRY_DEBUG" in source, (
@@ -98,7 +98,7 @@ class TestThePdbPathIsExtracted:
     def test_a_codeview_entry_is_read(self) -> None:
         from types import SimpleNamespace
 
-        from maljan.extractors.pe_extractor import _pe_pdb_path
+        from malspark.extractors.pe_extractor import _pe_pdb_path
 
         pe = SimpleNamespace(
             DIRECTORY_ENTRY_DEBUG=[
@@ -112,7 +112,7 @@ class TestThePdbPathIsExtracted:
     def test_a_stripped_binary_yields_none(self) -> None:
         from types import SimpleNamespace
 
-        from maljan.extractors.pe_extractor import _pe_pdb_path
+        from malspark.extractors.pe_extractor import _pe_pdb_path
 
         assert _pe_pdb_path(SimpleNamespace()) is None
         assert _pe_pdb_path(SimpleNamespace(DIRECTORY_ENTRY_DEBUG=[])) is None
@@ -120,7 +120,7 @@ class TestThePdbPathIsExtracted:
     def test_a_malformed_entry_does_not_raise(self) -> None:
         from types import SimpleNamespace
 
-        from maljan.extractors.pe_extractor import _pe_pdb_path
+        from malspark.extractors.pe_extractor import _pe_pdb_path
 
         pe = SimpleNamespace(
             DIRECTORY_ENTRY_DEBUG=[SimpleNamespace(entry=SimpleNamespace(PdbFileName=None))]

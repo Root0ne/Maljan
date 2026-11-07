@@ -38,12 +38,12 @@ from langchain_core.tools import StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import BaseModel
 
-from maljan.agents import tool_answer_clearing as tac
-from maljan.agents.base_agent import BaseAnalyst, _message_chars, _reported_request
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.core.exceptions import AnalystError
-from maljan.llm import context_window as cw
-from maljan.pipeline.events import TOOL_ANSWERS_CLEARED
+from malspark.agents import tool_answer_clearing as tac
+from malspark.agents.base_agent import BaseAnalyst, _message_chars, _reported_request
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.core.exceptions import AnalystError
+from malspark.llm import context_window as cw
+from malspark.pipeline.events import TOOL_ANSWERS_CLEARED
 
 from .no_tool_call_scenario import requests as no_tool_call_requests
 
@@ -303,7 +303,7 @@ class TestReadAgain:
         return recorder
 
     def test_it_answers_with_the_stored_output(self) -> None:
-        from maljan.agents.base_agent import _stored_answer_of
+        from malspark.agents.base_agent import _stored_answer_of
 
         tool = tac.read_evidence_tool(_stored_answer_of(self._recorder()))
         assert tool.name == tac.READ_EVIDENCE_TOOL
@@ -312,7 +312,7 @@ class TestReadAgain:
         assert tool.invoke({"evidence_id": "EV_0002"}) == "the first answer"
 
     def test_an_id_it_never_filed_is_a_failure_with_a_remedy(self) -> None:
-        from maljan.agents.base_agent import _stored_answer_of
+        from malspark.agents.base_agent import _stored_answer_of
 
         tool = tac.read_evidence_tool(_stored_answer_of(self._recorder()))
         answer = json.loads(tool.invoke({"evidence_id": "ev_0099"}))
@@ -321,7 +321,7 @@ class TestReadAgain:
         assert answer["error"]["remediation"] == tac.UNKNOWN_EVIDENCE_REMEDIATION
 
     def test_it_is_sized_by_the_job_s_guardrail(self) -> None:
-        from maljan.agents.base_agent import _stored_answer_of
+        from malspark.agents.base_agent import _stored_answer_of
 
         class _Sizer:
             def _apply_output_guardrail(self, text: str, narrowing: Any) -> str:
@@ -331,8 +331,8 @@ class TestReadAgain:
         assert tool.invoke({"evidence_id": "ev_0001"}) == "the f"
 
     def test_the_recorder_files_a_read_as_a_repeat_served_under_the_original_id(self) -> None:
-        from maljan.agents.base_agent import _stored_answer_of
-        from maljan.agents.evidence_recorder import record_tools
+        from malspark.agents.base_agent import _stored_answer_of
+        from malspark.agents.evidence_recorder import record_tools
 
         class _Corpus:
             def __init__(self) -> None:
@@ -448,7 +448,7 @@ class _Analyst(BaseAnalyst):
 
 @contextlib.contextmanager
 def _settings() -> Iterator[None]:
-    with patch("maljan.agents.base_agent.get_settings") as settings:
+    with patch("malspark.agents.base_agent.get_settings") as settings:
         cfg = settings.return_value
         cfg.react_agent_timeout = None
         cfg.react_agent_timeout_overrides = {}
@@ -613,7 +613,7 @@ class TestThroughTheLoop:
     def test_a_tool_that_cannot_be_offered_is_said_and_the_loop_ends_as_today(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         built = base_agent._model_that_closes_off_truncated_calls
         calls: list[int] = []

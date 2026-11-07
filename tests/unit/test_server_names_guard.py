@@ -13,7 +13,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parents[2] / "src" / "maljan"
+SRC = Path(__file__).resolve().parents[2] / "src" / "malspark"
 
 
 def _reads_args_schema(node: ast.AST) -> bool:

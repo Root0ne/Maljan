@@ -34,7 +34,7 @@ from app.models.report import AnalysisReport
 from app.models.sample import Sample
 from app.models.user import User
 from app.services import follow_up
-from maljan.reporting.models import QuestionAnswer
+from malspark.reporting.models import QuestionAnswer
 
 OWNER = uuid.uuid4()
 

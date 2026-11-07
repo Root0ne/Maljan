@@ -14,14 +14,14 @@ from __future__ import annotations
 
 import json
 
-from maljan.agents.static_analyst import (
+from malspark.agents.static_analyst import (
     _extract_analysis_path,
     _extract_load_hint,
     _extract_sample_hash,
 )
-from maljan.core.config import GHIDRA_SAMPLE_OPEN
-from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
-from maljan.pipeline.nodes import _augment_static_chunks_with_path
+from malspark.core.config import GHIDRA_SAMPLE_OPEN
+from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
+from malspark.pipeline.nodes import _augment_static_chunks_with_path
 
 _FAKE_STRATEGY = ChunkStrategy.SLIDING_WINDOW
 
@@ -178,7 +178,7 @@ class TestExtractLoadHint:
         assert 'load_program(file="/data/samples/d.apk")' in hint
 
     def test_the_line_names_the_tool_the_provider_declares(self) -> None:
-        from maljan.core.config import SampleOpenConfig
+        from malspark.core.config import SampleOpenConfig
 
         data = json.dumps({"analysis_file_path": "/data/samples/d.bin"})
         declared = SampleOpenConfig(open_tool="open_file", path_argument="file_path")

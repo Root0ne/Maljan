@@ -14,18 +14,18 @@ import re
 
 import pytest
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.detection_signatures import _build_yara
-from maljan.reporting.models import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.detection_signatures import _build_yara
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     SampleIdentity,
     StaticAnalysis,
 )
-from maljan.reporting.narrative_agent import build_prompt_text
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.tools.knowledge import api_capability
+from malspark.reporting.narrative_agent import build_prompt_text
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.tools.knowledge import api_capability
 from tests.unit._ledger_helpers import entry
 
 _NAMES = ["VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread", "RegQueryValueExA"]

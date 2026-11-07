@@ -16,17 +16,17 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis.disclosure import STOPPED_PART_WAY, disclosure_lines, disclosure_record
-from maljan.analysis.tool_effects import (
+from malspark.analysis.disclosure import STOPPED_PART_WAY, disclosure_lines, disclosure_record
+from malspark.analysis.tool_effects import (
     INTRO_SENTENCE,
     effects_lines,
     effects_part,
     entry_effects,
     sends_sample_bytes,
 )
-from maljan.core.config import Settings
-from maljan.core.declared_reading import facts_record, with_hints
-from maljan.core.tool_declarations import (
+from malspark.core.config import Settings
+from malspark.core.declared_reading import facts_record, with_hints
+from malspark.core.tool_declarations import (
     ToolDeclarations,
     ToolEffects,
     ToolFacts,
@@ -202,7 +202,7 @@ def test_a_tool_that_runs_any_script_it_is_given_is_left_undeclared(
 
 def _declared_as_shipped(key: str) -> dict[str, Any]:
     """A built-in server's tools as the platform reads them: its block's, its own under them."""
-    from maljan.core.declared_reading import builtin_tools
+    from malspark.core.declared_reading import builtin_tools
 
     return {
         tool: facts.model_dump(mode="json", exclude_defaults=True)
@@ -211,15 +211,15 @@ def _declared_as_shipped(key: str) -> dict[str, Any]:
 
 
 def _provider_sources() -> list[str]:
-    from maljan.core import builtin_declarations as built
+    from malspark.core import builtin_declarations as built
 
     return list(built.provider_block_paths())
 
 
 def _in_force(source: str) -> dict[str, Any]:
     """A shipped provider block's tools as the platform reads them, its listing included."""
-    from maljan.core.config import Settings
-    from maljan.core.tool_declarations import ToolDeclarations
+    from malspark.core.config import Settings
+    from malspark.core.tool_declarations import ToolDeclarations
 
     held = ToolDeclarations.from_settings(Settings(_env_file=None)).source(source)
     assert held is not None, source
@@ -230,7 +230,7 @@ def _in_force(source: str) -> dict[str, Any]:
 
 
 def _shipped_blocks() -> list[tuple[str, dict[str, Any]]]:
-    from maljan.core import builtin_declarations as built
+    from malspark.core import builtin_declarations as built
 
     blocks = [
         (f"mcp:{key}", {"tool_facts": _declared_as_shipped(key)})
@@ -247,7 +247,7 @@ def _shipped_blocks() -> list[tuple[str, dict[str, Any]]]:
 
 
 def test_every_built_in_tool_declares_its_effects_or_says_why_not() -> None:
-    from maljan.core.tool_declarations import strict_declarations
+    from malspark.core.tool_declarations import strict_declarations
 
     unsaid: list[str] = []
     for source, block in _shipped_blocks():
@@ -395,7 +395,7 @@ def test_reference_refreshes_and_the_case_store_are_named(shipped: ToolDeclarati
 
 
 def test_a_map_saved_whole_keeps_the_shipped_effects_and_the_operator_s_own_values() -> None:
-    from maljan.core.tool_declarations import (
+    from malspark.core.tool_declarations import (
         merge_tool_facts,
         stored_changes,
         stored_in_force,
@@ -489,9 +489,9 @@ def test_the_server_s_hints_ride_from_attach_to_the_entry() -> None:
     from langchain_core.tools import StructuredTool
     from pydantic import BaseModel
 
-    from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
-    from maljan.agents.mcp_client import MCPLangChainToolkit
-    from maljan.agents.tool_pinning import SERVER_HINTS_METADATA_KEY, SERVER_METADATA_KEY
+    from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
+    from malspark.agents.mcp_client import MCPLangChainToolkit
+    from malspark.agents.tool_pinning import SERVER_HINTS_METADATA_KEY, SERVER_METADATA_KEY
 
     client = MCPLangChainToolkit.__new__(MCPLangChainToolkit)
     client._categories = {}
@@ -639,8 +639,8 @@ def test_an_operator_s_contradiction_is_refused_and_a_stored_one_read_cautiously
 def test_the_report_prints_the_block_after_the_isolation_part(
     shipped: ToolDeclarations,
 ) -> None:
-    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-    from maljan.reporting.renderers import HtmlRenderer, MarkdownRenderer
+    from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+    from malspark.reporting.renderers import HtmlRenderer, MarkdownRenderer
 
     floss = facts_record("mcp:analysis", "floss", declared=shipped)
     record = disclosure_record(
@@ -667,8 +667,8 @@ def test_a_record_stored_before_the_part_prints_no_block() -> None:
 
 
 def test_a_stopped_run_says_its_effects_may_be_incomplete(shipped: ToolDeclarations) -> None:
-    from maljan.core.token_ledger import TokenLedger
-    from maljan.pipeline.stopped_run import partial_report, stopped_run_summary
+    from malspark.core.token_ledger import TokenLedger
+    from malspark.pipeline.stopped_run import partial_report, stopped_run_summary
 
     settings = Settings.model_validate(
         {"llm": {"provider": "openai", "openai": {"base_url": "http://127.0.0.1:1/v1"}}}
@@ -808,7 +808,7 @@ def test_an_undeclared_tool_hinted_open_stays_an_undeclared_row() -> None:
 
 
 def test_a_tick_of_discloses_sample_on_put_sample_saves_and_says_bytes() -> None:
-    from maljan.core.tool_declarations import merge_tool_facts, strict_declarations
+    from malspark.core.tool_declarations import merge_tool_facts, strict_declarations
 
     shipped = _declared_as_shipped("analysis")
     assert shipped["put_sample"]["effects"]["third_party"] == "no"
@@ -821,7 +821,7 @@ def test_a_tick_of_discloses_sample_on_put_sample_saves_and_says_bytes() -> None
 
 
 def test_an_operator_s_effects_merge_with_the_shipped_ones_sub_field_by_sub_field() -> None:
-    from maljan.core.tool_declarations import merge_tool_facts, tool_facts_changes
+    from malspark.core.tool_declarations import merge_tool_facts, tool_facts_changes
 
     shipped = _declared_as_shipped("knowledge")
     change = {"attck_lookup": {"effects": {"network": True}}}

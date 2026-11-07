@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.mcp_client import MCPLangChainToolkit
+from malspark.agents.mcp_client import MCPLangChainToolkit
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ class TestOutputGuardrailPassthrough:
 
     def test_exact_limit_unchanged(self, server_params: MagicMock) -> None:
         # A text answer is shown fenced: the answer and its fence fill the limit.
-        from maljan.agents.tool_fence import fence_lines_room
+        from malspark.agents.tool_fence import fence_lines_room
 
         toolkit = MCPLangChainToolkit(server_params, max_output_chars=200)
         text = "A" * (200 - fence_lines_room())
@@ -44,8 +44,8 @@ class TestOutputGuardrailTruncation:
     """Outputs over the limit should be truncated when no guardrail callback is set."""
 
     def test_large_output_truncated(self, server_params: MagicMock) -> None:
-        from maljan.agents.mcp_client import TRUNCATION_MARKER
-        from maljan.agents.tool_fence import fence_lines_room
+        from malspark.agents.mcp_client import TRUNCATION_MARKER
+        from malspark.agents.tool_fence import fence_lines_room
 
         toolkit = MCPLangChainToolkit(server_params, max_output_chars=200)
         text = "B" * 500
@@ -128,7 +128,7 @@ class TestOutputGuardrailWithFunctionSummarizer:
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = mock_llm_response
 
-        from maljan.analysis.function_summarizer import FunctionSummarizer
+        from malspark.analysis.function_summarizer import FunctionSummarizer
 
         summarizer = FunctionSummarizer(llm=mock_llm, max_summary_words=150)
 
@@ -163,7 +163,7 @@ class TestToolkitConstructorDefaults:
 
     def test_default_no_guardrail(self, server_params: MagicMock) -> None:
         """Zero is not "no cap": it is the served window's share of itself."""
-        from maljan.llm.context_window import MIN_TOOL_OUTPUT_CHARS, output_limit
+        from malspark.llm.context_window import MIN_TOOL_OUTPUT_CHARS, output_limit
 
         toolkit = MCPLangChainToolkit(server_params)
         assert toolkit._output_guardrail is None

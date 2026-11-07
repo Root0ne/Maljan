@@ -18,10 +18,10 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.agents.prompts import REVERSER_PROMPT
-from maljan.pipeline import triage_pack
-from maljan.pipeline.triage_pack import (
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.agents.prompts import REVERSER_PROMPT
+from malspark.pipeline import triage_pack
+from malspark.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     PackInputs,
@@ -29,7 +29,7 @@ from maljan.pipeline.triage_pack import (
     pack_entries,
     run_pack,
 )
-from maljan.schemas.evidence import EvidenceCounter, build_entry, format_entry_id
+from malspark.schemas.evidence import EvidenceCounter, build_entry, format_entry_id
 
 from ..tools.synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
 
@@ -115,7 +115,7 @@ class TestAnImageWithoutAFunctionTable:
     def test_capa_s_function_starts_are_handed_to_both_steps(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.tools import rules
+        from malspark.tools import rules
 
         image = SyntheticPE(is64=False, image_base=0x400000)
         for offset, name in ((0x140, b"VirtualAlloc"), (0x160, b"CreateFileW")):
@@ -259,7 +259,7 @@ class TestTheLines:
 
 class TestTheReverser:
     def test_the_brief_carries_both_lines(self, tmp_path: Path) -> None:
-        from maljan.pipeline.nodes import brief_agent
+        from malspark.pipeline.nodes import brief_agent
 
         class _Agent:
             pass

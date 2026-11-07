@@ -16,8 +16,8 @@ from fastapi.testclient import TestClient
 from app.api.v1.settings import router
 from app.database import get_db
 from app.deps import require_admin
-from maljan.core.config import ANTHROPIC_EFFORT_LEVELS
-from maljan.llm import model_capabilities
+from malspark.core.config import ANTHROPIC_EFFORT_LEVELS
+from malspark.llm import model_capabilities
 
 
 @pytest.fixture

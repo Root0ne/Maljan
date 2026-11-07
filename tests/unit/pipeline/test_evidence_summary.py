@@ -8,9 +8,9 @@ multiplied together.
 
 from __future__ import annotations
 
-from maljan.pipeline.evidence_summary import collect, summarise
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence, Finding
+from malspark.pipeline.evidence_summary import collect, summarise
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence, Finding
 
 
 def _isr(agent_id: str, *claims: ClaimEvidence, findings: list[Finding] | None = None) -> AgentISR:

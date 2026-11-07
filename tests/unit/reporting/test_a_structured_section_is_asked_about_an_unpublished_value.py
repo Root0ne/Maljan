@@ -18,9 +18,9 @@ from unittest.mock import patch
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from pydantic import BaseModel
 
-from maljan.pipeline.validation import UNPUBLISHED_VALUE_CODE
-from maljan.reporting.composer import ReportComposer, _ProseOut
-from maljan.reporting.narrative_agent import published_answers
+from malspark.pipeline.validation import UNPUBLISHED_VALUE_CODE
+from malspark.reporting.composer import ReportComposer, _ProseOut
+from malspark.reporting.narrative_agent import published_answers
 from tests.unit.reporting.test_an_unpublished_value_in_prose_carries_its_state import (
     PUBLISHED,
     REFUSED,
@@ -59,7 +59,9 @@ def _invoke(*answers: str) -> tuple[Any, _Model, Any]:
     comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
     comp._report = report
     comp._answers = published_answers(report)
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=True):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=True
+    ):
         result = asyncio.run(
             comp._invoke(
                 [HumanMessage(content="write it")], _ProseOut, section="command_and_control"

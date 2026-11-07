@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from maljan.schemas.evidence import build_entry
+from malspark.schemas.evidence import build_entry
 
 LEDGER = Path(__file__).resolve().parents[2] / "fixtures" / "ledger"
 

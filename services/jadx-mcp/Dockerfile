@@ -43,7 +43,7 @@ ENV PATH=/opt/jre/bin:$PATH \
     JADX_JAR=/opt/jadx/jadx.jar \
     MCP_BIND_ADDRESS=0.0.0.0 \
     MCP_PORT=8097 \
-    MALJAN_SAMPLE_ROOTS=/data/samples
+    MALSPARK_SAMPLE_ROOTS=/data/samples
 USER 65534:65534
 EXPOSE 8097
 CMD ["python3", "server.py"]

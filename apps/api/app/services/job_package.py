@@ -12,9 +12,10 @@ is. It holds:
 - ``manifest.sig``, optionally and always the second entry: an HMAC-SHA256
   over the manifest's bytes under a key derived from the settings encryption
   key the platform already holds, under its own purpose label
-  (:data:`SIGNATURE_LABEL`). Like the ledger's chain it proves integrity only
-  to a holder of that key: anyone who holds it can sign another manifest, and
-  anyone without it cannot check it;
+  (:data:`SIGNATURE_LABEL`; a package signed before the rename, under
+  :data:`PREVIOUS_SIGNATURE_LABEL`, still verifies). Like the ledger's chain
+  it proves integrity only to a holder of that key: anyone who holds it can
+  sign another manifest, and anyone without it cannot check it;
 - ``run/``: the stored-run files as they are (the job row with the sample's
   hash and name, the report row, the report document, the evidence ledger, the
   run summary, the judge's bundle, the events), exactly what
@@ -23,10 +24,10 @@ is. It holds:
   layout the served report prints (``reporting.full_report_in_one_file``);
 - ``report/evidence-bundle.html`` and ``report/evidence-bundle.json``: the
   evidence bundle behind the analyst report, beside it under the names its
-  links name (``maljan.reporting.renderers.bundle``);
+  links name (``malspark.reporting.renderers.bundle``);
 - ``export/stix-bundle.json``: the STIX bundle the report row serves;
 - ``ledger/spilled.json`` and ``ledger/objects/<sha256>``: every part of an
-  answer the ledger does not keep whole (``maljan.schemas.evidence_spill``),
+  answer the ledger does not keep whole (``malspark.schemas.evidence_spill``),
   with the kept bytes where the build could read them back, bounded, and
   verify them, else its reference and digest with the reason the bytes are
   not here;
@@ -86,13 +87,22 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import IO, Any, BinaryIO, Protocol
 
+from malspark.core.previous_name import PREVIOUS_NAME, under_current_name
+
 from app.services import ledger_chain
 from app.services.run_export import LAYOUT
 
-FORMAT = "maljan-job-package/2"
-# The HKDF purpose label the signature key is derived under.
-SIGNATURE_LABEL = b"maljan-job-package-v1"
-_SIGNATURE_TAG = b"maljan-job-package-manifest/1\n"
+FORMAT = "malspark-job-package/2"
+# The HKDF purpose label a new package's signature key is derived under, and
+# the label a package signed before the rename was (``malspark.core.previous_name``).
+# The signature record names its label; a verification derives a key under
+# each, so a package of either kind verifies.
+SIGNATURE_LABEL = b"malspark-job-package-v1"
+PREVIOUS_SIGNATURE_LABEL = f"{PREVIOUS_NAME}-job-package-v1".encode("ascii")
+SIGNATURE_LABELS = (SIGNATURE_LABEL, PREVIOUS_SIGNATURE_LABEL)
+# The signature's domain tag keeps the previous product name, as the tags of
+# the ledger's chain do: one tag for every package, old or new.
+_SIGNATURE_TAG = f"{PREVIOUS_NAME}-job-package-manifest/1\n".encode("ascii")
 SIGNATURE_ALGORITHM = "HMAC-SHA256"
 SIGNATURE_PROVES = (
     "An HMAC under a key derived from the platform's settings encryption key: it proves the "
@@ -132,7 +142,7 @@ _HEX = frozenset("0123456789abcdef")
 # A package built before the file digest: the same archive under the plain
 # gzip header the builder wrote then (no flags, no time, maximum compression,
 # no named system).
-LEGACY_FORMAT = "maljan-job-package/1"
+LEGACY_FORMAT = "malspark-job-package/1"
 _LEGACY_HEADER = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff"
 # The current header: the same fields with FEXTRA set, and one extra subfield
 # ("MJ") holding the SHA-256 of the rest of the file and its HMAC.
@@ -145,7 +155,7 @@ _HEADER = (
     + struct.pack("<H", 2 * _DIGEST_BYTES)
 )
 _HEADER_BYTES = len(_HEADER) + 2 * _DIGEST_BYTES
-_FILE_TAG = b"maljan-job-package-file/1\n"
+_FILE_TAG = f"{PREVIOUS_NAME}-job-package-file/1\n".encode("ascii")
 _NO_HMAC = bytes(_DIGEST_BYTES)
 
 VERIFIED = "verified"
@@ -190,7 +200,7 @@ NOT_CANONICAL = (
     "byte or the end of the archive differs, or data follows the gzip end."
 )
 FILE_DIGEST_LEGACY = (
-    "Built before the file digest (maljan-job-package/1): the gzip header, every tar header "
+    "Built before the file digest (malspark-job-package/1): the gzip header, every tar header "
     "and padding byte, the archive's end and the gzip CRC, length and end are checked against "
     "what the builder wrote then; only an equivalent encoding of the deflate stream, which "
     "yields the same archive, cannot be told apart."
@@ -350,8 +360,8 @@ def _markdown(report: Any, job: Any, layout: str | None = None) -> tuple[str | N
     ``layout`` is the served report's (``renderers/layout.py``); ``None`` reads
     the process's own setting.
     """
-    from maljan.reporting.renderers import MarkdownRenderer
-    from maljan.reporting.renderers.layout import report_layout
+    from malspark.reporting.renderers import MarkdownRenderer
+    from malspark.reporting.renderers.layout import report_layout
 
     typed, why = _typed(report, job)
     if typed is None:
@@ -361,9 +371,9 @@ def _markdown(report: Any, job: Any, layout: str | None = None) -> tuple[str | N
 
 def _bundle(report: Any, job: Any) -> tuple[tuple[str, str] | None, str | None]:
     """The evidence bundle's HTML and JSON, or ``None`` and why they are not rendered."""
-    from maljan.reporting.renderers import HtmlRenderer
-    from maljan.reporting.renderers.bundle import bundle_json
-    from maljan.reporting.renderers.layout import BUNDLE
+    from malspark.reporting.renderers import HtmlRenderer
+    from malspark.reporting.renderers.bundle import bundle_json
+    from malspark.reporting.renderers.layout import BUNDLE
 
     typed, why = _typed(report, job)
     if typed is None:
@@ -381,7 +391,7 @@ def _typed(report: Any, job: Any) -> tuple[Any, str | None]:
     """
     if not isinstance(report, Mapping):
         return None, "The run holds no report document (report.json), so nothing is rendered."
-    from maljan.reporting.models import MalwareReport, key_ordered
+    from malspark.reporting.models import MalwareReport, key_ordered
 
     document = key_ordered(report)
     if not document.get("generated_at"):
@@ -500,10 +510,13 @@ def signature_keys() -> dict[str, ledger_chain.ChainKey]:
 
     The same source as the ledger's own keys (``ledger_chain.known_keys``):
     one settings encryption key is held at a time, so this is the current key
-    alone; a package signed under an earlier key reads ``other_key``.
+    under each label of :data:`SIGNATURE_LABELS` (a package signed before the
+    rename names the previous one); a package signed under an earlier
+    settings key reads ``other_key``.
     """
     key, _ = signature_key()
-    return {key.key_id: key} if key is not None else {}
+    previous, _ = ledger_chain.platform_key_status(PREVIOUS_SIGNATURE_LABEL)
+    return {k.key_id: k for k in (key, previous) if k is not None}
 
 
 def sign(manifest: bytes, key: ledger_chain.ChainKey) -> str:
@@ -546,7 +559,7 @@ def build_package(
         raise PackageError(f"not a run directory: {run_dir}")
     if not _is_count(max_bytes) or max_bytes <= 0:
         raise PackageError("no valid upload_max_bytes bounds the package's files")
-    with tempfile.TemporaryDirectory(prefix="maljan-package-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="malspark-package-") as tmp:
         stage = _Stage(Path(tmp), max_bytes)
         parts: list[dict[str, Any]] = []
         absent: list[dict[str, Any]] = []
@@ -705,11 +718,18 @@ def build_package(
     return manifest
 
 
-def _signature_record(body: bytes, key_id: str, mac: str) -> dict[str, str]:
-    """The signature record the builder writes for the manifest's bytes ``body``."""
+def _signature_record(
+    body: bytes, key_id: str, mac: str, label: bytes | None = None
+) -> dict[str, str]:
+    """The signature record the builder writes for the manifest's bytes ``body``.
+
+    ``label`` is the key label the record names: the builder's own
+    (:data:`SIGNATURE_LABEL`) unless a verification re-states a record signed
+    under another of :data:`SIGNATURE_LABELS`.
+    """
     return {
         "algorithm": SIGNATURE_ALGORITHM,
-        "key_label": SIGNATURE_LABEL.decode("ascii"),
+        "key_label": (SIGNATURE_LABEL if label is None else label).decode("ascii"),
         "key_id": key_id,
         "manifest_sha256": hashlib.sha256(body).hexdigest(),
         "hmac": mac,
@@ -787,7 +807,7 @@ def archive_stream(
     ``key``, which must be the manifest's signature key, or zeros for an
     unsigned package) is written into ``out``, then the body.
     """
-    with tempfile.TemporaryFile(prefix="maljan-package-body-") as body:
+    with tempfile.TemporaryFile(prefix="malspark-package-body-") as body:
         stream = _Deflating(body)
         yield stream
         stream.finish()
@@ -1186,7 +1206,7 @@ def verify_package(
         return _broken(str(path), UNREADABLE)
     file_hash = hashlib.sha256()
     canonical = _Canonical()
-    with raw, tempfile.TemporaryDirectory(prefix="maljan-package-verify-") as tmp:
+    with raw, tempfile.TemporaryDirectory(prefix="malspark-package-verify-") as tmp:
         root = Path(tmp).resolve()
         try:
             # One pass over the file: the header, then every later byte into
@@ -1224,9 +1244,16 @@ def verify_package(
                         manifest_bytes = handle.read()
                         parsed = _parse(manifest_bytes, MANIFEST_DEPTH)
                         formats = (FORMAT, LEGACY_FORMAT)
-                        if not isinstance(parsed, dict) or parsed.get("format") not in formats:
+                        # A manifest written before the rename names either
+                        # format under the previous name, read as the same one.
+                        named = (
+                            under_current_name(parsed.get("format"))
+                            if isinstance(parsed, dict)
+                            else None
+                        )
+                        if named not in formats:
                             return _broken(MANIFEST, f"The manifest is not a {FORMAT} manifest.")
-                        if parsed["format"] != (LEGACY_FORMAT if legacy else FORMAT):
+                        if named != (LEGACY_FORMAT if legacy else FORMAT):
                             return _broken(MANIFEST, FORMAT_MISMATCH)
                         manifest = parsed
                         found = _listing(manifest, max_bytes)
@@ -1417,9 +1444,19 @@ def _check_signature(
         return "invalid", "The signature record carries no well-formed key id and HMAC.", None
     if key_id != declared.get("key_id"):
         return "invalid", "The signature names another key than the manifest does.", None
+    labels = {label.decode("ascii"): label for label in SIGNATURE_LABELS}
+    label = labels.get(str(record.get("key_label")))
+    if label is None:
+        return "invalid", "The signature names a key label no release derives.", None
+    # The manifest, which the HMAC covers, names the same label.
+    if record.get("key_label") != declared.get("key_label"):
+        return "invalid", "The signature names another key label than the manifest does.", None
     # Byte for byte the record the builder writes (as ``_Stage.json`` writes
-    # it): no field, value or spacing of it is left unchecked.
-    canonical = json.dumps(_signature_record(body, str(key_id), str(mac)), indent=1, sort_keys=True)
+    # it), under the label it names: no field, value or spacing of it is left
+    # unchecked.
+    canonical = json.dumps(
+        _signature_record(body, str(key_id), str(mac), label), indent=1, sort_keys=True
+    )
     if signature_bytes != canonical.encode("utf-8"):
         return "invalid", "The signature file is not the record the builder writes.", None
     key = keys.get(str(key_id))
@@ -1495,7 +1532,7 @@ async def build_for_job(
             response.release_conn()
 
     refs = spilled_refs(rows.evidence)
-    with tempfile.TemporaryDirectory(prefix="maljan-package-run-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="malspark-package-run-") as tmp:
         run_dir = Path(tmp) / RUN
         await asyncio.to_thread(write_files, run_files(rows), run_dir)
         del rows
@@ -1529,8 +1566,10 @@ __all__ = [
     "BROKEN",
     "FORMAT",
     "OTHER_KEY",
+    "PREVIOUS_SIGNATURE_LABEL",
     "SEAL_UNVERIFIABLE",
     "SIGNATURE_LABEL",
+    "SIGNATURE_LABELS",
     "UNSIGNED",
     "VERIFIED",
     "PackageError",

@@ -21,15 +21,15 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import RestMappingConfig
-from maljan.core.report_mapping import costly_paths, descendant_segments
-from maljan.providers.sandbox.rest_mapping import (
+from malspark.core.config import RestMappingConfig
+from malspark.core.report_mapping import costly_paths, descendant_segments
+from malspark.providers.sandbox.rest_mapping import (
     apply_mapping,
     compile_mapping,
     node_count,
     subtree_sizes,
 )
-from maljan.schemas.sandbox_document import sandbox_document
+from malspark.schemas.sandbox_document import sandbox_document
 
 
 def _tree(depth: int) -> dict[str, Any]:
@@ -167,7 +167,7 @@ def test_the_settings_save_warns_beside_a_costly_path_and_saves_it(monkeypatch: 
     import asyncio
 
     from app.api.v1 import settings as route
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     settings = Settings(
         _env_file=None,  # type: ignore[call-arg]
@@ -202,14 +202,14 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
 
     @staticmethod
     def _format(name: str, *tests: dict[str, Any], reader: str = "generic") -> Any:
-        from maljan.core.report_formats import ReportFormat
+        from malspark.core.report_formats import ReportFormat
 
         return ReportFormat.model_validate(
             {"name": name, "detect": [list(tests)], "reader": reader, "mapping": {}}
         )
 
     def test_a_detect_among_a_built_in_s_tests_is_named(self) -> None:
-        from maljan.core.report_formats import builtin_overlapping
+        from malspark.core.report_formats import builtin_overlapping
 
         older = self._format(
             "older_generic",
@@ -219,7 +219,7 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         assert builtin_overlapping(older) == "cuckoo"
 
     def test_a_detect_whose_own_reports_a_built_in_claims_is_named(self) -> None:
-        from maljan.core.report_formats import builtin_overlapping
+        from malspark.core.report_formats import builtin_overlapping
 
         claimed = self._format(
             "claimed",
@@ -229,13 +229,13 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         assert builtin_overlapping(claimed) == "cape2"
 
     def test_a_detect_of_its_own_is_not_named(self) -> None:
-        from maljan.core.report_formats import builtin_overlapping
+        from malspark.core.report_formats import builtin_overlapping
 
         own = self._format("own", {"path": "/acme_meta/version", "contains": "acme"})
         assert builtin_overlapping(own) == ""
 
     def test_a_partial_overlap_on_a_shared_place_is_named(self) -> None:
-        from maljan.core.report_formats import builtin_overlapping, format_named
+        from malspark.core.report_formats import builtin_overlapping, format_named
 
         # Every cuckoo-derived report carrying /signatures passes both detects.
         derived = self._format(
@@ -252,7 +252,7 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         assert builtin_overlapping(derived) == "cuckoo"
 
     def test_the_most_specific_built_in_is_named(self) -> None:
-        from maljan.core.report_formats import builtin_overlapping
+        from malspark.core.report_formats import builtin_overlapping
 
         derived = self._format(
             "derived",
@@ -280,7 +280,7 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
     def test_a_test_the_built_in_s_reports_cannot_pass_clears_it(
         self, apart: dict[str, Any]
     ) -> None:
-        from maljan.core.report_formats import builtin_overlapping
+        from malspark.core.report_formats import builtin_overlapping
 
         derived = self._format(
             "derived",
@@ -291,7 +291,7 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         assert builtin_overlapping(derived) == ""
 
     def test_a_test_on_a_place_of_its_own_does_not_clear_it(self) -> None:
-        from maljan.core.report_formats import builtin_overlapping
+        from malspark.core.report_formats import builtin_overlapping
 
         # Every cuckoo report may carry /acme_marker too.
         derived = self._format(
@@ -303,7 +303,7 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         assert builtin_overlapping(derived) == "cuckoo"
 
     def test_a_built_in_claiming_every_report_of_a_group_is_named_whatever_it_adds(self) -> None:
-        from maljan.core.report_formats import ReportFormat, builtin_overlapping
+        from malspark.core.report_formats import ReportFormat, builtin_overlapping
 
         # The built-in reads any /run text; the format's /run text is one of them.
         mine = self._format("mine", {"path": "/run", "contains": "acme"})
@@ -313,7 +313,7 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         assert builtin_overlapping(mine, [shipped]) == "shipped"
 
     def test_a_partial_overlap_below_a_built_in_s_place_is_named(self) -> None:
-        from maljan.core.report_formats import builtin_overlapping, format_named
+        from malspark.core.report_formats import builtin_overlapping, format_named
 
         below = self._format(
             "below",
@@ -325,7 +325,7 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         assert builtin_overlapping(below, [cuckoo]) == "cuckoo"
 
     def test_a_built_in_s_place_below_a_format_s_is_named(self) -> None:
-        from maljan.core.report_formats import ReportFormat, builtin_overlapping
+        from malspark.core.report_formats import ReportFormat, builtin_overlapping
 
         own = self._format("own_meta", {"path": "/meta", "types": ["object"]})
         builtin = ReportFormat.model_validate(
@@ -338,7 +338,7 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         assert builtin_overlapping(own, [builtin]) == "shipped"
 
     def test_a_shared_place_both_cannot_hold_is_not_named(self) -> None:
-        from maljan.core.report_formats import builtin_overlapping
+        from malspark.core.report_formats import builtin_overlapping
 
         # cuckoo needs /info an object; a text there is no cuckoo report.
         text = self._format(
@@ -349,7 +349,7 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         assert builtin_overlapping(text) == ""
 
     def test_groups_sharing_no_place_are_not_named(self) -> None:
-        from maljan.core.report_formats import builtin_overlapping
+        from malspark.core.report_formats import builtin_overlapping
 
         apart = self._format(
             "apart",
@@ -362,15 +362,15 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
     def test_an_accepted_proposal_is_not_named(self, fixture: str) -> None:
         from pathlib import Path
 
-        from maljan.core.report_formats import ReportFormat, builtin_overlapping
-        from maljan.core.report_proposals import propose_format
+        from malspark.core.report_formats import ReportFormat, builtin_overlapping
+        from malspark.core.report_proposals import propose_format
 
         path = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox" / fixture
         declaration = propose_format(json.loads(path.read_text()))["declaration"]
         assert builtin_overlapping(ReportFormat.model_validate(declaration)) == ""
 
     def test_the_plainest_report_of_each_built_in_group_passes_it(self) -> None:
-        from maljan.core.report_formats import BUILTIN_REPORT_FORMATS, least_report
+        from malspark.core.report_formats import BUILTIN_REPORT_FORMATS, least_report
 
         for fmt in BUILTIN_REPORT_FORMATS:
             for group in fmt.detect:
@@ -381,7 +381,7 @@ class TestAMappedFormatABuiltInOverlapsIsNamed:
         import asyncio
 
         from app.api.v1 import settings as route
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         settings = Settings(
             _env_file=None,  # type: ignore[call-arg]
@@ -435,7 +435,7 @@ class TestTheOverlapIsSaidForTheSaveThatWritesTheDetect:
         import asyncio
 
         from app.api.v1 import settings as route
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         settings = Settings(
             _env_file=None,  # type: ignore[call-arg]
@@ -452,7 +452,7 @@ class TestTheOverlapIsSaidForTheSaveThatWritesTheDetect:
         import asyncio
 
         from app.api.v1 import settings as route
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         settings = Settings(
             _env_file=None,  # type: ignore[call-arg]
@@ -505,7 +505,7 @@ class TestTheOverlapIsSaidForTheSaveThatWritesTheDetect:
         from app.database import get_db
         from app.deps import require_admin
         from app.services.settings_service import SaveResult
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         state: dict[str, Any] = {"formats": []}
 

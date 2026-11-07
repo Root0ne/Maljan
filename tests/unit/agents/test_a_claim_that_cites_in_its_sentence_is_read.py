@@ -22,14 +22,14 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     claims_unread_sentence,
     ledger_ids_cited,
     read_claim_blocks,
 )
-from maljan.agents.claim_headings import claims_headed, count_claims_begun
-from maljan.pipeline.validation import UNGROUNDED_TECHNIQUE_CODE, validate_isr
-from maljan.schemas.isr_models import AgentISR
+from malspark.agents.claim_headings import claims_headed, count_claims_begun
+from malspark.pipeline.validation import UNGROUNDED_TECHNIQUE_CODE, validate_isr
+from malspark.schemas.isr_models import AgentISR
 from tests.linear_cost import TIME_RATIO_LIMIT, calls, cpu_seconds
 
 # The shape of the paid run's round-4 answer, cut to three of its claims.

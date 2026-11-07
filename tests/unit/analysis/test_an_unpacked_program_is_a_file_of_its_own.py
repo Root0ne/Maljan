@@ -16,9 +16,9 @@ from typing import Any
 from tests.unit.tools import synthetic_upx as su
 from tests.unit.tools.synthetic_pe import SyntheticPE
 
-from maljan.analysis.evidence_roots import run_roots
-from maljan.schemas.evidence import LedgerEntry
-from maljan.tools import binary, upx
+from malspark.analysis.evidence_roots import run_roots
+from malspark.schemas.evidence import LedgerEntry
+from malspark.tools import binary, upx
 
 
 def _entry(eid: str, tool: str, answer: dict[str, Any], **args: Any) -> LedgerEntry:

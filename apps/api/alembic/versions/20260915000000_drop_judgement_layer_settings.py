@@ -11,7 +11,7 @@ settings service on the next read.
 ``analysis.sigma_rules_dir`` is not dropped but moved. It named a directory the
 pipeline's own Sigma stage read; Sigma matching is now a tool the ``analysis``
 sidecar serves, so an operator's directory belongs in that server's environment
-as ``MALJAN_SIGMA_RULES_DIR``. It folds into the ``core.mcp.servers`` JSON
+as ``MALSPARK_SIGMA_RULES_DIR``. It folds into the ``core.mcp.servers`` JSON
 document rather than staying a dotted key, for the reason
 ``20260905000000`` gives: the catalog has one entry for the whole map and a key
 it does not know is a key the settings service refuses. ``is_secret`` rows are
@@ -19,7 +19,9 @@ never touched — a rules directory is not a credential and none of these keys
 was ever stored as one.
 
 Downgrade restores the moved directory to its old flat key and nothing else:
-the dropped values configured behaviour that no longer exists.
+the dropped values configured behaviour that no longer exists. It reads the
+directory under either environment name: the one this revision wrote before
+the product's rename (T-576) or the one ``20261107000000`` renamed it to.
 
 Revision ID: 20260915000000
 Revises: 20260914000000
@@ -42,8 +44,10 @@ logger = logging.getLogger(__name__)
 
 MAP_KEY = "core.mcp.servers"
 SERVER_KEY = "analysis"
-SIGMA_ENV_NAME = "MALJAN_SIGMA_RULES_DIR"
-YARA_ENV_NAME = "MALJAN_YARA_RULES_DIR"
+SIGMA_ENV_NAME = "MALSPARK_SIGMA_RULES_DIR"
+YARA_ENV_NAME = "MALSPARK_YARA_RULES_DIR"
+# The prefix this revision wrote the two names under before the product's rename.
+PREVIOUS_ENV_PREFIX = "MALJAN_"
 LEGACY_SIGMA_KEY = "core.analysis.sigma_rules_dir"
 LEGACY_YARA_KEY = "core.analysis.yara_rules_dir"
 
@@ -146,7 +150,9 @@ def downgrade() -> None:
     upsert = _UPSERT_JSON_PG if conn.dialect.name == "postgresql" else _UPSERT_JSON_OTHER
     changed = False
     for key, env_name in MOVED_KEYS.items():
-        directory = env.pop(env_name, None)
+        previous = PREVIOUS_ENV_PREFIX + env_name.split("_", 1)[1]
+        directory = env.pop(env_name, None) or env.pop(previous, None)
+        env.pop(previous, None)
         if directory:
             conn.execute(upsert, {"k": key, "v": json.dumps(directory)})
             changed = True

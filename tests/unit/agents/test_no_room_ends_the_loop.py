@@ -34,11 +34,11 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.mcp_client import MCPLangChainToolkit
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.truncation_ledger import TruncationLedger
-from maljan.llm import context_window as cw
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.mcp_client import MCPLangChainToolkit
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.core.truncation_ledger import TruncationLedger
+from malspark.llm import context_window as cw
 
 # The graph's own sentence for a loop that reached its limit asking for tools.
 GRAPH_STOP = "need more steps"
@@ -142,7 +142,7 @@ def _strings_tool(toolkit: MCPLangChainToolkit, ran: list[int]) -> Any:
 
 @contextlib.contextmanager
 def _settings(max_steps: int) -> Iterator[None]:
-    with patch("maljan.agents.base_agent.get_settings") as settings:
+    with patch("malspark.agents.base_agent.get_settings") as settings:
         cfg = settings.return_value
         cfg.react_agent_timeout = 600
         cfg.react_agent_timeout_overrides = {}
@@ -299,13 +299,13 @@ class TestTheJudgeLoopToo:
     """The judge's loop is awaited whole, and its last message is its reasoning."""
 
     def test_the_graph_s_sentence_is_not_handed_on_as_the_judge_s_reasoning(self) -> None:
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         judge = JudgeAgent(llm=_AlwaysAsksForATool(calls=[]))
         judge.tools = [_strings_tool(MCPLangChainToolkit(), [])]
         with (
-            patch("maljan.agents.judge_agent.get_settings") as settings,
-            patch("maljan.agents.base_agent.get_settings", settings),
+            patch("malspark.agents.judge_agent.get_settings") as settings,
+            patch("malspark.agents.base_agent.get_settings", settings),
         ):
             settings.return_value.react_agent_timeout = 60
             settings.return_value.react_agent_max_steps = 6
@@ -331,7 +331,7 @@ class TestTheNodeDoesNotRunItAgain:
     def test_the_node_reads_it_before_its_fallback_analysis(self) -> None:
         import inspect
 
-        from maljan.pipeline import nodes
+        from malspark.pipeline import nodes
 
         source = inspect.getsource(nodes)
         guard = source.index('getattr(agent, "ended_out_of_room", False)')
@@ -343,7 +343,7 @@ class TestAJudgeWithNoReasoning:
     def test_no_model_is_asked_to_extract_a_verdict_from_nothing(self) -> None:
         from unittest.mock import AsyncMock
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         judge = JudgeAgent(llm=_AlwaysAsksForATool(calls=[]))
         extract = AsyncMock()

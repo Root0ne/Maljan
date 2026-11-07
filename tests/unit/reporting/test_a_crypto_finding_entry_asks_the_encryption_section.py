@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.evidence_bundles import bundle_for, crypto_finding_entries, is_empty
-from maljan.reporting.models import (
+from malspark.reporting.evidence_bundles import bundle_for, crypto_finding_entries, is_empty
+from malspark.reporting.models import (
     EvidenceIndexRow,
     FileHashes,
     MalwareReport,

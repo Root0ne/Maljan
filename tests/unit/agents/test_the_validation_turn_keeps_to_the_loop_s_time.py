@@ -15,8 +15,8 @@ import time
 from typing import Any
 from unittest.mock import patch
 
-from maljan.agents.base_agent import BaseAnalyst, BudgetCeiling, TurnPace
-from maljan.pipeline.validation import UNPARSED_ANSWER_CODE
+from malspark.agents.base_agent import BaseAnalyst, BudgetCeiling, TurnPace
+from malspark.pipeline.validation import UNPARSED_ANSWER_CODE
 
 PROSE = "The sample downloads a payload and runs it from memory."
 GOOD = "CLAIM: runs from memory\nEVIDENCE: fexecve [ev_0004]\nCONFIDENCE: 0.8\nTECHNIQUE: NONE\n"
@@ -49,7 +49,7 @@ def _analyst(turn_seconds: float) -> tuple[_Analyst, list[float]]:
 
 def _validated(analyst: _Analyst) -> Any:
     first = analyst._text_to_isr(PROSE, revision_round=0)
-    with patch("maljan.agents.base_agent.validity_check_available", return_value=True):
+    with patch("malspark.agents.base_agent.validity_check_available", return_value=True):
         return analyst._validate_isr(first, "evidence")
 
 
@@ -101,7 +101,7 @@ class TestAfterTheSecondLoop:
 
 
 def test_the_summary_carries_the_turns_not_asked() -> None:
-    from maljan.analysis.run_summary import RunSummaryBuilder
+    from malspark.analysis.run_summary import RunSummaryBuilder
 
     summary = (
         RunSummaryBuilder(start_time=0.0)

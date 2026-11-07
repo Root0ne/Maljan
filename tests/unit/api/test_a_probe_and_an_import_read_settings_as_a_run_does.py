@@ -18,7 +18,7 @@ CAPA = "core.static.capa.timeout_seconds"
 YARA = "core.static.yara.timeout_seconds"
 BUDGET = "core.mcp.breaker.default_call_timeout_seconds"
 CHECK = "core.reporting.detection_rule_check_seconds"
-BEFORE = "maljan-settings/2"
+BEFORE = "malspark-settings/2"
 MIGRATION = (
     Path(__file__).resolve().parents[3]
     / "apps/api/alembic/versions/20261102000000_budgets_leave_the_static_blocks.py"
@@ -36,7 +36,7 @@ def _migration() -> Any:
 class TestAProbeStartsAShippedServerAsARunDoes:
     def test_a_shipped_server_is_probed_with_its_seed_s_marks(self) -> None:
         from app.services.settings_probes import _probe_config
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         for name, block in Settings(_env_file=None).mcp.servers.items():
             probed = _probe_config(block.model_dump(mode="json"), name)
@@ -54,8 +54,8 @@ class TestAProbeStartsAShippedServerAsARunDoes:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from app.services.settings_probes import _probe_config
-        from maljan.core.config import Settings
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import Settings
+        from malspark.providers.servers import ServerHandle
 
         monkeypatch.delenv("PYTHONIOENCODING", raising=False)
         seen: list[dict[str, str]] = []
@@ -70,7 +70,7 @@ class TestAProbeStartsAShippedServerAsARunDoes:
             def get_tools(self) -> list[Any]:
                 return []
 
-        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
+        monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
         seed = Settings(_env_file=None).mcp.servers["analysis"]
         handle = ServerHandle("analysis", _probe_config(seed.model_dump(mode="json"), "analysis"))
         handle.open("probe")
@@ -93,7 +93,7 @@ class TestAnOlderExportKeepsItsFloor:
         self, document: dict[str, Any], budget: Any, check: Any
     ) -> None:
         from app.api.v1.settings import _imported_keys
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.settings_overrides import build_settings
 
         imported = _imported_keys(document, BEFORE)
         assert imported[BUDGET] == budget
@@ -120,11 +120,11 @@ class TestAnOlderExportKeepsItsFloor:
         """capa raised to 900 on this release gives no server a 900 s budget on import."""
         from app.api.v1.settings import EXPORT_FORMAT, IMPORT_FORMATS, _imported_keys
 
-        assert EXPORT_FORMAT == "maljan-settings/3"
-        assert set(IMPORT_FORMATS) == {EXPORT_FORMAT, "maljan-settings/2", "maljan-settings/1"}
+        assert EXPORT_FORMAT == "malspark-settings/3"
+        assert set(IMPORT_FORMATS) == {EXPORT_FORMAT, "malspark-settings/2", "malspark-settings/1"}
         assert _imported_keys({CAPA: 900}, EXPORT_FORMAT) == {CAPA: 900}
-        assert _imported_keys({CAPA: 900}, "maljan-settings/2")[BUDGET] == 900
-        assert _imported_keys({CAPA: 900}, "maljan-settings/1")[BUDGET] == 900
+        assert _imported_keys({CAPA: 900}, "malspark-settings/2")[BUDGET] == 900
+        assert _imported_keys({CAPA: 900}, "malspark-settings/1")[BUDGET] == 900
         # Its YARA timeout, written by an earlier release only, is still the check budget.
         assert _imported_keys({YARA: 30}, EXPORT_FORMAT) == {CHECK: 30}
 
@@ -144,7 +144,7 @@ class TestAnOlderExportKeepsItsFloor:
         assert BUDGET not in _current_keys({CAPA: 900})
 
     def test_the_migration_restates_the_core_floor(self) -> None:
-        from maljan.core.legacy_tool_tables import FORMER_CALL_FLOOR_SOURCES, former_call_floor
+        from malspark.core.legacy_tool_tables import FORMER_CALL_FLOOR_SOURCES, former_call_floor
 
         mod = _migration()
         assert mod.FLOOR_SOURCES == FORMER_CALL_FLOOR_SOURCES
@@ -155,13 +155,13 @@ class TestAnOlderExportKeepsItsFloor:
 
 class TestAnUnmovedRowIsReadAsItsNewKey:
     def test_the_yara_timeout_is_the_check_budget(self) -> None:
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.settings_overrides import build_settings
 
         settings = build_settings({"static.yara.timeout_seconds": 30})
         assert settings.reporting.detection_rule_check_seconds == 30
 
     def test_the_new_key_wins(self) -> None:
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.settings_overrides import build_settings
 
         settings = build_settings(
             {"static.yara.timeout_seconds": 30, "reporting.detection_rule_check_seconds": 15}
@@ -173,19 +173,19 @@ class TestAnUnmovedRowIsReadAsItsNewKey:
         """A moved key its own model reads is left to it, as on dev."""
         from pydantic import ValidationError
 
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.settings_overrides import build_settings
 
         with pytest.raises(ValidationError):
             build_settings({"static.r2.mirror_dir": value})
 
     def test_a_mirror_dir_its_model_reads_is_read_as_on_dev(self) -> None:
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.settings_overrides import build_settings
 
         settings = build_settings({"static.r2.mirror_dir": "data/samples/r2-elsewhere"})
         assert settings.static.r2.work_dir == "r2-elsewhere"
 
     def test_the_flat_memory_keys_are_read_by_their_model_as_on_dev(self) -> None:
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.settings_overrides import build_settings
 
         settings = build_settings(
             {"memory.qdrant_url": "http://q:6333", "memory.qdrant_collection": "cases_q7"}
@@ -198,7 +198,7 @@ class TestAnUnmovedRowIsReadAsItsNewKey:
         assert both.memory.qdrant.url == "http://new:6333"
 
     def test_the_store_moves_only_keys_no_model_reads(self) -> None:
-        from maljan.core.settings_annotations import (
+        from malspark.core.settings_annotations import (
             MOVED_UNREAD_BY_MODELS,
             RENAMED_SETTING_VALUES,
             RENAMED_SETTINGS,
@@ -209,7 +209,7 @@ class TestAnUnmovedRowIsReadAsItsNewKey:
         assert not {k for k in MOVED_UNREAD_BY_MODELS if k.startswith("core.memory.")}
 
     def test_every_moved_key_is_read_as_its_new_one(self) -> None:
-        from maljan.core.settings_annotations import RENAMED_SETTINGS, read_as_current
+        from malspark.core.settings_annotations import RENAMED_SETTINGS, read_as_current
 
         for old, new in RENAMED_SETTINGS.items():
             assert new in read_as_current({old: "v"}), old

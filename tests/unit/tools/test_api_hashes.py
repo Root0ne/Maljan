@@ -19,8 +19,8 @@ from pathlib import Path
 
 import pytest
 
-from maljan.tools import api_hashes
-from maljan.tools.api_hashes import DEFAULT_ALGORITHMS, DEFAULT_EXPORT_NAMES, resolve_api_hashes
+from malspark.tools import api_hashes
+from malspark.tools.api_hashes import DEFAULT_ALGORITHMS, DEFAULT_EXPORT_NAMES, resolve_api_hashes
 
 from .synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
 

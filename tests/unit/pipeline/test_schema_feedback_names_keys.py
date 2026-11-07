@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from maljan.pipeline.validation import feedback_text, schema_violations
+from malspark.pipeline.validation import feedback_text, schema_violations
 
 
 class _Section(BaseModel):
@@ -54,7 +54,7 @@ class TestTheFeedbackNamesTheKeys:
 
     def test_the_narrative_schema_is_named_the_same_way(self) -> None:
         """It ignores extra keys, so its shape complaint is a missing one."""
-        from maljan.reporting.narrative_agent import NarrativeOutput
+        from malspark.reporting.narrative_agent import NarrativeOutput
 
         violations = schema_violations(
             NarrativeOutput, {"not_a_field": "x"}, code="narrative.schema"
@@ -81,7 +81,7 @@ class TestANestedObjectNamesItsOwnKeys:
     answer's keys, none of which belong there."""
 
     def test_the_keys_belong_to_the_object_that_rejected_the_field(self) -> None:
-        from maljan.reporting.narrative_agent import NarrativeOutput
+        from malspark.reporting.narrative_agent import NarrativeOutput
 
         violations = schema_violations(
             NarrativeOutput,

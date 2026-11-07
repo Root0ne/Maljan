@@ -20,8 +20,8 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from maljan.agents import tool_answer_clearing as tac
-from maljan.agents.base_agent import _message_chars
+from malspark.agents import tool_answer_clearing as tac
+from malspark.agents.base_agent import _message_chars
 
 
 def _no_report(_messages: list[Any]) -> tuple[int, int]:
@@ -210,7 +210,7 @@ class TestCitedIds:
 
 class TestTheBoundaryIsTheModelsOwn:
     def test_a_tiered_price_row_gives_its_first_boundary(self) -> None:
-        from maljan.core.spend import Price, prompt_tier_tokens
+        from malspark.core.spend import Price, prompt_tier_tokens
 
         tiered = Price(0.1, 0.5, tiers=((200_000, Price(0.3, 1.0)), (100_000, Price(0.5, 2.5))))
         assert prompt_tier_tokens(tiered) == 100_000
@@ -218,14 +218,14 @@ class TestTheBoundaryIsTheModelsOwn:
         assert prompt_tier_tokens(None) is None
 
     def test_the_vendored_table_s_haiku_row_is_read(self) -> None:
-        from maljan.core.spend import SpendMeter, prompt_tier_tokens
+        from malspark.core.spend import SpendMeter, prompt_tier_tokens
 
         meter = SpendMeter()
         assert prompt_tier_tokens(meter.price_of("claude-haiku-5-5")) == 100_000
 
     def test_the_agent_s_clearing_carries_its_model_s_boundary(self) -> None:
-        from maljan.agents.base_agent import BudgetMeter
-        from maljan.core.spend import SpendMeter
+        from malspark.agents.base_agent import BudgetMeter
+        from malspark.core.spend import SpendMeter
 
         class _Ledger:
             spend = SpendMeter()
@@ -240,8 +240,8 @@ class TestTheBoundaryIsTheModelsOwn:
         assert clearing.tier_pays is not None
 
     def test_an_unpriced_or_flat_model_has_no_tier_point(self) -> None:
-        from maljan.agents.base_agent import BudgetMeter
-        from maljan.core.spend import SpendMeter
+        from malspark.agents.base_agent import BudgetMeter
+        from malspark.core.spend import SpendMeter
 
         class _Ledger:
             spend = SpendMeter()
@@ -259,9 +259,9 @@ class TestTheCacheLifetimeIsTheModelsOwn:
     def test_the_provider_s_whole_chain_of_classes_states_it(self) -> None:
         from langchain_anthropic import ChatAnthropic
 
-        from maljan.llm.anthropic_history import prompt_cache_seconds, with_preserved_thinking
-        from maljan.llm.tool_replies import with_answered_tool_calls
-        from maljan.llm.transient import with_transient_retries
+        from malspark.llm.anthropic_history import prompt_cache_seconds, with_preserved_thinking
+        from malspark.llm.tool_replies import with_answered_tool_calls
+        from malspark.llm.transient import with_transient_retries
 
         for ttl, seconds in (("5m", 300), ("1h", 3600)):
             built = with_answered_tool_calls(
@@ -275,7 +275,7 @@ class TestTheCacheLifetimeIsTheModelsOwn:
     def test_a_binding_or_a_model_list_answers_for_the_models_it_calls(self) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.llm.anthropic_history import CACHE_LIFETIME_ATTR, prompt_cache_seconds
+        from malspark.llm.anthropic_history import CACHE_LIFETIME_ATTR, prompt_cache_seconds
 
         def stating(seconds: int | None) -> Any:
             class _Model:
@@ -297,7 +297,7 @@ class TestTheCacheLifetimeIsTheModelsOwn:
 
 class TestWhetherAClearPays:
     def test_a_clear_under_the_boundary_pays_when_the_dearer_tier_costs_more(self) -> None:
-        from maljan.core.spend import Price
+        from malspark.core.spend import Price
 
         price = Price(
             0.1,
@@ -314,7 +314,7 @@ class TestWhetherAClearPays:
         assert not tac.tier_clear_pays(price, 101_000, 100_500, 99_000, 0)
 
     def test_an_hour_s_cache_writes_are_priced_as_such(self) -> None:
-        from maljan.core.spend import SpendMeter
+        from malspark.core.spend import SpendMeter
 
         price = SpendMeter().price_of("claude-haiku-5-5")
         # At five-minute writes the clear pays; written for an hour the
@@ -323,9 +323,9 @@ class TestWhetherAClearPays:
         assert not tac.tier_clear_pays(price, 101_000, 98_000, 60_000, 1_000, hour_writes=True)
 
     def test_the_agent_prices_writes_at_its_model_s_cache_lifetime(self) -> None:
-        from maljan.agents.base_agent import BudgetMeter
-        from maljan.core.spend import SpendMeter
-        from maljan.llm.anthropic_history import CACHE_LIFETIME_ATTR
+        from malspark.agents.base_agent import BudgetMeter
+        from malspark.core.spend import SpendMeter
+        from malspark.llm.anthropic_history import CACHE_LIFETIME_ATTR
 
         class _Ledger:
             spend = SpendMeter()

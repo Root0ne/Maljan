@@ -15,8 +15,8 @@ import json
 import time
 from types import SimpleNamespace
 
-from maljan.pipeline.validation import mark_claims_citing_only_failed_calls
-from maljan.schemas.isr_models import (
+from malspark.pipeline.validation import mark_claims_citing_only_failed_calls
+from malspark.schemas.isr_models import (
     FAILED_CALLS_MARKER,
     AgentISR,
     ClaimEvidence,
@@ -79,7 +79,7 @@ def test_the_flag_is_said_beside_the_claim_and_absent_from_an_unflagged_dump() -
 
 
 def test_the_attack_table_notes_a_technique_resting_only_on_such_claims() -> None:
-    from maljan.extractors.capability_matrix import build_capability_matrix
+    from malspark.extractors.capability_matrix import build_capability_matrix
 
     failed = _claim("Reads the exports", "ev_0068", "T1106")
     failed.cites_only_failed_calls = True

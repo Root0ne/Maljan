@@ -7,14 +7,14 @@ from typing import Any
 import pytest
 import yaml
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.detection_signatures import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.detection_signatures import (
     _escape_yara,
     _safe_rule_name,
     _suricata_content_escape,
     build_detection_rules,
 )
-from maljan.reporting.models import MalwareReport
+from malspark.reporting.models import MalwareReport
 from tests.unit._ledger_helpers import ledger_from_sandbox, persistence_isr
 
 
@@ -175,7 +175,7 @@ class TestRansomwareYara:
     def test_yara_rule_name_prefixed(self, ransomware_report: MalwareReport) -> None:
         rules = build_detection_rules(ransomware_report)
         rule = next(r for r in rules if r.kind == "yara")
-        assert rule.name.startswith("Maljan_AutoGen_")
+        assert rule.name.startswith("Malspark_AutoGen_")
 
     def test_yara_body_includes_imports(self, ransomware_report: MalwareReport) -> None:
         rules = build_detection_rules(ransomware_report)
@@ -277,7 +277,7 @@ class TestRansomwareSuricata:
 class TestBuilderAttach:
     def test_attach_replaces_signatures(self, ransomware_report: MalwareReport) -> None:
         # Start with a stub signature so we can verify it's replaced.
-        from maljan.reporting.models import DetectionRule
+        from malspark.reporting.models import DetectionRule
 
         ransomware_report.detection_signatures = [
             DetectionRule(kind="yara", name="stub", body="rule x {condition: false}")
@@ -293,8 +293,8 @@ class TestEscapingEdgeCases:
         Such a name is never published — it could not be a host — so no draft
         reaches it through the report; the writer is asked directly.
         """
-        from maljan.reporting.detection_signatures import _suricata_dns_rule
-        from maljan.reporting.models import NetworkDomain
+        from malspark.reporting.detection_signatures import _suricata_dns_rule
+        from malspark.reporting.models import NetworkDomain
 
         line = _suricata_dns_rule(NetworkDomain(fqdn='evil"injection.com'), 1, "a" * 64, "x")
         assert line is not None
@@ -324,7 +324,7 @@ class TestNoDynamicNoSigma:
 class TestYaraFamilyGroundedGate:
     """The Wave 4 Sigma gate refuses generation when family_grounded=false.
     Wave 9 extends the same gate to YARA so the 2026-05-29 Linux ELF audit's
-    ``Maljan_AutoGen_unknown`` stub cannot ship."""
+    ``Malspark_AutoGen_unknown`` stub cannot ship."""
 
     def test_yara_gated_when_family_ungrounded(self) -> None:
         report = _build()

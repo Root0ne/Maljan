@@ -10,7 +10,7 @@ from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.pipeline.events import claims_to_payload, scrub, summarize_claims
+from malspark.pipeline.events import claims_to_payload, scrub, summarize_claims
 from tests.credential_shapes import prefixed_key
 from tests.linear_cost import assert_scales
 
@@ -81,7 +81,7 @@ def test_a_huge_single_token_is_masked_at_the_window_edge() -> None:
 
 
 def test_an_argument_of_many_urls_keeps_its_first_urls() -> None:
-    from maljan.pipeline.events import summarize_args
+    from malspark.pipeline.events import summarize_args
 
     shown = summarize_args({"text": "Contacts " + _urls(40)})
     assert "host0.example" in shown

@@ -22,17 +22,17 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.analysis.sample_integrity import sandbox_target_record
-from maljan.app import SANDBOX_FAILURE_CHARS
-from maljan.core.config import Settings
-from maljan.core.pack_steps import effective_steps
-from maljan.pipeline import sandbox_status as status
-from maljan.pipeline.triage_pack import PIPELINE, render_pack, run_pack
-from maljan.providers.base import SandboxCapabilities
-from maljan.providers.sandbox.readers import required_reader
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.schemas.sandbox_report import SandboxRun
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.analysis.sample_integrity import sandbox_target_record
+from malspark.app import SANDBOX_FAILURE_CHARS
+from malspark.core.config import Settings
+from malspark.core.pack_steps import effective_steps
+from malspark.pipeline import sandbox_status as status
+from malspark.pipeline.triage_pack import PIPELINE, render_pack, run_pack
+from malspark.providers.base import SandboxCapabilities
+from malspark.providers.sandbox.readers import required_reader
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.schemas.sandbox_report import SandboxRun
 from tests.unit.pipeline.test_triage_pack import SANDBOX_REPORT, _inputs, _write
 from tests.unit.tools.test_binary import _pe
 
@@ -186,9 +186,9 @@ class TestThePack:
     def test_markup_in_the_target_reaches_the_pack_and_the_report_as_a_value(
         self, tmp_path: Path
     ) -> None:
-        from maljan.reporting.ledger_report import build_sections
-        from maljan.reporting.models import MalwareReport
-        from maljan.reporting.renderers import MarkdownRenderer
+        from malspark.reporting.ledger_report import build_sections
+        from malspark.reporting.models import MalwareReport
+        from malspark.reporting.renderers import MarkdownRenderer
 
         result = _pack(tmp_path, _marked(PROBE))
         (entry,) = [e for e in result.entries if e.tool == "sandbox_status"]
@@ -259,9 +259,9 @@ class _Provider:
 
 
 def _app(provider: Any) -> Any:
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
-    app = MaljanApp(mock=True)
+    app = MalsparkApp(mock=True)
     app.container.mock = False
     app.container._sandbox_provider_cache = provider
     return app
@@ -327,7 +327,7 @@ class TestTheApp:
             status.TARGET_KEY: {"expected_sha256": INTAKE, "sandbox_sha256": OTHER},
         }
 
-        with caplog.at_level(logging.WARNING, logger="maljan"):
+        with caplog.at_level(logging.WARNING, logger="malspark"):
             handed = app._tell_the_target(forged, INTAKE)
 
         assert handed is not None
@@ -343,7 +343,7 @@ class TestTheApp:
         app.container.sandbox_target_claim = {"provider": "x", "task_id": "1", "sha256": OTHER}
         forged = {**copy.deepcopy(SANDBOX_REPORT), status.TARGET_KEY: {"anything": "else"}}
 
-        with caplog.at_level(logging.WARNING, logger="maljan"):
+        with caplog.at_level(logging.WARNING, logger="malspark"):
             handed = app._tell_the_target(forged, INTAKE)
 
         assert handed is not None

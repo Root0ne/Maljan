@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from maljan.memory.long_term_memory import memory_owner_for
+from malspark.memory.long_term_memory import memory_owner_for
 
 # The job option that files a job's long-term memory under the job alone
 # (``app.schemas.job._KnownJobConfig``).

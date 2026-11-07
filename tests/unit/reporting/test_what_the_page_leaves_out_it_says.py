@@ -9,9 +9,9 @@ reads as the whole when it is not.
 
 from __future__ import annotations
 
-from maljan.reporting.detection_signatures import LEFT_OUT_COMMENT
-from maljan.reporting.figures import _figure_left_out
-from maljan.reporting.renderers.markdown import (
+from malspark.reporting.detection_signatures import LEFT_OUT_COMMENT
+from malspark.reporting.figures import _figure_left_out
+from malspark.reporting.renderers.markdown import (
     CUT_CELL_SENTENCE,
     LEFT_OUT_LINE,
     _left_out,

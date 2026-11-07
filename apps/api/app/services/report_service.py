@@ -7,10 +7,11 @@ import uuid
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from arq import ArqRedis
-from maljan.reporting.builder import ioc_table
-from maljan.reporting.models import ConsolidatedIOC
-from maljan.reporting.renderers.stix_renderer import SAMPLE_DIGESTS, publishes, yes_because
-from maljan.reporting.run_diff import RunRecord, diff_runs
+from malspark.reporting.builder import ioc_table
+from malspark.reporting.models import ConsolidatedIOC
+from malspark.reporting.renderers.stix_renderer import SAMPLE_DIGESTS, publishes, yes_because
+from malspark.reporting.run_diff import RunRecord, diff_runs
+from malspark.schemas.stix_models import with_current_property_names
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -24,7 +25,7 @@ from app.models.user import User
 from app.services.audit_chain import record_report_deletion
 
 if TYPE_CHECKING:  # pragma: no cover — import cycle-free typing only
-    from maljan.reporting.models import MalwareReport
+    from malspark.reporting.models import MalwareReport
 
 logger = get_logger("service.report")
 
@@ -56,7 +57,7 @@ def _export_filename(report: "MalwareReport", extension: str) -> str:
         stem = (report.identity.hashes.sha256 or "report")[:_HASH_NAME_CHARS]
     stem = _shorten_hash_like(stem)
     stem = _UNSAFE_FILENAME_RE.sub("-", stem).strip("-.") or "report"
-    return f"maljan-{stem[:60]}.{extension}"
+    return f"malspark-{stem[:60]}.{extension}"
 
 
 def _shorten_hash_like(stem: str) -> str:
@@ -64,7 +65,7 @@ def _shorten_hash_like(stem: str) -> str:
 
     Malware pipelines routinely store a sample under its own digest, and this
     one is no exception — the live corpus is full of ``<sha256>.exe``. Left
-    alone that produced ``maljan-<60 chars of hash>.pdf``: truncated mid-digest,
+    alone that produced ``malspark-<60 chars of hash>.pdf``: truncated mid-digest,
     so it neither identified the sample nor kept the original extension. Keeping
     a short prefix plus the extension says strictly more in a quarter the width.
     """
@@ -83,7 +84,7 @@ def _typed_report(mr: dict) -> Any:
     A report that will not validate has no table to rebuild; the feed then
     serves the rows the report stored, and says so in the log.
     """
-    from maljan.reporting.models import MalwareReport
+    from malspark.reporting.models import MalwareReport
 
     try:
         return MalwareReport.model_validate(mr)
@@ -224,8 +225,8 @@ def with_current_iocs(mr: Any, owner: str) -> tuple[Any, str | None]:
     typed = _typed_report(mr)
     if typed is None:
         return mr, None
-    from maljan.reporting.misp import build_misp_attributes
-    from maljan.reporting.prose_decisions import with_decided_statements
+    from malspark.reporting.misp import build_misp_attributes
+    from malspark.reporting.prose_decisions import with_decided_statements
 
     table = ioc_table(typed)
     served = {**mr, "consolidated_iocs": [row.model_dump(mode="json") for row in table]}
@@ -253,7 +254,9 @@ def run_record(report: AnalysisReport) -> RunRecord:
         malware_category=report.malware_category,
         malware_report=report.malware_report,
         run_summary=report.run_summary,
-        stix_bundle=report.stix_bundle,
+        # A bundle stored before the rename reads under the current property
+        # names, as the bundle endpoint serves it.
+        stix_bundle=with_current_property_names(report.stix_bundle),
         agent_findings=[
             {
                 "agent_name": f.agent_name,
@@ -527,7 +530,7 @@ class ReportService:
         loaded = await self._load_malware_report(report_id, user, "markdown")
         if loaded is None:
             return None
-        from maljan.reporting.renderers import MarkdownRenderer
+        from malspark.reporting.renderers import MarkdownRenderer
 
         return str(MarkdownRenderer(layout=await self.report_layout()).render(loaded))
 
@@ -546,7 +549,7 @@ class ReportService:
         loaded = await self._load_malware_report(report_id, user, "html")
         if loaded is None:
             return None
-        from maljan.reporting.renderers import HtmlRenderer
+        from malspark.reporting.renderers import HtmlRenderer
 
         layout = await self.report_layout()
         return RenderedReport(
@@ -570,8 +573,8 @@ class ReportService:
         loaded = await self._load_malware_report(report_id, user, "evidence bundle")
         if loaded is None:
             return None
-        from maljan.reporting.renderers import HtmlRenderer
-        from maljan.reporting.renderers.layout import BUNDLE, BUNDLE_HTML
+        from malspark.reporting.renderers import HtmlRenderer
+        from malspark.reporting.renderers.layout import BUNDLE, BUNDLE_HTML
 
         return RenderedReport(
             content=HtmlRenderer(layout=BUNDLE).render(loaded, nonce=nonce).encode("utf-8"),
@@ -589,8 +592,8 @@ class ReportService:
         loaded = await self._load_malware_report(report_id, user, "evidence bundle")
         if loaded is None:
             return None
-        from maljan.reporting.renderers.bundle import bundle_json
-        from maljan.reporting.renderers.layout import BUNDLE_JSON
+        from malspark.reporting.renderers.bundle import bundle_json
+        from malspark.reporting.renderers.layout import BUNDLE_JSON
 
         return RenderedReport(
             content=bundle_json(loaded).encode("utf-8"),
@@ -604,7 +607,7 @@ class ReportService:
         store that cannot be read prints the layout the process's own settings
         name, and the log says why.
         """
-        from maljan.reporting.renderers.layout import report_layout
+        from malspark.reporting.renderers.layout import report_layout
 
         from app.services.settings_service import effective_core_settings
 
@@ -640,7 +643,7 @@ class ReportService:
         loaded = await self._load_malware_report(report_id, user, "pdf")
         if loaded is None:
             return None
-        from maljan.reporting.renderers import HtmlRenderer, PdfRenderer
+        from malspark.reporting.renderers import HtmlRenderer, PdfRenderer
 
         html_doc = HtmlRenderer(
             layout=await self.report_layout(), self_contained=True, bundle_location=bundle_location
@@ -665,7 +668,7 @@ class ReportService:
         mr = await self.get_malware_report(report_id, user)
         if not mr:
             return None
-        from maljan.reporting.models import MalwareReport, key_ordered
+        from malspark.reporting.models import MalwareReport, key_ordered
 
         try:
             return MalwareReport.model_validate(key_ordered(mr))

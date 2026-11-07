@@ -18,8 +18,8 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.base_agent import BaseAnalyst, alignment_gate
-from maljan.pipeline.validation import (
+from malspark.agents.base_agent import BaseAnalyst, alignment_gate
+from malspark.pipeline.validation import (
     PLATFORM_MISMATCH_CODE,
     VALIDITY_CODE,
     WEAK_ALIGNMENT_CODE,
@@ -33,13 +33,13 @@ from maljan.pipeline.validation import (
     validation_metrics,
     validity_check_available,
 )
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     corroboration as _corroboration,
 )
-from maljan.schemas.evidence import build_entry, format_entry_id
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import AttackPattern, Bundle
-from maljan.tools import knowledge
+from malspark.schemas.evidence import build_entry, format_entry_id
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import AttackPattern, Bundle
+from malspark.tools import knowledge
 
 # The roots and the sources a row states beside its lists, tested apart
 # (``tests/unit/analysis/test_a_technique_on_one_source_or_on_artefacts_is_not_corroborated.py``).
@@ -418,7 +418,7 @@ class TestTheGateRunsOnlyOnAWarmIndex:
     def test_a_warm_index_scores_the_claimed_id_and_ranks_candidates(self, monkeypatch) -> None:
         fake = _FakeIndex()
         monkeypatch.setattr(knowledge, "_HYBRID_INDEX", fake)
-        monkeypatch.setattr("maljan.memory.attck_loader.domain_of", lambda tid: "enterprise")
+        monkeypatch.setattr("malspark.memory.attck_loader.domain_of", lambda tid: "enterprise")
         assert knowledge.index_is_warm() is True
         answer = knowledge.technique_alignment("injects into a process", "T1547.001", k=2)
         assert answer["technique_id"] == "T1547.001"
@@ -448,7 +448,7 @@ class TestTheGateRunsOnlyOnAWarmIndex:
             if built:
                 break
             threading.Event().wait(0.02)
-        assert built == ["maljan-attck-index"]
+        assert built == ["malspark-attck-index"]
         assert knowledge.index_is_warm() is False
 
 
@@ -544,7 +544,7 @@ class TestValidityAvailability:
         agent.pack_ledger_ids = []
         agent.sample_format = ("pe", "windows")
         monkeypatch.setattr(
-            "maljan.pipeline.validation.validate_isr",
+            "malspark.pipeline.validation.validate_isr",
             lambda *_a, **_k: [],
         )
         agent._validate_isr(_isr(_claim("T1055")), "evidence")
@@ -603,7 +603,7 @@ class TestCorroborationCounts:
         """The four sources in the shapes they really emit: the capa and
         Sigma ledger fixtures, and the two knowledge tools called live.
         capa decorates its ids, Sigma lower-cases them under ``tags``."""
-        from maljan.tools.knowledge import api_capability, lolbin_lookup
+        from malspark.tools.knowledge import api_capability, lolbin_lookup
 
         capa = _fixture("capa")
         assert capa["capabilities"][0]["attck"] == ["Defense Evasion::Process Injection [T1055]"]
@@ -675,12 +675,12 @@ class TestCorroborationCounts:
 
 class TestTheMatrixCarriesTheCatalogueScope:
     def test_cells_carry_domain_and_platforms_and_c1_reads_them(self, monkeypatch) -> None:
-        from maljan.extractors.capability_matrix import build_capability_matrix
-        from maljan.qa.fp_linter import lint_report
+        from malspark.extractors.capability_matrix import build_capability_matrix
+        from malspark.qa.fp_linter import lint_report
 
         monkeypatch.setattr(knowledge, "attck_lookup", _Attck().attck_lookup)
         monkeypatch.setattr(
-            "maljan.extractors.capability_matrix._unknown_to_the_catalogue", lambda ids: set()
+            "malspark.extractors.capability_matrix._unknown_to_the_catalogue", lambda ids: set()
         )
         isrs = {"static": _isr(_claim("T1417"), _claim("T1547.001"))}
         cells, _mappings = build_capability_matrix(stix_output=None, isr_reports=isrs)
@@ -711,7 +711,7 @@ class TestTheWarmerIsSticky:
     def test_a_failed_build_is_remembered_and_nothing_starts_again(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.tools import knowledge
+        from malspark.tools import knowledge
 
         starts: list[int] = []
 
@@ -749,7 +749,7 @@ class TestTheGateRanksTheClaimAlone:
 
 class TestTheNotRunSentence:
     def test_the_catalogue_code_has_its_sentence_and_another_code_is_named(self) -> None:
-        from maljan.pipeline.validation import not_run_sentence
+        from malspark.pipeline.validation import not_run_sentence
 
         assert not_run_sentence("attck.unknown_id").startswith(
             "the ATT&CK catalogue could not be read"
@@ -765,8 +765,8 @@ class TestThePlatformCheckLoadsNoCatalogue:
         """The scope comes from the two vendored files. Loading the STIX
         bundles inside an analyst's turn cost a second and a hundred
         megabytes on a warm cache and a network fetch on a cold one."""
-        from maljan.memory import attck_loader
-        from maljan.tools import knowledge
+        from malspark.memory import attck_loader
+        from malspark.tools import knowledge
 
         def _no_load(*_args: object, **_kwargs: object) -> object:
             raise AssertionError("the bundle catalogue was loaded in a validation turn")
@@ -780,7 +780,7 @@ class TestThePlatformCheckLoadsNoCatalogue:
         assert [c.technique_id for c in isr.claims] == ["T1055", "T1633"]
 
     def test_attck_scope_answers_from_the_vendored_files(self) -> None:
-        from maljan.tools import knowledge
+        from malspark.tools import knowledge
 
         assert knowledge.attck_scope("t1633") == {
             "technique_id": "T1633",
@@ -798,7 +798,7 @@ class TestAPreOnlyTechnique:
     def test_it_is_exempt_from_the_platform_half(self) -> None:
         """T1583 (Acquire Infrastructure) declares PRE alone: it happens before
         any host is touched, so a Windows sample cannot contradict it."""
-        from maljan.tools import knowledge
+        from malspark.tools import knowledge
 
         assert knowledge.attck_scope("T1583")["platforms"] == ["PRE"]
         assert platform_mismatch_message("T1583", knowledge, ("enterprise", ("Windows",))) == ""
@@ -822,7 +822,7 @@ class TestAPreOnlyTechnique:
         ``T1583 Acquire Infrastructure`` off an Android infostealer's C2
         registration and out of every published surface.
         """
-        from maljan.tools import knowledge
+        from malspark.tools import knowledge
 
         assert platform_mismatch_message("T1583", knowledge, ("mobile", ("Android",))) == ""
 
@@ -847,13 +847,13 @@ class TestARetiredId:
         """The retired note comes from the vendored id universe; the suggestions
         beside it come from the ranked index, which is a corpus build this suite
         does not take. These tests are about the note."""
-        from maljan.tools import knowledge
+        from malspark.tools import knowledge
 
         monkeypatch.setattr(knowledge, "resolve_technique", lambda *a, **k: {"candidates": []})
         yield
 
     def test_the_analyst_is_told_the_id_was_retired_and_in_which_release(self) -> None:
-        from maljan.tools import knowledge
+        from malspark.tools import knowledge
 
         isr = _isr(_claim("T1562.001"))
         violations = validate_isr(isr, attck=knowledge, sample=PE)
@@ -865,7 +865,7 @@ class TestARetiredId:
         assert isr.claims[0].technique_id == "T1562.001"
 
     def test_the_knowledge_tools_say_so_too(self) -> None:
-        from maljan.tools import knowledge
+        from malspark.tools import knowledge
 
         row = knowledge.attck_validate(["T1562.001"])["invalid"][0]
         assert row["retired_in"] == "19.2"
@@ -876,7 +876,7 @@ class TestARetiredId:
         assert knowledge.attck_retired_in("T1055") is None
 
     def test_an_invented_id_carries_no_such_note(self) -> None:
-        from maljan.tools import knowledge
+        from malspark.tools import knowledge
 
         violations = validate_isr(_isr(_claim("T9999")), attck=knowledge, sample=PE)
         assert "retired" not in violations[0].message
@@ -893,7 +893,7 @@ class TestAssertionsFromYaraAndFromRetiredIds:
         assert rows["T1055.012"] == {"asserted_by": ["yara"], "claimed_by": []}
 
     def test_an_upstream_rule_asserting_a_retired_id_is_marked(self) -> None:
-        from maljan.analysis.corroboration import technique_label
+        from malspark.analysis.corroboration import technique_label
 
         sigma = {"matches": [{"title": "x", "tags": ["attack.t1562.004"], "matched_fields": []}]}
         rows = corroboration({}, [_entry("sigma_match_sandbox", sigma, 1)])
@@ -911,7 +911,7 @@ class TestACatalogueAssociationIsNeverASource:
         """Reading a window's pixels back is what a screenshot is made of, and
         it is also what a screen recorder and a remote-desktop server do; the
         association is shown for reference and is not asserted."""
-        from maljan.tools.knowledge import api_capability
+        from malspark.tools.knowledge import api_capability
 
         payload = api_capability(["GetDIBits", "PrintWindow", "GetDC", "BitBlt"])
         assert any(row["techniques"] for row in payload["capabilities"])
@@ -925,8 +925,8 @@ class TestACatalogueAssociationIsNeverASource:
 
     def test_an_operator_catalogue_is_named_by_its_own_name(self) -> None:
         """Any tool declared a catalogue is named as it is, never as the shipped catalogue."""
-        from maljan.pipeline.evidence_summary import catalogue_associations
-        from maljan.tools.knowledge import api_capability
+        from malspark.pipeline.evidence_summary import catalogue_associations
+        from malspark.tools.knowledge import api_capability
 
         payload = api_capability(["GetDIBits", "PrintWindow", "GetDC", "BitBlt"])
         entry = _entry("refs__lookup_apis", payload, 1).model_copy(
@@ -937,7 +937,7 @@ class TestACatalogueAssociationIsNeverASource:
 
 class TestEverySurfaceSaysWhatHappenedToARetiredId:
     def test_the_validity_tool_gives_the_reason_and_the_successor(self) -> None:
-        from maljan.tools import knowledge
+        from malspark.tools import knowledge
 
         (row,) = knowledge.attck_validate(["T1024"])["invalid"]
         assert row["reason"] == "revoked by T1573 in the ATT&CK catalogue"
@@ -945,9 +945,9 @@ class TestEverySurfaceSaysWhatHappenedToARetiredId:
         assert "retired_in" not in row
 
     def test_a_revoked_attack_pattern_is_not_said_to_have_no_entry(self) -> None:
-        from maljan.pipeline.validation import validate_verdict_bundle
-        from maljan.schemas.stix_models import AttackPattern, Bundle
-        from maljan.tools import knowledge
+        from malspark.pipeline.validation import validate_verdict_bundle
+        from malspark.schemas.stix_models import AttackPattern, Bundle
+        from malspark.tools import knowledge
 
         bundle = Bundle(
             objects=[  # type: ignore[list-item]
@@ -966,8 +966,8 @@ class TestEverySurfaceSaysWhatHappenedToARetiredId:
         assert "no current entry for it: it was revoked by T1573" in row.message
 
     def test_the_corroboration_row_carries_the_reason(self) -> None:
-        from maljan.analysis.corroboration import corroboration_row, technique_label
-        from maljan.pipeline.validation import _retired_release
+        from malspark.analysis.corroboration import corroboration_row, technique_label
+        from malspark.pipeline.validation import _retired_release
 
         assert _retired_release("T1024") is None
         row = corroboration_row({"asserted_by": ["sigma"], "retired_reason": "revoked by T1573"})

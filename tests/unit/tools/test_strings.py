@@ -1,4 +1,4 @@
-"""``maljan.tools.strings`` finds the wide runs and types what it finds.
+"""``malspark.tools.strings`` finds the wide runs and types what it finds.
 
 The IOC scan moved here from ``pe_extractor``; ``test_string_ioc_extraction``
 still pins its behaviour through the extractor's re-export, so what these tests
@@ -11,7 +11,7 @@ from __future__ import annotations
 import string
 from pathlib import Path
 
-from maljan.tools import strings as tool
+from malspark.tools import strings as tool
 
 
 def _pad(payload: bytes) -> bytes:

@@ -15,8 +15,8 @@ from collections.abc import Callable
 import pytest
 from tests.linear_cost import assert_scales
 
-from maljan.core.undeclared_tools import PROSE_ERROR_CHARS, prose_error
-from maljan.schemas.evidence import build_entry
+from malspark.core.undeclared_tools import PROSE_ERROR_CHARS, prose_error
+from malspark.schemas.evidence import build_entry
 
 
 def _entry(output: str, *, source: str | None = "mcp:other", tool: str = "load_binary") -> object:

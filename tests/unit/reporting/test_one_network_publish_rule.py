@@ -27,19 +27,19 @@ import json
 import pathlib
 from typing import Any
 
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.ledger_projection import network_from_ledger, static_from_ledger
-from maljan.reporting.models import MalwareReport, StaticAnalysis, StringIOC
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.ledger_projection import network_from_ledger, static_from_ledger
+from malspark.reporting.models import MalwareReport, StaticAnalysis, StringIOC
+from malspark.reporting.renderers.stix_renderer import (
     NETWORK_KINDS,
     STRING_IOC_KINDS,
     ExtendedSTIXRenderer,
     indicator_pattern,
     indicator_publish_reason,
 )
-from maljan.schemas.evidence import build_entry
+from malspark.schemas.evidence import build_entry
 
-SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "maljan"
+SRC = pathlib.Path(__file__).resolve().parents[3] / "src" / "malspark"
 
 # The prefixes a STIX pattern this platform mints begins with: the four
 # endpoints and every other kind the string sweep types a row as. The sample's

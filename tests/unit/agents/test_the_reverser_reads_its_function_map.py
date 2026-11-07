@@ -20,10 +20,10 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.agents.evidence_recorder import same_function_notice
-from maljan.agents.function_map import FUNCTION_MAP_HEAD, function_artefacts
-from maljan.schemas.evidence import LedgerEntry
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.agents.evidence_recorder import same_function_notice
+from malspark.agents.function_map import FUNCTION_MAP_HEAD, function_artefacts
+from malspark.schemas.evidence import LedgerEntry
 
 LISTING = "void FUN_1400050ac(void)\n{\n  lookup(0x1);\n}\n"
 REPORT = (
@@ -48,7 +48,7 @@ def _decompiler(calls: list[dict[str, Any]]) -> StructuredTool:
         description="Decompile one function.",
         args_schema=_Args,
         infer_schema=False,
-        metadata={"maljan_server": "ghidra"},
+        metadata={"malspark_server": "ghidra"},
     )
 
 
@@ -97,7 +97,7 @@ class _Analyst(BaseAnalyst):
 
 @pytest.fixture(autouse=True)
 def _no_suggestions(monkeypatch: pytest.MonkeyPatch) -> None:
-    from maljan.tools import knowledge
+    from malspark.tools import knowledge
 
     monkeypatch.setattr(knowledge, "resolve_technique", lambda *a, **k: {"candidates": []})
 
@@ -115,7 +115,7 @@ def _analyst(asks: list[str], calls: list[dict[str, Any]]) -> tuple[_Analyst, _M
 
 
 def _run(analyst: _Analyst) -> None:
-    with patch("maljan.agents.base_agent.loop_limits", return_value=(None, None)):
+    with patch("malspark.agents.base_agent.loop_limits", return_value=(None, None)):
         analyst.safe_analyze_isr("the task")
 
 
@@ -140,7 +140,7 @@ def test_every_call_runs_and_the_map_rides_the_latest_answer() -> None:
 @pytest.mark.parametrize("again", ["0x1400050ac", "1400050ac"])
 def test_an_identical_repeat_is_served_by_the_repeat_guard_as_before(again: str) -> None:
     """The same address in another hex spelling is the same call (``RepeatGuard._key``)."""
-    from maljan.agents.evidence_recorder import served_repeat_notice
+    from malspark.agents.evidence_recorder import served_repeat_notice
 
     calls: list[dict[str, Any]] = []
     analyst, model = _analyst(["0x1400050ac", again], calls)
@@ -238,8 +238,8 @@ def test_an_agent_with_no_run_state_block_is_sent_no_map() -> None:
 
 
 def test_the_node_briefs_the_artefacts_and_an_ask_hands_them_on() -> None:
-    from maljan.agents.delegation import _brief_callee
-    from maljan.pipeline import nodes
+    from malspark.agents.delegation import _brief_callee
+    from malspark.pipeline import nodes
 
     hashes = {
         "id": "ev_0000",

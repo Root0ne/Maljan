@@ -16,10 +16,10 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.llm import context_window
-from maljan.pipeline import analyst_mode as analyst_mode_module
-from maljan.pipeline.analyst_mode import (
+from malspark.core.config import Settings
+from malspark.llm import context_window
+from malspark.pipeline import analyst_mode as analyst_mode_module
+from malspark.pipeline.analyst_mode import (
     AnalystMode,
     analyst_mode_of,
     mock_mode,
@@ -307,8 +307,8 @@ class TestWhatEachStageRan:
 
 class TestTheContainer:
     def test_the_job_s_mode_reaches_the_graph(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.core.container import ServiceContainer
-        from maljan.pipeline.builder import build_graph
+        from malspark.core.container import ServiceContainer
+        from malspark.pipeline.builder import build_graph
 
         for parallel in (False, True):
             container = ServiceContainer(Settings(_env_file=None), mock=True)
@@ -321,7 +321,7 @@ class TestTheContainer:
             assert analyst_mode_of(container).parallel is parallel
 
     def test_a_mock_container_resolves_once_and_says_why(self) -> None:
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer(Settings(_env_file=None), mock=True)
         first = container.analyst_mode()

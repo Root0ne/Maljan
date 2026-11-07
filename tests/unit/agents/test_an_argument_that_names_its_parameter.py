@@ -14,14 +14,14 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.evidence_recorder import (
+from malspark.agents.evidence_recorder import (
     SELF_NAMED_ARGUMENT_CODE,
     EvidenceRecorder,
     RepeatGuard,
     record_tools,
     self_named_arguments,
 )
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.schemas.evidence import EvidenceCounter
 
 
 def _strings_tool(ran: list[dict[str, Any]]) -> StructuredTool:
@@ -108,7 +108,7 @@ class TestTheCall:
 
 
 def test_the_analyst_counts_the_question_where_the_summary_reads_it() -> None:
-    from maljan.agents.base_agent import BaseAnalyst
+    from malspark.agents.base_agent import BaseAnalyst
 
     class _Analyst(BaseAnalyst):
         def analyze(self, data: str) -> str:  # pragma: no cover - unused

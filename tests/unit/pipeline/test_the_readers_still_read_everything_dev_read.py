@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     _unstated_values,
     network_values_in,
     recommendation_indicator_violations,
 )
-from maljan.reporting.renderers.markdown import _defanged_text
-from maljan.tools.strings import iocs_from_text
+from malspark.reporting.renderers.markdown import _defanged_text
+from malspark.tools.strings import iocs_from_text
 
 # (input, sweep, host reader, values the publish check names, recommendation
 # questions, defanged text): dev's output for each.

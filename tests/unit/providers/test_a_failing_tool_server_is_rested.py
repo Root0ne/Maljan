@@ -20,10 +20,10 @@ import pytest
 from mcp.shared.exceptions import McpError
 from mcp.types import CONNECTION_CLOSED, INVALID_PARAMS, ErrorData
 
-from maljan.agents.mcp_client import MCPLangChainToolkit
-from maljan.core.config import Settings
-from maljan.providers.server_guard import ServerGuard, guard_from_settings, transport_failure
-from maljan.tools.errors import SERVER_RESTING, error_parts
+from malspark.agents.mcp_client import MCPLangChainToolkit
+from malspark.core.config import Settings
+from malspark.providers.server_guard import ServerGuard, guard_from_settings, transport_failure
+from malspark.tools.errors import SERVER_RESTING, error_parts
 
 
 class _Clock:
@@ -282,7 +282,7 @@ class TestTheToolkitCallsThroughTheGuard:
 
 class TestTheRegistryHoldsOneGuardPerServer:
     def test_every_handle_has_the_job_guard_and_an_opening_is_kept_and_announced(self) -> None:
-        from maljan.providers.servers import ServerRegistry
+        from malspark.providers.servers import ServerRegistry
 
         events: list[tuple[str, dict[str, Any]]] = []
         settings = Settings()
@@ -311,7 +311,7 @@ class TestTheRegistryHoldsOneGuardPerServer:
 
 
 def test_the_run_summary_names_every_rest() -> None:
-    from maljan.analysis.run_summary import RunSummaryBuilder
+    from malspark.analysis.run_summary import RunSummaryBuilder
 
     summary = (
         RunSummaryBuilder(start_time=0.0)
@@ -331,14 +331,14 @@ def test_the_run_summary_names_every_rest() -> None:
 
 @pytest.mark.parametrize("failures", [1, 2])
 def test_the_sentence_counts_in_words(failures: int) -> None:
-    from maljan.analysis.run_summary import server_rest_sentence
+    from malspark.analysis.run_summary import server_rest_sentence
 
     text = server_rest_sentence({"server": "s", "failures": failures, "cooldown_s": 5})
     assert (" call in a row" in text) == (failures == 1)
 
 
 def test_the_sentence_names_a_labelled_server_by_its_label_and_key() -> None:
-    from maljan.analysis.run_summary import server_rest_sentence
+    from malspark.analysis.run_summary import server_rest_sentence
 
     row = {"server": "analysis", "failures": 3, "cooldown_s": 60.0, "reason": "timed out"}
     labelled = server_rest_sentence({**row, "label": "Analysis MCP"})
@@ -458,7 +458,7 @@ class TestTheCallDeadline:
     )
     def test_the_deployment_budget_is_every_such_servers_budget(self, server: str) -> None:
         """The deployment's budget for a server that declares none (900 s on a slow host)."""
-        from maljan.providers.server_guard import server_call_budget
+        from malspark.providers.server_guard import server_call_budget
 
         settings = Settings.model_validate(
             {"mcp": {"breaker": {"default_call_timeout_seconds": 900}}}
@@ -476,7 +476,7 @@ class TestTheCallDeadline:
         assert guard_from_settings(server, settings).call_timeout("any") == 330.0
 
     def test_the_built_in_provider_blocks_keep_it_too(self) -> None:
-        from maljan.providers.server_guard import server_call_budget
+        from malspark.providers.server_guard import server_call_budget
 
         settings = Settings()
         for block in (settings.static.ghidra, settings.static.r2, settings.sandbox.cape2.mcp):
@@ -551,7 +551,7 @@ class TestTheRequestIdIsTheCallsOwn:
     def test_next_request_id_is_the_id_call_tool_sends(self) -> None:
         from mcp import ClientSession
 
-        from maljan.agents.mcp_client import next_request_id
+        from malspark.agents.mcp_client import next_request_id
 
         async def main() -> tuple[Any, Any]:
             to_server_send, to_server_receive = anyio.create_memory_object_stream(10)

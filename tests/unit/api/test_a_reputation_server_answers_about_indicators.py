@@ -19,13 +19,13 @@ import pytest
 
 from app.services.enrichment_sources import ready_sources, slowest_shipped_pace
 from app.services.enrichment_tools import ServerToolCaller
-from maljan.analysis.disclosure import EnrichmentAsks
-from maljan.core.config import MCPServerConfig
-from maljan.core.derived_declarations import derived_tool_facts
-from maljan.core.served_declarations import register_served
-from maljan.core.tool_declarations import launch_identity
-from maljan.enrichment.builtin_sources import builtin_source_entries
-from maljan.enrichment.orchestrator import enrich_malware_report
+from malspark.analysis.disclosure import EnrichmentAsks
+from malspark.core.config import MCPServerConfig
+from malspark.core.derived_declarations import derived_tool_facts
+from malspark.core.served_declarations import register_served
+from malspark.core.tool_declarations import launch_identity
+from malspark.enrichment.builtin_sources import builtin_source_entries
+from malspark.enrichment.orchestrator import enrich_malware_report
 
 KEY = "-".join(["acme", "intel"])
 HOST = ".".join(["intel", "acme-labs", "net"])
@@ -134,7 +134,7 @@ async def _enrich(
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404))) as h:
         with (
             patch.object(caller, "_handle", _handle),
-            patch("maljan.enrichment.declared.asyncio.sleep", _sleep),
+            patch("malspark.enrichment.declared.asyncio.sleep", _sleep),
         ):
             await enrich_malware_report(
                 report,
@@ -211,7 +211,7 @@ async def test_a_source_that_names_the_server_and_no_tool_is_asked_the_same_way(
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(404))) as h:
         with (
             patch.object(caller, "_handle", _handle),
-            patch("maljan.enrichment.orchestrator.WhoisClient") as whois,
+            patch("malspark.enrichment.orchestrator.WhoisClient") as whois,
         ):
             whois.return_value.asn_lookup = _nothing
             whois.return_value.geoip = lambda _a: None

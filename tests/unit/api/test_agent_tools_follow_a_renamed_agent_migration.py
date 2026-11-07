@@ -179,7 +179,7 @@ def test_the_numbered_rename_is_followed_when_it_is_the_only_one() -> None:
 
 def test_after_the_role_entry_revision_the_store_loads() -> None:
     """The two revisions in order leave a document the settings model accepts."""
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     conn = _connect()
     _insert(

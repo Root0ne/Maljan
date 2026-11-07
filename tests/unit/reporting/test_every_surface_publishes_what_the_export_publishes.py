@@ -18,9 +18,9 @@ from typing import Any
 import pytest
 
 from app.services.report_service import ioc_feed_rows
-from maljan.reporting.builder import build_consolidated_iocs
-from maljan.reporting.detection_signatures import build_detection_rules
-from maljan.reporting.models import (
+from malspark.reporting.builder import build_consolidated_iocs
+from malspark.reporting.detection_signatures import build_detection_rules
+from malspark.reporting.models import (
     DynamicBehavior,
     FileHashes,
     JudgeIndicator,
@@ -29,7 +29,7 @@ from maljan.reporting.models import (
     NetworkIOCs,
     SampleIdentity,
 )
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.renderers.stix_renderer import (
     UNPUBLISHED_VALUE_CODE,
     ExtendedSTIXRenderer,
     exported_indicator_values,
@@ -38,7 +38,7 @@ from maljan.reporting.renderers.stix_renderer import (
     publishes,
     rule_values,
 )
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.stix_models import Bundle
 
 OBSERVED = "gate9.example.org"
 SWEPT = "crl.example-authority.org"
@@ -145,7 +145,7 @@ class TestAJudgeValueTheRuleRefuses:
         )
 
     def test_a_judge_value_the_file_s_strings_hold_is_said_to_be_seen_there(self) -> None:
-        from maljan.reporting.models import StaticAnalysis, StringIOC
+        from malspark.reporting.models import StaticAnalysis, StringIOC
 
         judge = _judge("[domain-name:value = 'only-judge.example.net']")
         report = _report(

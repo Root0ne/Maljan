@@ -17,12 +17,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     KEPT_WITH_A_FINDING,
     UNPUBLISHED_RECOMMENDATION_CODE,
     recommendation_indicator_violations,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     ConsolidatedIOC,
     FileHashes,
     MalwareReport,
@@ -32,7 +32,7 @@ from maljan.reporting.models import (
     SampleIdentity,
     TTPMapping,
 )
-from maljan.reporting.narrative_agent import NarrativeAgent, published_answers
+from malspark.reporting.narrative_agent import NarrativeAgent, published_answers
 
 PUBLISHED = "gate.example.com"
 REFUSED = "198.51.100.7"

@@ -129,11 +129,11 @@ def test_an_enrichment_queue_that_is_down_names_no_password() -> None:
     "text",
     [
         f"redis://default:{PASSWORD}@redis.internal:6379/0",
-        f"postgresql://maljan:{PASSWORD}@db.internal:5432/maljan",
+        f"postgresql://malspark:{PASSWORD}@db.internal:5432/malspark",
         f"ConnectionError: http://user:{PASSWORD}@qdrant.internal:6333 refused",
     ],
 )
 def test_the_masking_itself_covers_every_dsn_shape(text: str) -> None:
-    from maljan.core.settings_overrides import redact_url
+    from malspark.core.settings_overrides import redact_url
 
     assert PASSWORD not in redact_url(text)

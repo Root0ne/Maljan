@@ -1,7 +1,7 @@
 """The paid models' prices in the vendored table are the vendors' own figures, per token.
 
 The rehearsal's spend check and the product price a call from the same vendored
-table (``maljan.core.spend.table_prices``), so a wrong figure there would pass
+table (``malspark.core.spend.table_prices``), so a wrong figure there would pass
 both. These are the figures read on the vendors' price pages on 2026-10-10:
 
 * https://platform.claude.com/docs/en/about-claude/pricing — Claude Haiku 5.5,
@@ -30,7 +30,7 @@ from typing import Any
 
 import pytest
 
-from maljan.core.spend import table_prices
+from malspark.core.spend import table_prices
 
 M = 1_000_000
 # Off-peak: a Saturday noon. Peak: a Monday inside each window. Off-peak again:

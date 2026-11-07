@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.pipeline import validation
-from maljan.pipeline.validation import (
+from malspark.pipeline import validation
+from malspark.pipeline.validation import (
     ABSENCE_CLAIM_CODE,
     CLAIM_DOES_NOT_DESCRIBE_CODE,
     NAME_STEM_MAX_FAMILIES,
@@ -34,8 +34,8 @@ from maljan.pipeline.validation import (
     procedure_words,
     validate_isr,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.tools import knowledge
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.tools import knowledge
 
 PE = {"platform": "windows", "file_type": "pe"}
 ASKED = {CLAIM_DOES_NOT_DESCRIBE_CODE, ABSENCE_CLAIM_CODE}

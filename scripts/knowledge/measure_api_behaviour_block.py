@@ -67,8 +67,8 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_ROOT / "src"))
 
-from maljan.analysis.api_capability_db import load_api_behaviour_db  # noqa: E402
-from maljan.tools.knowledge import (  # noqa: E402
+from malspark.analysis.api_capability_db import load_api_behaviour_db  # noqa: E402
+from malspark.tools.knowledge import (  # noqa: E402
     DEFAULT_API_ATTCK_MAP,
     DEFAULT_API_BEHAVIOUR_MAP,
     api_capability,

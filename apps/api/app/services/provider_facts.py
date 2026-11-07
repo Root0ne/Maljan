@@ -2,7 +2,7 @@
 
 Titles, descriptions, credential keys, hosted or run locally, connection-test
 labels, per-agent endpoints and effort settings live on each registered
-provider (``maljan.llm.provider_base.LLMProvider``, the static and sandbox
+provider (``malspark.llm.provider_base.LLMProvider``, the static and sandbox
 provider classes, the memory backends, the reputation sources). This module
 gathers them for the settings schema, so the console keeps no table of
 providers of its own and a provider registered tomorrow is described the day
@@ -27,7 +27,7 @@ SANDBOX_SELECTOR = "core.sandbox.provider"
 
 
 def _llm_choices() -> tuple[dict[str, str], dict[str, str], dict[str, dict[str, Any]]]:
-    from maljan.llm.provider_base import facts_of, provider_names
+    from malspark.llm.provider_base import facts_of, provider_names
 
     titles: dict[str, str] = {}
     descriptions: dict[str, str] = {}
@@ -108,7 +108,7 @@ def selector_choices(
     ``keys`` are the catalog's keys in order, against which a provider's
     declared guide leaves are expanded.
     """
-    from maljan.providers.registry import _SANDBOX_REGISTRY, _STATIC_REGISTRY, discover_providers
+    from malspark.providers.registry import _SANDBOX_REGISTRY, _STATIC_REGISTRY, discover_providers
 
     discover_providers()
     titles, descriptions, facts = _llm_choices()
@@ -129,9 +129,9 @@ def probe_labels(enrichment_sources: Any = None) -> dict[str, str]:
     ``enrichment_sources`` is the stored ``api.enrichment_sources`` map: each
     source in force that declares a test is labelled by its own title.
     """
-    from maljan.enrichment.declared import effective_sources
-    from maljan.memory.store_factory import registered_backends
-    from maljan.providers.registry import _SANDBOX_REGISTRY, _STATIC_REGISTRY, discover_providers
+    from malspark.enrichment.declared import effective_sources
+    from malspark.memory.store_factory import registered_backends
+    from malspark.providers.registry import _SANDBOX_REGISTRY, _STATIC_REGISTRY, discover_providers
 
     discover_providers()
     labels = dict(OWN_PROBE_LABELS)
@@ -152,6 +152,6 @@ def probe_labels(enrichment_sources: Any = None) -> dict[str, str]:
 
 def server_keys() -> tuple[list[str], list[str]]:
     """The shipped tool-server keys, and the keys no operator's server may take."""
-    from maljan.core.config import reserved_server_keys, shipped_server_keys
+    from malspark.core.config import reserved_server_keys, shipped_server_keys
 
     return list(shipped_server_keys()), list(reserved_server_keys())

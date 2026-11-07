@@ -19,8 +19,8 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from maljan.core import safe_json
-from maljan.core.safe_json import (
+from malspark.core import safe_json
+from malspark.core.safe_json import (
     CYCLE_MARK,
     DEEPER_MARK,
     DEPTH_GUARD,
@@ -406,7 +406,7 @@ class TestAHostileDeepBody:
     def test_the_guard_says_how_many_containers_it_marked(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        caplog.set_level("WARNING", logger="maljan.core.safe_json")
+        caplog.set_level("WARNING", logger="malspark.core.safe_json")
         loads('{"a": ' + "[" * 10_000 + "]" * 10_000 + ', "b": ' + "[" * 300 + "]" * 300 + "}")
         loads("[" * 300 + "]" * 300)
         said = [r.getMessage() for r in caplog.records]
@@ -448,8 +448,8 @@ class TestAHostileDeepBody:
 
 _CHUNK_SCRIPT = """
 import json, resource, sys, time
-from maljan.utils.peak_memory import rss_to_bytes
-from maljan.core.safe_json import loads
+from malspark.utils.peak_memory import rss_to_bytes
+from malspark.core.safe_json import loads
 mode, depth, size = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 chunk = "[" * depth + "]" * depth
 text = "[" + ",".join([chunk] * max(1, size // (2 * depth + 1))) + "]"
@@ -468,9 +468,9 @@ def _chunked_read(mode: str, depth: int, size: int) -> tuple[int, float]:
     import subprocess
     import sys
 
-    import maljan
+    import malspark
 
-    env = {**os.environ, "PYTHONPATH": str(Path(maljan.__file__).resolve().parents[1])}
+    env = {**os.environ, "PYTHONPATH": str(Path(malspark.__file__).resolve().parents[1])}
     done = subprocess.run(
         [sys.executable, "-c", _CHUNK_SCRIPT, mode, str(depth), str(size)],
         capture_output=True,
@@ -485,8 +485,8 @@ def _chunked_read(mode: str, depth: int, size: int) -> tuple[int, float]:
 
 _PEAK_SCRIPT = """
 import json, resource, sys
-from maljan.utils.peak_memory import rss_to_bytes
-from maljan.core.safe_json import loads
+from malspark.utils.peak_memory import rss_to_bytes
+from malspark.core.safe_json import loads
 kind, unit, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
 closer = "}]" if unit.startswith("[") else "]}"
 if kind == "deep":
@@ -505,9 +505,9 @@ def _added_peak(kind: str, unit: str, n: int) -> int:
     import subprocess
     import sys
 
-    import maljan
+    import malspark
 
-    env = {**os.environ, "PYTHONPATH": str(Path(maljan.__file__).resolve().parents[1])}
+    env = {**os.environ, "PYTHONPATH": str(Path(malspark.__file__).resolve().parents[1])}
     done = subprocess.run(
         [sys.executable, "-c", _PEAK_SCRIPT, kind, unit, str(n)],
         capture_output=True,
@@ -532,8 +532,8 @@ class TestEveryStoredReportIsWrittenAsBefore:
     def test_the_report_and_its_document_are_handed_to_json_dumps_unchanged(
         self, path: Any
     ) -> None:
-        from maljan.providers.sandbox.readers import required_reader
-        from maljan.schemas.sandbox_document import sandbox_document
+        from malspark.providers.sandbox.readers import required_reader
+        from malspark.schemas.sandbox_document import sandbox_document
 
         text = path.read_text(encoding="utf-8")
         raw = json.loads(text)

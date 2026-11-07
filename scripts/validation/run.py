@@ -179,7 +179,7 @@ def find_r2mcp(given: str = "") -> tuple[str, str]:
     of the shipped ``static.r2.binary_path`` (PATH, then radare2's install
     places); then the known places above.
     """
-    from maljan.providers.static.r2 import resolve_r2_binary
+    from malspark.providers.static.r2 import resolve_r2_binary
 
     looked: list[str] = []
     for value in (given, os.environ.get("VALIDATION_R2MCP", "")):
@@ -385,7 +385,7 @@ def _rehearsal(wire: str, scenario: str = "normal", **kwargs: Any) -> Rehearsal:
 
 
 def _defaults() -> Any:
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     return build_settings({})
 
@@ -469,7 +469,7 @@ def _entry_kinds(record: RunRecord, match: reach_mod.Match) -> list[str]:
 
 def preflight_r2(ctx: Context, times: int = 3) -> dict[str, Any]:
     """The r2 server's own tool listing, ``times`` times over one stdio handshake each."""
-    from maljan.providers.static.r2 import enumerate_r2_tools
+    from malspark.providers.static.r2 import enumerate_r2_tools
 
     counts = []
     for _ in range(times):
@@ -716,7 +716,7 @@ def accepted_proposal(name: str, entry: dict[str, Any]) -> tuple[dict[str, Any],
     calls it plans, then with every planned call confirmed, so the answers can
     propose what the schemas alone do not say.
     """
-    from maljan.core.config import MCPServerConfig
+    from malspark.core.config import MCPServerConfig
 
     first = _probe_mcp(name, entry)
     planned = [
@@ -977,7 +977,7 @@ def upload_checks() -> dict[str, Any]:
     # The reader check: the format the first fixture is read as, declared with no reader.
     blob = (SANDBOX_FIXTURES / "cape2_report.json").read_bytes()
     fmt, _task, _target = _read_declared(json.loads(blob), sandbox_formats(sandbox.report_formats))
-    from maljan.core.report_formats import effective_formats
+    from malspark.core.report_formats import effective_formats
 
     declared = next(
         (d for d in effective_formats(sandbox.report_formats) if fmt and d.name == fmt.name), None
@@ -1090,8 +1090,8 @@ def memory_api_checks() -> dict[str, Any]:
     from app.services.provider_facts import probe_labels
     from app.services.settings_probes import run_probe
     from app.services.settings_service import SettingsService, SettingsValidationError
-    from maljan.core.settings_overrides import build_settings
-    from maljan.memory.store_factory import MemoryBackendNotConfiguredError, build_memory_store
+    from malspark.core.settings_overrides import build_settings
+    from malspark.memory.store_factory import MemoryBackendNotConfiguredError, build_memory_store
 
     out: dict[str, Any] = {}
     settings_catalog_api.catalog_index.cache_clear()
@@ -1248,7 +1248,7 @@ REP_DECLARED: dict[str, Any] = {
 
 def expected_first_lookup(servers: dict[str, Any]) -> str:
     """The service the pack asks first: the lowest declared reputation rank, read as data."""
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     settings = build_settings({"mcp.servers": servers})
     ranked = []
@@ -1363,8 +1363,8 @@ def builtin_sources(extra: dict[str, Any], newcomer: str) -> dict[str, set[str]]
     The enabled servers other than ``newcomer`` by their key, and the static
     provider by its id: read as settings data (``tool_facts``), never by name.
     """
-    from maljan.core.settings_overrides import build_settings
-    from maljan.core.tool_declarations import block_at, provider_blocks
+    from malspark.core.settings_overrides import build_settings
+    from malspark.core.tool_declarations import block_at, provider_blocks
 
     settings = build_settings(extra)
     out = {
@@ -1713,7 +1713,7 @@ def main(argv: list[str] | None = None) -> int:
 if __name__ == "__main__":
     # The run's pipeline is in this process: before any thread or the YARA
     # engine loads, C code is pinned to fold case as ASCII does.
-    from maljan.core.ctype_locale import pin_character_classification
+    from malspark.core.ctype_locale import pin_character_classification
 
     pin_character_classification()
     raise SystemExit(main())

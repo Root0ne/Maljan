@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.analysis.evidence_roots import answer_facts, statement_values
+from malspark.analysis.evidence_roots import answer_facts, statement_values
 
 
 def _places(structured: dict[str, Any], tool: str, statement: str) -> bool:
@@ -50,7 +50,7 @@ def test_a_l4_short_field_words_and_joined_words_match() -> None:
 
 
 def test_a_l3_a_decimal_string_is_decimal_and_hex_needs_its_prefix() -> None:
-    from maljan.analysis.evidence_roots import _measure
+    from malspark.analysis.evidence_roots import _measure
 
     assert _measure("4096") == 4096
     assert _measure("0x1000") == 4096
@@ -60,7 +60,7 @@ def test_a_l3_a_decimal_string_is_decimal_and_hex_needs_its_prefix() -> None:
 
 
 def test_a_l1_the_cli_fallback_does_not_recreate_a_zero_confidence(tmp_path: Any) -> None:
-    from maljan.cli import _write_markdown_report
+    from malspark.cli import _write_markdown_report
 
     summary = {
         "final_decision": "Malware",
@@ -77,7 +77,7 @@ def test_a_l1_the_cli_fallback_does_not_recreate_a_zero_confidence(tmp_path: Any
 
 
 def test_a_l1_the_inline_summary_says_not_recorded(capsys: Any) -> None:
-    from maljan.cli import _print_run_summary_inline
+    from malspark.cli import _print_run_summary_inline
 
     _print_run_summary_inline(
         {
@@ -93,7 +93,7 @@ def test_a_l1_the_inline_summary_says_not_recorded(capsys: Any) -> None:
 
 
 def test_a_l2_the_report_names_a_block_that_was_not_built() -> None:
-    from maljan.analysis.disclosure import NOT_BUILT_UNREAD, not_built, not_built_line
+    from malspark.analysis.disclosure import NOT_BUILT_UNREAD, not_built, not_built_line
 
     line = not_built_line("coverage", not_built(NOT_BUILT_UNREAD))
     assert line == f"The coverage block was not built: {NOT_BUILT_UNREAD}."
@@ -102,8 +102,8 @@ def test_a_l2_the_report_names_a_block_that_was_not_built() -> None:
 
 
 def test_a_l2_a_stopped_run_retries_a_block_that_was_not_built() -> None:
-    from maljan.analysis.disclosure import NOT_BUILT_UNREAD, not_built
-    from maljan.pipeline.stopped_run import _is_built
+    from malspark.analysis.disclosure import NOT_BUILT_UNREAD, not_built
+    from malspark.pipeline.stopped_run import _is_built
 
     assert _is_built({"v": 1}) is True
     assert _is_built(not_built(NOT_BUILT_UNREAD)) is False

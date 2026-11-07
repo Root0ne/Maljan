@@ -24,7 +24,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import httpx
-from maljan.core.tool_declarations import CredentialBootstrap, first
+from malspark.core.tool_declarations import CredentialBootstrap, first
 
 from app.services.server_map import SERVER_MAP_KEY, TOKEN_MASK
 
@@ -119,7 +119,7 @@ def server_map_with_token(stored: dict[str, Any], key: str, token: str) -> dict[
     yet is taken from its seed; ``validate_server_map`` re-seeds every other
     built-in it is not given.
     """
-    from maljan.core.config import _builtin_servers
+    from malspark.core.config import _builtin_servers
 
     servers: dict[str, Any] = {
         name: dict(entry) for name, entry in stored.items() if isinstance(entry, dict)

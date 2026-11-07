@@ -167,7 +167,7 @@ export const MOCK_JOB_DETAIL = {
 };
 
 /**
- * The evidence bundle behind the report (`maljan-evidence-bundle/1`), over
+ * The evidence bundle behind the report (`malspark-evidence-bundle/1`), over
  * the same four calls as the ledger below. Its sections hold what the bundle
  * reader has to draw: a table with an escaped pipe, a listing, a subsection
  * title used twice (numbered on its second use), links into the index, a
@@ -175,7 +175,7 @@ export const MOCK_JOB_DETAIL = {
  * must stay text.
  */
 export const MOCK_EVIDENCE_BUNDLE = {
-  format: "maljan-evidence-bundle/1",
+  format: "malspark-evidence-bundle/1",
   report: {
     title: "Loader analysis",
     sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
@@ -371,7 +371,7 @@ export const MOCK_TOOL_USAGE = {
 
 /** Matches `_SYSTEM_STATUS_SCHEMA`. */
 export const MOCK_SYSTEM_STATUS = {
-  app_name: "Maljan",
+  app_name: "Malspark",
   app_version: "0.1.0",
   mock_mode_allowed: false,
   enrichment_enabled: true,
@@ -782,15 +782,15 @@ export const MOCK_SETTINGS_SCHEMA = withServedDeclarations({
           type: "json", default: {}, nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "mcp",
           title: "Tool servers",
-          description: "Every MCP server Maljan can attach, keyed by a short name.",
+          description: "Every MCP server Malspark can attach, keyed by a short name.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "server_map", subgroup: null, advanced: false,
           // Resolved by the API from `REQUIRED_ENV_ALLOW`: the names each
           // built-in sidecar is started with whatever the stored registry
           // says. The editor draws them above the box rather than in it.
           required_env: {
-            analysis: ["MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS", "MALJAN_SAMPLE_ROOTS"],
-            network: ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
+            analysis: ["MALSPARK_STAGING_DIR", "MALSPARK_STAGING_TTL_HOURS", "MALSPARK_SAMPLE_ROOTS"],
+            network: ["MALSPARK_STAGING_DIR", "MALSPARK_SAMPLE_ROOTS"],
           },
         },
         {
@@ -827,7 +827,7 @@ export const MOCK_SETTINGS_SCHEMA = withServedDeclarations({
           type: "json", default: {}, nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "agents",
           title: "Agent definitions",
-          description: "Every analyst Maljan can run, keyed by a short name.",
+          description: "Every analyst Malspark can run, keyed by a short name.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "agent_definitions", subgroup: null, advanced: false,
           agent_category_choices: ["code_reader", "static", "dynamic", "network", "intel", "other"],
@@ -1012,7 +1012,7 @@ export const MOCK_SETTINGS_VALUES = {
           // describes a response the API cannot produce.
           enabled: true, transport: "stdio", command: "python",
           args: ["services/network-mcp/server.py"], env: {}, cwd: "services/network-mcp",
-          env_allow: ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
+          env_allow: ["MALSPARK_STAGING_DIR", "MALSPARK_SAMPLE_ROOTS"],
           url: "", auth_token: "", auth_token_source: "default",
           tools: null, agents: ["network"], label: "Network MCP",
         },
@@ -1388,15 +1388,15 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = withServedDeclarations(
           type: "json", default: {}, nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "mcp",
           title: "Tool servers",
-          description: "Every MCP server Maljan can attach, keyed by a short name.",
+          description: "Every MCP server Malspark can attach, keyed by a short name.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "server_map", subgroup: null, advanced: false,
           // Resolved by the API from `REQUIRED_ENV_ALLOW`: the names each
           // built-in sidecar is started with whatever the stored registry
           // says. The editor draws them above the box rather than in it.
           required_env: {
-            analysis: ["MALJAN_STAGING_DIR", "MALJAN_STAGING_TTL_HOURS", "MALJAN_SAMPLE_ROOTS"],
-            network: ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
+            analysis: ["MALSPARK_STAGING_DIR", "MALSPARK_STAGING_TTL_HOURS", "MALSPARK_SAMPLE_ROOTS"],
+            network: ["MALSPARK_STAGING_DIR", "MALSPARK_SAMPLE_ROOTS"],
           },
         },
       ],
@@ -1421,7 +1421,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = withServedDeclarations(
           type: "json", default: {}, nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "agents",
           title: "Agent definitions",
-          description: "Every analyst Maljan can run, keyed by a short name.",
+          description: "Every analyst Malspark can run, keyed by a short name.",
           applies: "next_job", editable: true, reason: null, probe: null,
           applies_when: null, order: -1, choices_from: null, editor: "agent_definitions", subgroup: null, advanced: false,
           agent_category_choices: ["code_reader", "static", "dynamic", "network", "intel", "other"],
@@ -1475,7 +1475,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = withServedDeclarations(
         },
         {
           key: "core.memory.qdrant.collection", namespace: "core", path: "memory.qdrant.collection",
-          type: "str", default: "maljan_findings", nullable: false, choices: null,
+          type: "str", default: "malspark_findings", nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "memory",
           title: "Qdrant collection", description: "Collection findings are written to and read from.",
           applies: "next_job", editable: true, reason: null, probe: null,
@@ -1485,7 +1485,7 @@ export const MOCK_SETTINGS_SCHEMA_FULL: SettingsSchema = withServedDeclarations(
         {
           key: "core.memory.qdrant.function_hash_collection", namespace: "core",
           path: "memory.qdrant.function_hash_collection",
-          type: "str", default: "maljan_function_hashes", nullable: false, choices: null,
+          type: "str", default: "malspark_function_hashes", nullable: false, choices: null,
           minimum: null, maximum: null, secret: false, group: "memory",
           title: "Qdrant function-hash collection", description: "Collection function hashes are written to and read from.",
           applies: "next_job", editable: true, reason: null, probe: null,
@@ -1594,7 +1594,7 @@ export const MOCK_SETTINGS_VALUES_FULL: SettingsValues = {
         network: {
           enabled: true, transport: "stdio", command: "python",
           args: ["services/network-mcp/server.py"], env: {}, cwd: "services/network-mcp",
-          env_allow: ["MALJAN_STAGING_DIR", "MALJAN_SAMPLE_ROOTS"],
+          env_allow: ["MALSPARK_STAGING_DIR", "MALSPARK_SAMPLE_ROOTS"],
           url: "", auth_token: "", auth_token_source: "default",
           tools: null, agents: ["network"], label: "Network MCP",
         },
@@ -1623,8 +1623,8 @@ export const MOCK_SETTINGS_VALUES_FULL: SettingsValues = {
     "core.memory.backend": { value: "memory", ...unset() },
     "core.memory.qdrant.url": { value: "", ...unset() },
     "core.memory.qdrant.api_key": { value: null, is_set: false, hint: null, source: "default", updated_at: null, updated_by: null },
-    "core.memory.qdrant.collection": { value: "maljan_findings", ...unset() },
-    "core.memory.qdrant.function_hash_collection": { value: "maljan_function_hashes", ...unset() },
+    "core.memory.qdrant.collection": { value: "malspark_findings", ...unset() },
+    "core.memory.qdrant.function_hash_collection": { value: "malspark_function_hashes", ...unset() },
     "core.memory.top_k": { value: 5, ...unset() },
     "api.enrichment_enabled": { value: false, ...unset() },
     "api.enrichment_max_lookups": { value: 10, ...unset() },
@@ -1810,7 +1810,7 @@ export async function installApiMocks(
     route.fulfill({
       status: 200,
       contentType: "text/plain",
-      body: "rule Maljan_Mock { condition: false }",
+      body: "rule Malspark_Mock { condition: false }",
     })
   );
   await page.route("**/api/v1/reports/*/enrich", (route) =>
@@ -1916,9 +1916,9 @@ export async function installApiMocks(
     route.fulfill({
       status: 200,
       contentType: "application/json",
-      headers: { "content-disposition": "attachment; filename=maljan-settings.json" },
+      headers: { "content-disposition": "attachment; filename=malspark-settings.json" },
       body: JSON.stringify({
-        format: "maljan-settings/1",
+        format: "malspark-settings/1",
         exported_at: "2026-08-01T00:00:00Z",
         values: { "core.negotiation.retry_delay": 10 },
         secrets_omitted: ["core.llm.openai.api_key"],

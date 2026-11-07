@@ -14,9 +14,9 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from maljan.core.spend import SpendMeter
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.generation_rate import model_name_of
+from malspark.core.spend import SpendMeter
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.generation_rate import model_name_of
 from tests.unit.agents.test_a_loop_has_no_default_limit import (
     REPORT,
     TASK,

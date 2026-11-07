@@ -25,13 +25,13 @@ from scripts.replay import rules
 from scripts.replay.rules import replay_run
 from scripts.replay.stored import read_run
 
-from maljan.agents import base_agent, evidence_recorder, judge_agent
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.pipeline import validation
-from maljan.reporting import section_agreement
-from maljan.reporting.composer import ReportComposer
-from maljan.reporting.narrative_agent import NarrativeAgent
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents import base_agent, evidence_recorder, judge_agent
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.pipeline import validation
+from malspark.reporting import section_agreement
+from malspark.reporting.composer import ReportComposer
+from malspark.reporting.narrative_agent import NarrativeAgent
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.unit.scripts._replay_tiny import FIXTURE
 
 # A call of a check-shaped function: ``validate_*``, or a name ending in what

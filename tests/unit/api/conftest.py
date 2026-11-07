@@ -22,9 +22,9 @@ def a_built_in_server_ships_a_tool_table() -> Iterator[None]:
     mechanism give one block the table it shipped before
     (``tests/fixtures/a_shipped_server_tool_table.json``).
     """
-    from maljan.core import builtin_declarations, declared_reading
-    from maljan.core import settings_overrides as so
-    from maljan.core.tool_declarations import bump_declaration_version
+    from malspark.core import builtin_declarations, declared_reading
+    from malspark.core import settings_overrides as so
+    from malspark.core.tool_declarations import bump_declaration_version
 
     def _clear() -> None:
         so._shipped_dump.cache_clear()

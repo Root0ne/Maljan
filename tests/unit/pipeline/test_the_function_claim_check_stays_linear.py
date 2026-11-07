@@ -15,9 +15,9 @@ import json
 import time
 from types import SimpleNamespace
 
-from maljan.agents.function_map import function_artefacts
-from maljan.pipeline.events import _catalogue_names
-from maljan.pipeline.function_claims import (
+from malspark.agents.function_map import function_artefacts
+from malspark.pipeline.events import _catalogue_names
+from malspark.pipeline.function_claims import (
     _catalogue_lower,
     _clause_starts,
     check_function_claims,
@@ -25,8 +25,8 @@ from maljan.pipeline.function_claims import (
     listed_functions,
     named_values,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import ClaimEvidence
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import ClaimEvidence
 
 BASE = 0x140000000
 FUNCTIONS = 200

@@ -25,9 +25,9 @@ import urllib.request
 from datetime import UTC, datetime
 
 DETECTOR = {
-    "name": "maljan-uv-export",
+    "name": "malspark-uv-export",
     "version": "1",
-    "url": "https://github.com/Root0ne/Maljan/blob/main/scripts/ci/submit_dependency_snapshot.py",
+    "url": "https://github.com/Root0ne/Malspark/blob/main/scripts/ci/submit_dependency_snapshot.py",
 }
 MANIFEST = "uv.lock"
 _REQUIREMENT = re.compile(

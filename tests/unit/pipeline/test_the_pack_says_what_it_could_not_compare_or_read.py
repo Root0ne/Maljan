@@ -19,11 +19,11 @@ from typing import Any
 
 import pytest
 
-from maljan.core.logger import logger as maljan_logger
-from maljan.pipeline import triage_pack
-from maljan.pipeline.triage_pack import PIPELINE, pack_entries, render_pack
-from maljan.schemas.evidence import build_entry, format_entry_id
-from maljan.tools import api_hashes, emulated_strings, string_blobs
+from malspark.core.logger import logger as malspark_logger
+from malspark.pipeline import triage_pack
+from malspark.pipeline.triage_pack import PIPELINE, pack_entries, render_pack
+from malspark.schemas.evidence import build_entry, format_entry_id
+from malspark.tools import api_hashes, emulated_strings, string_blobs
 from tests.unit.pipeline.test_decoded_strings_in_the_pack import (
     _answer,
     _fake_capa,  # noqa: F401 — the autouse fixture, applied here too
@@ -44,13 +44,13 @@ def _forgotten() -> Any:
 
 
 @pytest.fixture
-def caplog_maljan(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture:
+def caplog_malspark(caplog: pytest.LogCaptureFixture) -> pytest.LogCaptureFixture:
     """``caplog`` with the project logger propagating into it."""
-    propagate = maljan_logger.propagate
-    maljan_logger.propagate = True
+    propagate = malspark_logger.propagate
+    malspark_logger.propagate = True
     caplog.set_level(logging.DEBUG)
     yield caplog
-    maljan_logger.propagate = propagate
+    malspark_logger.propagate = propagate
 
 
 def _compared(monkeypatch: pytest.MonkeyPatch) -> list[list[Any]]:
@@ -286,7 +286,7 @@ class TestTheServedIndexReadsTheMemoryOnce:
     def test_the_decoder_compares_with_the_rows_the_index_joins(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.tools import artefact_index
+        from malspark.tools import artefact_index
 
         reads: list[str] = []
         rows = [
@@ -318,7 +318,7 @@ class TestTheServedIndexReadsTheMemoryOnce:
     def test_rows_that_cannot_be_read_are_none_with_the_reason_read_once(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.tools import artefact_index
+        from malspark.tools import artefact_index
 
         reads: list[str] = []
 
@@ -362,12 +362,12 @@ def _entry(tool: str, output: str, args: dict[str, Any] | None = None, **over: A
 
 class TestWhatThePackCouldNotRead:
     def test_an_unreadable_ledger_row_is_logged_as_a_warning(
-        self, caplog_maljan: pytest.LogCaptureFixture
+        self, caplog_malspark: pytest.LogCaptureFixture
     ) -> None:
         good = _entry("strings", '{"strings": []}').model_dump()
         bad = {"id": "ev_0009", "agent": PIPELINE, "seq": "not a number"}
         assert [e.id for e in pack_entries([good, bad])] == [good["id"]]
-        warned = [r for r in caplog_maljan.records if r.levelno >= logging.WARNING]
+        warned = [r for r in caplog_malspark.records if r.levelno >= logging.WARNING]
         assert warned, "the skipped row is not said"
         assert "ev_0009" in warned[0].getMessage()
 
@@ -418,7 +418,7 @@ class TestWhatThePackCouldNotRead:
             assert render_pack(entries, budget) == f"{render_pack(plain, room)}\n{sentence}"
 
     def test_a_renderer_failure_is_said_with_its_reason_not_as_recorded(
-        self, monkeypatch: pytest.MonkeyPatch, caplog_maljan: pytest.LogCaptureFixture
+        self, monkeypatch: pytest.MonkeyPatch, caplog_malspark: pytest.LogCaptureFixture
     ) -> None:
         entry = _entry("floss", '{"strings": [], "total": 0}')
         shown, _data = triage_pack._shown(entry)
@@ -430,4 +430,4 @@ class TestWhatThePackCouldNotRead:
         line = render_pack([entry], 0)
         assert not line.rstrip().endswith(": recorded")
         assert "ValueError" in line
-        assert any(r.levelno >= logging.WARNING for r in caplog_maljan.records)
+        assert any(r.levelno >= logging.WARNING for r in caplog_malspark.records)

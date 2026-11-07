@@ -1,4 +1,4 @@
-"""Integration tests for the full Maljan pipeline.
+"""Integration tests for the full Malspark pipeline.
 
 These tests exercise the entire LangGraph workflow in mock mode — no real LLM
 calls, no API keys required. They validate that all subsystems are correctly
@@ -18,10 +18,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.app import MaljanApp
-from maljan.core.config import ChunkingConfig, NegotiationConfig, Settings
-from maljan.pipeline.nodes import make_stage_agent_node
-from maljan.schemas.isr_models import AgentISR
+from malspark.app import MalsparkApp
+from malspark.core.config import ChunkingConfig, NegotiationConfig, Settings
+from malspark.pipeline.nodes import make_stage_agent_node
+from malspark.schemas.isr_models import AgentISR
 from tests.stages import ANALYSIS_STAGE, paper_profile
 
 # ---------------------------------------------------------------------------
@@ -30,13 +30,13 @@ from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
 @pytest.fixture
-def mock_app() -> MaljanApp:
-    """Reusable mock-mode MaljanApp with default settings."""
-    return MaljanApp(mock=True)
+def mock_app() -> MalsparkApp:
+    """Reusable mock-mode MalsparkApp with default settings."""
+    return MalsparkApp(mock=True)
 
 
 @pytest.fixture
-def mock_result(mock_app: MaljanApp) -> dict:
+def mock_result(mock_app: MalsparkApp) -> dict:
     """Run the full mock pipeline and cache the result."""
     return mock_app.run("sample_1", file_name="test.exe")
 
@@ -48,7 +48,7 @@ def mock_result(mock_app: MaljanApp) -> dict:
 
 def test_pipeline_mock_mode_end_to_end() -> None:
     """Full pipeline runs in mock mode and produces a verdict."""
-    app = MaljanApp(mock=True)
+    app = MalsparkApp(mock=True)
     result = app.run("sample_1", file_name="test.exe")
 
     reports = result.get("reports", {})
@@ -68,13 +68,13 @@ def test_pipeline_mock_mode_end_to_end() -> None:
 
 def test_pipeline_graph_compiles() -> None:
     """Graph compiles without errors."""
-    app = MaljanApp(mock=True)
+    app = MalsparkApp(mock=True)
     assert app.graph is not None
 
 
 def test_pipeline_consensus_iterations() -> None:
     """Mock pipeline reaches consensus within reasonable iterations."""
-    app = MaljanApp(mock=True)
+    app = MalsparkApp(mock=True)
     result = app.run("sample_1")
 
     assert result["iteration_count"] <= 3
@@ -84,7 +84,7 @@ def test_pipeline_consensus_iterations() -> None:
 def test_pipeline_respects_max_iterations() -> None:
     """Pipeline respects custom max_iterations from config."""
     config = Settings(negotiation=NegotiationConfig(max_iterations=1))
-    app = MaljanApp(config=config, mock=True)
+    app = MalsparkApp(config=config, mock=True)
     result = app.run("sample_1")
 
     assert result["iteration_count"] == 1
@@ -194,7 +194,7 @@ class TestAnalystNodeChunkedWiring:
         is_mock: bool = False,
     ) -> MagicMock:
         """Build a mock ServiceContainer that returns configured chunks."""
-        from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
+        from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
 
         if chunks is None:
             chunks = [
@@ -254,7 +254,7 @@ class TestAnalystNodeChunkedWiring:
 
     def test_multi_chunk_calls_safe_analyze_isr_chunked(self) -> None:
         """Multiple chunks → safe_analyze_isr_chunked() called."""
-        from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
+        from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
 
         chunks = [
             TextChunk(
@@ -291,7 +291,7 @@ class TestAnalystNodeChunkedWiring:
 
     def test_node_returns_error_isr_on_failure(self) -> None:
         """If load_chunked raises, node returns an error ISR without crashing."""
-        from maljan.core.exceptions import LLMError
+        from malspark.core.exceptions import LLMError
 
         container = self._make_mock_container()
         container.load_chunked.side_effect = LLMError("loader failed")
@@ -332,14 +332,14 @@ class TestChunkedConfigPath:
         )
         # In mock mode, analyst nodes return early (before chunking).
         # This test validates that the config flows through without crash.
-        app = MaljanApp(config=config, mock=True)
+        app = MalsparkApp(config=config, mock=True)
         result = app.run("sample_1")
         assert result["final_decision"] == "Malware"
 
     def test_chunking_config_respected_by_container(self) -> None:
         """ChunkingConfig passed to Settings is accessible via ServiceContainer."""
         config = Settings(chunking=ChunkingConfig(max_tokens_per_chunk=500, overlap_tokens=50))
-        app = MaljanApp(config=config, mock=True)
+        app = MalsparkApp(config=config, mock=True)
         assert app.container.config.chunking.max_tokens_per_chunk == 500
         assert app.container.config.chunking.overlap_tokens == 50
 
@@ -352,14 +352,14 @@ class TestChunkedConfigPath:
 class TestPipelineConfigVariants:
     def test_pipeline_with_file_name_none(self) -> None:
         """Pipeline works without file_name (optional parameter)."""
-        app = MaljanApp(mock=True)
+        app = MalsparkApp(mock=True)
         result = app.run("sample_1")
         assert result["final_decision"] is not None
         assert result.get("file_name") is None
 
     def test_multiple_runs_with_same_app_instance(self) -> None:
-        """Same MaljanApp instance can run multiple analyses sequentially."""
-        app = MaljanApp(mock=True)
+        """Same MalsparkApp instance can run multiple analyses sequentially."""
+        app = MalsparkApp(mock=True)
         result1 = app.run("sample_1", file_name="first.exe")
         result2 = app.run("sample_1", file_name="second.exe")
         assert result1["final_decision"] is not None
@@ -367,7 +367,7 @@ class TestPipelineConfigVariants:
 
     def test_pipeline_initial_state_has_all_required_keys(self) -> None:
         """All required state keys are initialized before graph invocation."""
-        app = MaljanApp(mock=True)
+        app = MalsparkApp(mock=True)
         result = app.run("sample_1")
         required_keys = [
             "file_hash",

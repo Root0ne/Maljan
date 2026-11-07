@@ -81,7 +81,7 @@ def _run(mod, conn, direction: str = "upgrade") -> None:
 
 
 def _shipped_dump() -> dict[str, Any]:
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     return build_settings({}).model_dump(mode="json")
 
@@ -108,7 +108,7 @@ def _one_change(server: str) -> dict[str, Any]:
 
 def _read(entry: dict[str, Any]) -> dict[str, Any]:
     """A declaration as this release reads it, every field written out."""
-    from maljan.core.tool_declarations import ToolFacts
+    from malspark.core.tool_declarations import ToolFacts
 
     return ToolFacts.model_validate(entry).model_dump(mode="json")
 
@@ -119,7 +119,7 @@ def _with_shipped_effects(entry: dict[str, Any], shipped: dict[str, Any]) -> dic
     ``effects`` and ``reads_delay_imports`` came after every release that
     stored a map whole (``tool_declarations.FIELDS_AFTER_WHOLE_MAPS``).
     """
-    from maljan.core.tool_declarations import FIELDS_AFTER_WHOLE_MAPS
+    from malspark.core.tool_declarations import FIELDS_AFTER_WHOLE_MAPS
 
     later = {
         name: (shipped or {})[name]
@@ -158,7 +158,7 @@ def _today(block: str) -> dict[str, Any]:
 
 
 def _in_force(rows: dict[str, Any]) -> dict[str, Any]:
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     core = {k.removeprefix("core."): v for k, v in rows.items()}
     return build_settings(core).model_dump(mode="json")
@@ -330,14 +330,14 @@ def test_one_fixed_info_line_is_logged_and_a_downgrade_reads_the_same(caplog) ->
     _run(mod, conn, "downgrade")
     restored = _rows(conn)[SERVERS]["virustotal"]["tool_facts"]
     assert set(restored) == set(whole)
-    from maljan.core.tool_declarations import ToolFacts
+    from malspark.core.tool_declarations import ToolFacts
 
     for tool, entry in whole.items():
         assert ToolFacts.model_validate(restored[tool]) == ToolFacts.model_validate(entry)
 
 
 def test_the_revision_s_mark_is_the_application_s() -> None:
-    from maljan.core.tool_declarations import CHANGES_FORM, CHANGES_MARK
+    from malspark.core.tool_declarations import CHANGES_FORM, CHANGES_MARK
 
     mod = _module()
     assert (mod.CHANGES_MARK, mod.CHANGES_FORM) == (CHANGES_MARK, CHANGES_FORM)

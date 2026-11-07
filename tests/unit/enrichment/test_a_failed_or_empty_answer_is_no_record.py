@@ -17,14 +17,14 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.enrichment.declared import (
+from malspark.enrichment.declared import (
     EnrichmentSource,
     ReadySource,
     SourceAsker,
     is_malicious,
     read_record,
 )
-from maljan.tools.errors import BAD_ARGUMENT, NOT_CONFIGURED, TIMEOUT, TOOL_FAILED, tool_error
+from malspark.tools.errors import BAD_ARGUMENT, NOT_CONFIGURED, TIMEOUT, TOOL_FAILED, tool_error
 
 SOURCE = EnrichmentSource.model_validate(
     {

@@ -19,13 +19,13 @@ again after whitespace changed nothing. Every value below is synthetic.
 
 from __future__ import annotations
 
-from maljan.pipeline.claim_drops import (
+from malspark.pipeline.claim_drops import (
     answer_unchanged,
     claim_values,
     dropped_values,
     dropped_values_sentence,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _isr(*claims: str) -> AgentISR:

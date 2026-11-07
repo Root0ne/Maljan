@@ -1,7 +1,7 @@
 """An entry's facts are the declaration of the name its server gave the tool, found exactly.
 
 A registry renames a tool two servers both offer to ``<server key>__<tool>``.
-That rename is recorded on the tool (``maljan_declared_name``) and the facts
+That rename is recorded on the tool (``malspark_declared_name``) and the facts
 stored with its entries are the declaration of the original name, so a tool a
 server natively spells ``<its key>__x`` is no longer read as its tool ``x``.
 An entry written before the name was recorded is still read by taking its own
@@ -14,16 +14,16 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.tool_pinning import (
+from malspark.agents.tool_pinning import (
     DECLARED_NAME_METADATA_KEY,
     declared_facts_of,
     declared_name_of,
 )
-from maljan.core.config import Settings
-from maljan.core.declared_reading import facts_record
-from maljan.core.tool_declarations import ToolDeclarations
-from maljan.providers.servers import ServerRegistry
-from maljan.schemas.evidence import build_entry
+from malspark.core.config import Settings
+from malspark.core.declared_reading import facts_record
+from malspark.core.tool_declarations import ToolDeclarations
+from malspark.providers.servers import ServerRegistry
+from malspark.schemas.evidence import build_entry
 
 
 def _declared() -> ToolDeclarations:

@@ -13,8 +13,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.agents.function_map import build_function_map, function_artefacts, function_map_block
-from maljan.schemas.evidence import LedgerEntry
+from malspark.agents.function_map import build_function_map, function_artefacts, function_map_block
+from malspark.schemas.evidence import LedgerEntry
 
 BASE = 0x10000000
 

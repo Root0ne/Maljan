@@ -18,18 +18,18 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.providers.static import capa_child, capa_yara
-from maljan.providers.static.capa_child import (
+from malspark.core.config import Settings
+from malspark.providers.static import capa_child, capa_yara
+from malspark.providers.static.capa_child import (
     LIBRARY_FUNCTIONS_NO_DIRECTORY,
     LIBRARY_FUNCTIONS_NO_FILES,
     LIBRARY_FUNCTIONS_NOT_FOR_FORMAT,
     LIBRARY_FUNCTIONS_UNSTATED,
     NOT_IDENTIFIED_KEY,
 )
-from maljan.providers.static.capa_yara import CapaYaraStaticProvider
-from maljan.tools import pe_image, staging
-from maljan.tools import rules as tool
+from malspark.providers.static.capa_yara import CapaYaraStaticProvider
+from malspark.tools import pe_image, staging
+from malspark.tools import rules as tool
 
 BASE = 0x400000
 

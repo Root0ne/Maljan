@@ -31,8 +31,8 @@ from typing import Any
 
 from arq import cron
 from arq.worker import Worker
-from maljan.core.settings_overrides import StoredValueRefused
-from maljan.memory import attck_update
+from malspark.core.settings_overrides import StoredValueRefused
+from malspark.memory import attck_update
 
 from app.config import settings
 from app.logging_config import get_logger
@@ -241,8 +241,8 @@ def drop_a_replaced_catalogue() -> bool:
         _seen_signature = signature
         return False
     _seen_signature = signature
-    from maljan.memory import attck_loader
-    from maljan.tools import knowledge
+    from malspark.memory import attck_loader
+    from malspark.tools import knowledge
 
     attck_loader.reset_caches()
     knowledge.reset_indices()

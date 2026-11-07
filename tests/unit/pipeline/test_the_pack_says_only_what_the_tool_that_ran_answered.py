@@ -22,13 +22,13 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis import evidence_roots
-from maljan.core import config as config_module
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.pipeline import triage_pack
-from maljan.pipeline.triage_pack import PIPELINE, ServerAnswer
-from maljan.schemas.evidence import LedgerEntry
-from maljan.tools import artefact_index, crypto_constants, string_blobs
+from malspark.analysis import evidence_roots
+from malspark.core import config as config_module
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.pipeline import triage_pack
+from malspark.pipeline.triage_pack import PIPELINE, ServerAnswer
+from malspark.schemas.evidence import LedgerEntry
+from malspark.tools import artefact_index, crypto_constants, string_blobs
 
 from .test_the_pack_runs_its_declared_steps import (
     INVENTORY,
@@ -108,7 +108,7 @@ class TestASwappedMatchersLine:
         assert capa.split(": ", 1)[1].startswith("1 capabilities (hash data with CRC32 @ 0x1200)")
 
     def test_the_techniques_it_asserts_are_shown(self, settings: Settings, tmp_path: Path) -> None:
-        from maljan.core import declared_reading
+        from malspark.core import declared_reading
 
         facts = {
             **RULEMATCH["tool_facts"]["match"],
@@ -292,6 +292,6 @@ class TestStepsStartedBesideThePack:
 
 
 def test_every_reading_by_declaration_is_a_declared_fact_renderer() -> None:
-    from maljan.core.pack_steps import DECLARED_FACT_RENDERERS
+    from malspark.core.pack_steps import DECLARED_FACT_RENDERERS
 
     assert set(triage_pack._DECLARED_SHAPES) == set(DECLARED_FACT_RENDERERS)

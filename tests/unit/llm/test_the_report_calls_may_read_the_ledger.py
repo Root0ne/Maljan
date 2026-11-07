@@ -22,12 +22,12 @@ from unittest.mock import patch
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from maljan.agents.ledger_reads import LedgerReads, not_bound_reason
-from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
-from maljan.llm.answer_text import answer_text
-from maljan.reporting.composer import COMPOSED_SECTIONS, ReportComposer
-from maljan.reporting.narrative_agent import NarrativeAgent
-from maljan.schemas.evidence import LedgerEntry
+from malspark.agents.ledger_reads import LedgerReads, not_bound_reason
+from malspark.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+from malspark.llm.answer_text import answer_text
+from malspark.reporting.composer import COMPOSED_SECTIONS, ReportComposer
+from malspark.reporting.narrative_agent import NarrativeAgent
+from malspark.schemas.evidence import LedgerEntry
 from tests.unit.reporting.test_the_composer_writes_its_sections_at_once import (
     _isr,
     _report,
@@ -95,7 +95,7 @@ def _compose(
     composer = ReportComposer(llm=_model(), per_section_timeout=60)
     composer.ledger_reads = reads
     with patch(
-        "maljan.reporting.composer.structured_output_supported_for_llm", return_value=structured
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=structured
     ):
         asyncio.run(composer.compose(report, _isr(), facts_block=FACTS, concurrent=False))
     return wire, report, composer
@@ -203,7 +203,7 @@ class TestTheNarrative:
     def _generate(
         monkeypatch: pytest.MonkeyPatch, answer: Any, reads: LedgerReads | None
     ) -> tuple[Wire, Any, NarrativeAgent]:
-        from maljan.reporting import narrative_agent
+        from malspark.reporting import narrative_agent
         from tests.unit.reporting.test_narrative_agent import _make_report, _valid_narrative
 
         text = _valid_narrative().model_dump_json()
@@ -298,8 +298,8 @@ class TestAnOpenAIShapedSchemaCall:
     def test_the_schema_call_is_parsed_as_function_calling_parses_it(self) -> None:
         from langchain_core.output_parsers.openai_tools import PydanticToolsParser
 
-        from maljan.agents.ledger_reads import structured_reply
-        from maljan.reporting.narrative_agent import NarrativeOutput
+        from malspark.agents.ledger_reads import structured_reply
+        from malspark.reporting.narrative_agent import NarrativeOutput
         from tests.unit.reporting.test_narrative_agent import _valid_narrative
 
         args = _valid_narrative().model_dump(mode="json")
@@ -312,8 +312,8 @@ class TestAnOpenAIShapedSchemaCall:
         assert read["parsed"] == parsed == _valid_narrative()
 
     def test_a_read_beside_the_schema_call_does_not_change_what_is_parsed(self) -> None:
-        from maljan.agents.ledger_reads import structured_reply
-        from maljan.reporting.narrative_agent import NarrativeOutput
+        from malspark.agents.ledger_reads import structured_reply
+        from malspark.reporting.narrative_agent import NarrativeOutput
         from tests.unit.reporting.test_narrative_agent import _valid_narrative
 
         args = _valid_narrative().model_dump(mode="json")
@@ -323,8 +323,8 @@ class TestAnOpenAIShapedSchemaCall:
         assert read["parsed"] == _valid_narrative()
 
     def test_arguments_the_schema_refuses_are_no_parse_with_the_error_kept(self) -> None:
-        from maljan.agents.ledger_reads import structured_reply
-        from maljan.reporting.narrative_agent import NarrativeOutput
+        from malspark.agents.ledger_reads import structured_reply
+        from malspark.reporting.narrative_agent import NarrativeOutput
 
         read = structured_reply(self._message({"key_findings": "not a list"}), NarrativeOutput)
 
@@ -396,7 +396,7 @@ class TestTheReportersFurtherRounds:
     def test_a_follow_up_question_may_read_the_stored_ledger(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.reporting import follow_up
+        from malspark.reporting import follow_up
         from tests.unit.reporting.test_a_follow_up_is_answered_from_the_stored_run import _run
 
         offered: list[Any] = []
@@ -419,7 +419,7 @@ class TestTheReportersFurtherRounds:
     def test_the_agreement_round_never_raises_over_a_read_that_fails(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.reporting.section_agreement import ask_section_agreement
+        from malspark.reporting.section_agreement import ask_section_agreement
         from tests.unit.reporting.test_a_passage_written_without_the_code_is_asked_against_section_5 import (  # noqa: E501
             _DEBATE,
             CITABLE,

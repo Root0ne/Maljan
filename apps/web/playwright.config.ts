@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * Playwright E2E test configuration for the Maljan Next.js frontend.
+ * Playwright E2E test configuration for the Malspark Next.js frontend.
  *
  * - Starts its own `next dev` before tests (webServer).
  * - Mocks every API call, so no backend is required — and none is contacted.

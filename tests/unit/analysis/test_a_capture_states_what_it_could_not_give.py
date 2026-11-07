@@ -24,8 +24,8 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis import capture_reader
-from maljan.analysis.pcap_summary import capture_facts, each_packet, summarize_pcap
+from malspark.analysis import capture_reader
+from malspark.analysis.pcap_summary import capture_facts, each_packet, summarize_pcap
 
 ROOT = Path(__file__).resolve().parents[3]
 NETWORK_SERVER = ROOT / "services" / "network-mcp" / "server.py"
@@ -83,9 +83,9 @@ def _epb(interface: int, data: bytes) -> bytes:
 def network(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     base = tmp_path / "staging"
     (base / JOB_LEAF / "captures").mkdir(parents=True)
-    monkeypatch.setenv("MALJAN_STAGING_DIR", str(base))
-    monkeypatch.setenv("MALJAN_STAGING_JOB", JOB_LEAF)
-    monkeypatch.setenv("MALJAN_SAMPLE_ROOTS", "")
+    monkeypatch.setenv("MALSPARK_STAGING_DIR", str(base))
+    monkeypatch.setenv("MALSPARK_STAGING_JOB", JOB_LEAF)
+    monkeypatch.setenv("MALSPARK_SAMPLE_ROOTS", "")
     spec = importlib.util.spec_from_file_location("network_mcp_states", NETWORK_SERVER)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

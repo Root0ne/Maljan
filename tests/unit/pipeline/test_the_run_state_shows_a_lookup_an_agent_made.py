@@ -13,9 +13,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.pipeline.run_state import render_run_state
-from maljan.pipeline.triage_pack import NOT_RUN_PREFIX, PIPELINE
-from maljan.schemas.evidence import build_entry, format_entry_id
+from malspark.pipeline.run_state import render_run_state
+from malspark.pipeline.triage_pack import NOT_RUN_PREFIX, PIPELINE
+from malspark.schemas.evidence import build_entry, format_entry_id
 
 SHA = "ab" * 32
 NOT_ASKED = f"{NOT_RUN_PREFIX} no server declares a reputation lookup; no lookup was made"

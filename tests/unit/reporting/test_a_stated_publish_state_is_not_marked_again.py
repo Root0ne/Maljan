@@ -24,9 +24,9 @@ from unittest.mock import patch
 
 import pytest
 
-from maljan.pipeline.validation import UNPUBLISHED_VALUE_CODE, unpublished_value_violations
-from maljan.reporting.composer import ReportComposer, _ProseOut
-from maljan.reporting.models import (
+from malspark.pipeline.validation import UNPUBLISHED_VALUE_CODE, unpublished_value_violations
+from malspark.reporting.composer import ReportComposer, _ProseOut
+from malspark.reporting.models import (
     FileHashes,
     FlaggedStatement,
     MalwareReport,
@@ -36,7 +36,7 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 ADDRESS = "198.18.44.12"
 OTHER = "198.18.71.203"
@@ -379,7 +379,7 @@ class TestTheComposer:
         comp._report = report
         comp._answers = _answers
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             result = asyncio.run(
                 comp._invoke(

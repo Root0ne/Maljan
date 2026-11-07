@@ -215,7 +215,7 @@ for (const [here, page] of pages) {
     const [address, anchor] = link.split('#');
     const path = address.split('?')[0];
     if (/^[a-z][a-z0-9+.-]*:/i.test(link)) {
-      if (/^https?:\/\/root0ne\.github\.io\/Maljan(\/|$)/i.test(link)) {
+      if (/^https?:\/\/root0ne\.github\.io\/Malspark(\/|$)/i.test(link)) {
         errors.push(`${page.file}: ${link} is the old address; link to /docs/... instead`);
       }
       continue;

@@ -14,10 +14,10 @@ from typing import Any
 import pytest
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.composition import ResolvedAgent
-from maljan.agents.configurable_analyst import ConfigurableAnalyst
-from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
-from maljan.agents.static_analyst import StaticAnalyst
+from malspark.agents.composition import ResolvedAgent
+from malspark.agents.configurable_analyst import ConfigurableAnalyst
+from malspark.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+from malspark.agents.static_analyst import StaticAnalyst
 
 MIRROR = "/srv/samples/r2-work/" + "cd" * 32 + ".exe"
 HEAD_CHUNK = json.dumps({"analysis_file_path": MIRROR})

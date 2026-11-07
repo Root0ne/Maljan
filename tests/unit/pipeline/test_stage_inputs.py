@@ -14,12 +14,12 @@ import json
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.composition import mcp_refs_for
-from maljan.core.config import GHIDRA_SAMPLE_OPEN, Settings
-from maljan.core.container import ServiceContainer
-from maljan.loaders.binary_chunker import TextChunk
-from maljan.pipeline.nodes import make_stage_agent_node, upstream_findings
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.composition import mcp_refs_for
+from malspark.core.config import GHIDRA_SAMPLE_OPEN, Settings
+from malspark.core.container import ServiceContainer
+from malspark.loaders.binary_chunker import TextChunk
+from malspark.pipeline.nodes import make_stage_agent_node, upstream_findings
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _chunk(content: str) -> TextChunk:
@@ -134,13 +134,13 @@ class TestUpstreamFindings:
     def test_the_default_budget_is_derived_from_the_served_window(self) -> None:
         from unittest.mock import patch
 
-        from maljan.llm.context_window import (
+        from malspark.llm.context_window import (
             ANSWER_SHARE,
             CHARS_PER_TOKEN,
             ContextBudget,
             WindowFact,
         )
-        from maljan.pipeline.nodes import upstream_chars
+        from malspark.pipeline.nodes import upstream_chars
 
         container = _container()
         assert container.config.reporting.upstream_findings_max_chars == 0
@@ -154,12 +154,12 @@ class TestUpstreamFindings:
     def test_an_unknown_window_takes_the_documented_fallback(self) -> None:
         from unittest.mock import patch
 
-        from maljan.llm.context_window import (
+        from malspark.llm.context_window import (
             UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS,
             ContextBudget,
             unknown_window,
         )
-        from maljan.pipeline.nodes import upstream_chars
+        from malspark.pipeline.nodes import upstream_chars
 
         container = _container()
         budget = ContextBudget(unknown_window())
@@ -167,7 +167,7 @@ class TestUpstreamFindings:
             assert upstream_chars(container) == UNKNOWN_WINDOW_TOOL_OUTPUT_CHARS
 
     def test_an_operators_value_wins_over_the_window(self) -> None:
-        from maljan.pipeline.nodes import upstream_chars
+        from malspark.pipeline.nodes import upstream_chars
 
         container = _container(reporting={"upstream_findings_max_chars": 120})
 
@@ -351,7 +351,7 @@ class TestTheReporterIsADefinitionLikeAnyOther:
         one, which is the model the narrative and composer rounds were built
         with before the reporter was a definition.
         """
-        from maljan.llm.registry import LLMProviderRegistry
+        from malspark.llm.registry import LLMProviderRegistry
 
         registry = LLMProviderRegistry(Settings(_env_file=None))
         roles: list[str] = []
@@ -375,7 +375,7 @@ class TestASandboxReferenceIsNotOnlyForTheDynamicRole:
         in a stage of its own asks for the same thing and must get the same
         closures over the job's report.
         """
-        from maljan.agents.composition import _sandbox_tools
+        from malspark.agents.composition import _sandbox_tools
 
         settings = _settings(
             [
@@ -408,7 +408,7 @@ class TestASandboxReferenceIsNotOnlyForTheDynamicRole:
         assert "sandbox_network" in names
 
     def test_the_team_s_sandbox_exclusion_still_withholds_them(self) -> None:
-        from maljan.agents.composition import _sandbox_tools
+        from malspark.agents.composition import _sandbox_tools
 
         settings = _settings(
             [
@@ -476,7 +476,7 @@ class TestInjectionKeepsTheHeadChunkAContract:
         return str(agent.safe_analyze_isr.call_args[0][0])
 
     def test_the_load_hint_still_fires_with_findings_injected(self) -> None:
-        from maljan.agents.static_analyst import _extract_analysis_path, _extract_load_hint
+        from malspark.agents.static_analyst import _extract_analysis_path, _extract_load_hint
 
         head = self._head("findings")
         assert head.lstrip().startswith("{")
@@ -486,7 +486,7 @@ class TestInjectionKeepsTheHeadChunkAContract:
         assert _extract_analysis_path(head) == "/srv/samples/abc123.exe"
 
     def test_the_load_hint_still_fires_with_full_reports_injected(self) -> None:
-        from maljan.agents.static_analyst import _extract_load_hint
+        from malspark.agents.static_analyst import _extract_load_hint
 
         head = self._head("full")
         assert "LOAD THIS BINARY FIRST" in _extract_load_hint(
@@ -501,7 +501,7 @@ class TestInjectionKeepsTheHeadChunkAContract:
         assert "packed with UPX" in parsed["upstream_findings"]
 
     def test_a_head_that_is_not_json_still_takes_the_block_in_front(self) -> None:
-        from maljan.pipeline.nodes import _with_upstream
+        from malspark.pipeline.nodes import _with_upstream
 
         (head,) = _with_upstream([_chunk("raw decompiled output")], "## Upstream findings\n\n- x")
         assert head.content.startswith("## Upstream findings")
@@ -564,7 +564,7 @@ class TestTheDebateStageThresholdIsRead:
     """Finding 6: a stage's ``consensus_threshold`` decided nothing."""
 
     def _stage(self, threshold: float) -> Any:
-        from maljan.core.config import DebateOptions, StageDefinition
+        from malspark.core.config import DebateOptions, StageDefinition
 
         return StageDefinition(
             key="debate",
@@ -573,7 +573,7 @@ class TestTheDebateStageThresholdIsRead:
         )
 
     def test_the_router_reports_the_stage_s_threshold_over_the_global(self) -> None:
-        from maljan.pipeline.routing import ConsensusRouter
+        from malspark.pipeline.routing import ConsensusRouter
 
         settings = Settings(_env_file=None, negotiation={"consensus_threshold": 0.85})
         assert ConsensusRouter(settings)._consensus_threshold == 0.85
@@ -581,7 +581,7 @@ class TestTheDebateStageThresholdIsRead:
 
     def test_the_mediator_calls_agreement_at_the_stage_s_bar(self) -> None:
         """0.6 is consensus under a stage that asks for 0.55 and not under 0.85."""
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         settings = Settings(_env_file=None, negotiation={"consensus_threshold": 0.85})
         judge = JudgeAgent.__new__(JudgeAgent)
@@ -592,7 +592,7 @@ class TestTheDebateStageThresholdIsRead:
         assert not 0.6 >= judge._consensus_threshold()
 
     def test_the_node_hands_the_mediator_the_stage_s_number(self) -> None:
-        from maljan.pipeline.nodes import _debate_threshold
+        from malspark.pipeline.nodes import _debate_threshold
 
         assert _debate_threshold(self._stage(0.55)) == 0.55
         # No options on the stage means the global one, which is what the

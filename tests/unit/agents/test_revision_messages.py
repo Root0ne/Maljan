@@ -10,7 +10,7 @@ says so rather than sending an empty block.
 
 from __future__ import annotations
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     _REVISION_ISR_FRAMING,
     prompt_to_messages,
     revision_messages,

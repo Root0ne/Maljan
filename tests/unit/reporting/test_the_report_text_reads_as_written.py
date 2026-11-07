@@ -15,18 +15,18 @@ from typing import Any
 
 from markdown_it import MarkdownIt
 
-from maljan.reporting.figures import build_execution_flow
-from maljan.reporting.models import EvidenceSection, MalwareReport
-from maljan.reporting.renderers.analyst import (
+from malspark.reporting.figures import build_execution_flow
+from malspark.reporting.models import EvidenceSection, MalwareReport
+from malspark.reporting.renderers.analyst import (
     _LABEL_CHARS,
     _word_cut,
     flow_step_labels,
     flow_steps,
 )
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.reporting.renderers.layout import ANALYST, BUNDLE, FULL
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.reporting.renderers.prose_forms import (
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.reporting.renderers.layout import ANALYST, BUNDLE, FULL
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.renderers.prose_forms import (
     CALLERS_IN_PROSE,
     _code_spans,
     _prose_escaped,
@@ -34,7 +34,7 @@ from maljan.reporting.renderers.prose_forms import (
     section_reference,
     tidied,
 )
-from maljan.reporting.section_agreement import unread_callee_clause
+from malspark.reporting.section_agreement import unread_callee_clause
 
 # The value haiku8 printed, and the text it stands for.
 _PACKED = "\\Registry\\Machine\\x5c"
@@ -398,8 +398,8 @@ class TestOnlyProseTheBundlePrintsIsCompacted:
             assert all(c in analyst for c in _CALLERS), field
 
     def test_the_prose_list_is_what_the_bundle_prints(self) -> None:
-        from maljan.reporting.models import TechnicalAnalysis, TechnicalSubsection
-        from maljan.reporting.renderers.markdown import SECTION_5_PROSE
+        from malspark.reporting.models import TechnicalAnalysis, TechnicalSubsection
+        from malspark.reporting.renderers.markdown import SECTION_5_PROSE
 
         fields = [
             name

@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.pack_steps import PackStep, check_steps, default_steps, effective_steps
+from malspark.core.pack_steps import PackStep, check_steps, default_steps, effective_steps
 
 
 def test_the_shipped_steps_with_a_clock_are_the_ones_the_in_process_code_honours() -> None:

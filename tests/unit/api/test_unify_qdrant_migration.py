@@ -89,7 +89,7 @@ def test_the_api_values_move_across_and_the_rows_go() -> None:
     mod = _module()
     conn = _connect()
     _insert(conn, "api.qdrant_url", "http://qdrant:6333")
-    _insert(conn, "api.qdrant_collection", "maljan_ltm")
+    _insert(conn, "api.qdrant_collection", "malspark_ltm")
     _insert(conn, "api.qdrant_api_key", "gAAAAAencrypted", is_secret=True)
     conn.commit()
 
@@ -99,7 +99,7 @@ def test_the_api_values_move_across_and_the_rows_go() -> None:
 
     assert first == _rows(conn), "running it twice changes nothing"
     assert first["core.memory.qdrant_url"] == "http://qdrant:6333"
-    assert first["core.memory.qdrant_collection"] == "maljan_ltm"
+    assert first["core.memory.qdrant_collection"] == "malspark_ltm"
     assert first["core.memory.qdrant_api_key"] == "gAAAAAencrypted"
     assert not any(key.startswith("api.qdrant") for key in first)
 
@@ -239,6 +239,6 @@ def test_it_imports_no_application_code() -> None:
     """A migration that imports the app breaks the moment the app moves on."""
     source = MIGRATION.read_text(encoding="utf-8")
 
-    assert "import maljan" not in source
-    assert "from maljan" not in source
+    assert "import malspark" not in source
+    assert "from malspark" not in source
     assert "from app" not in source

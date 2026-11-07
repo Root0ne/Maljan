@@ -25,10 +25,10 @@ import pytest
 from pydantic import ValidationError
 from tests.linear_cost import assert_scales
 
-from maljan.core import settings_overrides
-from maljan.core.config import Settings
-from maljan.core.pack_steps import effective_steps, lenient_steps, shipped_step
-from maljan.core.settings_overrides import (
+from malspark.core import settings_overrides
+from malspark.core.config import Settings
+from malspark.core.pack_steps import effective_steps, lenient_steps, shipped_step
+from malspark.core.settings_overrides import (
     build_settings,
     left_out_pack_steps,
     pack_step_refusals,

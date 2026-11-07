@@ -22,12 +22,12 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.core.spend import TAIL_CALLS, SpendCeilingStop
-from maljan.pipeline.validation import FEEDBACK_PREAMBLE, ValidationTally, citation_violations
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.models import QUESTION_OUTCOMES, MalwareReport, QuestionAnswer
-from maljan.reporting.narrative_agent import NarrativeAgent, build_prompt_text, findings_lines
-from maljan.reporting.question_round import (
+from malspark.core.spend import TAIL_CALLS, SpendCeilingStop
+from malspark.pipeline.validation import FEEDBACK_PREAMBLE, ValidationTally, citation_violations
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.models import QUESTION_OUTCOMES, MalwareReport, QuestionAnswer
+from malspark.reporting.narrative_agent import NarrativeAgent, build_prompt_text, findings_lines
+from malspark.reporting.question_round import (
     ANSWERED_TWICE_CODE,
     ESTABLISHED_UNGROUNDED_CODE,
     NEGATIVE_ON_OPEN_QUESTION_CODE,
@@ -48,10 +48,10 @@ from maljan.reporting.question_round import (
     question_violations,
     settle,
 )
-from maljan.reporting.renderers import MarkdownRenderer
-from maljan.reporting.renderers.html import HtmlRenderer
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, OpenQuestion
+from malspark.reporting.renderers import MarkdownRenderer
+from malspark.reporting.renderers.html import HtmlRenderer
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, OpenQuestion
 from tests.unit.reporting._report_shapes import hostile_report, rich_report, stored_old_shape
 
 QUESTIONS = ["What is the C2 address?", "Does it persist through a Run key?"]
@@ -401,7 +401,7 @@ class TestTheRound:
 
     @pytest.mark.asyncio
     async def test_a_value_quoted_beside_the_wrong_entry_is_asked_about_once(self) -> None:
-        from maljan.pipeline.validation import CITATION_WRONG_ENTRY_CODE, EntryTexts
+        from malspark.pipeline.validation import CITATION_WRONG_ENTRY_CODE, EntryTexts
 
         texts = EntryTexts(
             texts={"ev_0001": "nothing of note", "ev_0003": "beacon to c2.example.net"},
@@ -631,15 +631,15 @@ class TestTheReportersCall:
         agent, llm = self._agent(AIMessage(content="{}"))
         monkeypatch.setattr(agent, "_call_limit", lambda turns, **kw: (321, "a bound"))
         monkeypatch.setattr(
-            "maljan.llm.context_window.output_bound_kwargs",
+            "malspark.llm.context_window.output_bound_kwargs",
             lambda llm, bound: {"max_tokens": bound},
         )
         monkeypatch.setattr(
-            "maljan.core.token_ledger.record_response_usage",
+            "malspark.core.token_ledger.record_response_usage",
             lambda ledger, reply, **kw: recorded.append(kw["call"]),
         )
         monkeypatch.setattr(
-            "maljan.reporting.narrative_agent.spend_release",
+            "malspark.reporting.narrative_agent.spend_release",
             lambda ledger, slot: released.append(slot),
         )
 
@@ -656,7 +656,7 @@ class TestTheReportersCall:
         agent, _ = self._agent(ValueError("refused"))
         monkeypatch.setattr(agent, "_call_limit", lambda turns, **kw: (None, "none"))
         monkeypatch.setattr(
-            "maljan.reporting.narrative_agent.spend_release",
+            "malspark.reporting.narrative_agent.spend_release",
             lambda ledger, slot: released.append(slot),
         )
 

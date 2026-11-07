@@ -32,7 +32,7 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     C2Channel,
     CapabilityCell,
     ConfigItem,
@@ -50,9 +50,9 @@ from maljan.reporting.models import (
     TechnicalSubsection,
     TTPMapping,
 )
-from maljan.reporting.renderers import HtmlRenderer, MarkdownRenderer
-from maljan.reporting.renderers.bundle import bundle_json, render_products
-from maljan.reporting.renderers.layout import (
+from malspark.reporting.renderers import HtmlRenderer, MarkdownRenderer
+from malspark.reporting.renderers.bundle import bundle_json, render_products
+from malspark.reporting.renderers.layout import (
     ANALYST,
     BUNDLE,
     BUNDLE_HTML,
@@ -222,7 +222,7 @@ class TestTheAnalystReport:
         assert '<li id="ev_9999"><strong>ev_9999</strong>' in bundle
 
     def test_the_html_draws_only_the_figures_of_its_own_sections(self) -> None:
-        from maljan.reporting.figures import build_figures
+        from malspark.reporting.figures import build_figures
 
         report = _report()
         report.figures = build_figures(report)
@@ -236,7 +236,7 @@ class TestTheAnalystReport:
 
 def _checked_report() -> MalwareReport:
     """``_report`` with a finding of every validation code the analyst report must show."""
-    from maljan.reporting.models import FamilyAttribution, FlaggedStatement, HostIdentifier
+    from malspark.reporting.models import FamilyAttribution, FlaggedStatement, HostIdentifier
 
     report = _report()
     report.dynamic = None  # no sandbox watched: an observed step is marked so
@@ -269,8 +269,8 @@ def _checked_report() -> MalwareReport:
 
 def _sentence_marks(text: str) -> list[str]:
     """Each mark the single-file report prints after a flagged sentence, found in ``text``."""
-    from maljan.reporting.prose_decisions import CATEGORY_TYPE_UNSTATED_CODE
-    from maljan.reporting.renderers.markdown import _FLAG_WORDS
+    from malspark.reporting.prose_decisions import CATEGORY_TYPE_UNSTATED_CODE
+    from malspark.reporting.renderers.markdown import _FLAG_WORDS
 
     words = [w for code, w in _FLAG_WORDS.items() if code != CATEGORY_TYPE_UNSTATED_CODE]
     return [w for w in [*words, "asked about and kept"] if f"**[{w}" in text]
@@ -343,7 +343,7 @@ class TestThePlatformsCaveats:
     def test_a_row_whose_value_a_check_flagged_whole_is_counted_not_printed_empty(
         self,
     ) -> None:
-        from maljan.reporting.models import FlaggedStatement
+        from malspark.reporting.models import FlaggedStatement
 
         report = _checked_report()
         report.run_summary = {}
@@ -385,7 +385,7 @@ class TestTheBundle:
     def test_its_json_carries_the_notes_the_index_and_every_section(self) -> None:
         report = _report()
         document = json.loads(bundle_json(report))
-        assert document["format"] == "maljan-evidence-bundle/1"
+        assert document["format"] == "malspark-evidence-bundle/1"
         assert [row["id"] for row in document["evidence_index"]] == [
             "ev_0001",
             "ev_0002",
@@ -397,7 +397,7 @@ class TestTheBundle:
         assert {"sec-technical-analysis", "sec-evidence-index"} <= anchors
 
     def test_the_command_line_writes_it_beside_the_report(self, tmp_path: Path) -> None:
-        from maljan.cli import _write_markdown_report
+        from malspark.cli import _write_markdown_report
 
         target = tmp_path / "report.md"
         _write_markdown_report({"malware_report": _report().model_dump(mode="json")}, str(target))
@@ -407,7 +407,7 @@ class TestTheBundle:
         assert json.loads((tmp_path / "evidence-bundle.json").read_text())["notes"]
 
     def test_its_json_and_its_html_number_a_repeated_title_alike(self) -> None:
-        from maljan.reporting.renderers.analyst import unique_anchor
+        from malspark.reporting.renderers.analyst import unique_anchor
 
         taken: set[str] = set()
         assert [unique_anchor("sec-a", taken) for _ in range(3)] == [
@@ -456,8 +456,8 @@ class TestTheLayoutChoice:
         assert report_layout(off) == ANALYST
 
     def test_the_setting_is_off_by_default_and_in_the_catalog(self) -> None:
-        from maljan.core.config import ReportingConfig
-        from maljan.core.settings_annotations import ANNOTATIONS
+        from malspark.core.config import ReportingConfig
+        from malspark.core.settings_annotations import ANNOTATIONS
 
         assert ReportingConfig().full_report_in_one_file is False
         assert ANNOTATIONS["reporting.full_report_in_one_file"]["subgroup"] == "Report content"
@@ -467,7 +467,7 @@ class TestTheLayoutChoice:
             MarkdownRenderer(layout="short")
 
     def test_only_the_bundle_files_are_linked_beside_the_page(self) -> None:
-        from maljan.reporting.renderers.html import _report_link
+        from malspark.reporting.renderers.html import _report_link
 
         assert _report_link("evidence-bundle.html#ev_0001")
         assert _report_link("evidence-bundle.json")
@@ -494,7 +494,7 @@ def _stored() -> list[str]:
 
 
 def _load(run: str) -> MalwareReport:
-    from maljan.reporting.models import key_ordered
+    from malspark.reporting.models import key_ordered
 
     if run == FIXTURE_RUN:
         return MalwareReport.model_validate(key_ordered(json.loads(REDACTED.read_text())))
@@ -543,13 +543,13 @@ MARKS = (
 
 def _decisions(report: MalwareReport) -> dict[str, list[str]]:
     """What the run decided, by class, as the single-file report prints each value."""
-    from maljan.reporting.defang import defang
-    from maljan.reporting.renderers.markdown import (
+    from malspark.reporting.defang import defang
+    from malspark.reporting.renderers.markdown import (
         _NETWORK_KINDS,
         _RULE_SECTIONS,
         _indicator_rows,
     )
-    from maljan.reporting.renderers.stix_renderer import publishes
+    from malspark.reporting.renderers.stix_renderer import publishes
 
     rows = _indicator_rows(report) or []
     rules: list[str] = []

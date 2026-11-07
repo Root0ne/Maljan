@@ -30,8 +30,8 @@ from app.models.evidence import EvidenceEntry
 from app.schemas.evidence import EvidenceEntryResponse
 from app.services import ledger_chain
 from app.worker.analysis_worker import _evidence_row, _store_the_report
-from maljan.core.config import Settings
-from maljan.schemas.evidence import LedgerEntry
+from malspark.core.config import Settings
+from malspark.schemas.evidence import LedgerEntry
 
 
 @compiles(postgresql.JSONB, "sqlite")

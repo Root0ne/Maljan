@@ -128,7 +128,7 @@ describe("readProposals", () => {
         planned: [
           {
             tool: "lister",
-            arguments: { path: "/nonexistent-maljan-probe/x" },
+            arguments: { path: "/nonexistent-malspark-probe/x" },
             remote: false,
             credential: false,
             withheld: ["auth token"],
@@ -146,7 +146,7 @@ describe("readProposals", () => {
     expect(read!.planned).toEqual([
       {
         tool: "lister",
-        arguments: { path: "/nonexistent-maljan-probe/x" },
+        arguments: { path: "/nonexistent-malspark-probe/x" },
         remote: false,
         credential: false,
         withheld: ["auth token"],
@@ -409,7 +409,7 @@ describe("DeclarationProposals", () => {
       { tool: "lookup", arguments: { hash: "e3" }, remote: true, credential: true, withheld: [] },
       {
         tool: "lister",
-        arguments: { path: "/nonexistent-maljan-probe/x" },
+        arguments: { path: "/nonexistent-malspark-probe/x" },
         remote: false,
         credential: false,
         withheld: ["auth token", "environment HIDDEN"],

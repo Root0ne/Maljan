@@ -17,7 +17,7 @@ import pytest
 
 from app.services import job_package
 from app.services.report_service import ReportService
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     SampleIdentity,
@@ -32,7 +32,7 @@ JOB = {"completed_at": "2026-10-25T08:30:00+00:00"}
 def _stored_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """The store as a fresh deployment holds it: the settings' defaults, read with no database."""
     from app.services import settings_service
-    from maljan.core.config import get_settings
+    from malspark.core.config import get_settings
 
     async def _effective(db: Any) -> Any:
         return get_settings()

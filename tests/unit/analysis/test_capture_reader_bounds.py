@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from maljan.analysis import capture_reader
-from maljan.analysis.pcap_summary import capture_facts, each_packet
-from maljan.core import delivery_limits as limits
+from malspark.analysis import capture_reader
+from malspark.analysis.pcap_summary import capture_facts, each_packet
+from malspark.core import delivery_limits as limits
 
 
 def _pcap(records: list[bytes], snaplen: int = 65535) -> bytes:

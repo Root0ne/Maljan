@@ -8,8 +8,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from maljan.tools import api_hashes, pe_image
-from maljan.tools.pe_image import Section
+from malspark.tools import api_hashes, pe_image
+from malspark.tools.pe_image import Section
 
 _EXEC = 0x20000000
 _DATA = 0x40000040

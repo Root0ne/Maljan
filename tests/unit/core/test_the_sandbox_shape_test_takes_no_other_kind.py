@@ -18,9 +18,9 @@ from typing import Any
 
 import pytest
 
-from maljan.core.declaration_proposals import propose_tool
-from maljan.core.report_proposals import propose_format
-from maljan.core.report_shapes import row_shape
+from malspark.core.declaration_proposals import propose_tool
+from malspark.core.report_proposals import propose_format
+from malspark.core.report_shapes import row_shape
 
 ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "tests" / "fixtures" / "golden" / "declaration_proposals_on_dev.json"
@@ -422,7 +422,7 @@ class TestQuestionValuesAreJudgedByMostOfThem:
         ],
     )
     def test_the_host_name_share(self, held: list[int], reads: bool) -> None:
-        from maljan.core.report_shapes import host_names
+        from malspark.core.report_shapes import host_names
 
         assert host_names({"request": held}) == {"request": reads}
 
@@ -493,7 +493,7 @@ class TestAServerWithoutTheSandboxRoleIsToldOfIt:
     _PROCS = _tool("get_processes", "processes", ["pid", "ppid", "name", "command_line"])
 
     def test_run_shaped_rows_give_the_hint_and_no_kind(self) -> None:
-        from maljan.core.declaration_proposals import propose
+        from malspark.core.declaration_proposals import propose
 
         out = propose([self._PROCS])
         assert out["tools"]["get_processes"]["facts"].get("kind") is None
@@ -504,14 +504,14 @@ class TestAServerWithoutTheSandboxRoleIsToldOfIt:
         assert out["notes"][0] not in out["tools"]["get_processes"].get("notes", [])
 
     def test_a_sandbox_source_gets_the_kind_and_no_hint(self) -> None:
-        from maljan.core.declaration_proposals import propose
+        from malspark.core.declaration_proposals import propose
 
         out = propose([self._PROCS], sandbox_source=True)
         assert out["tools"]["get_processes"]["facts"]["kind"] == "sandbox_processes"
         assert "notes" not in out
 
     def test_a_server_whose_rows_read_like_no_run_gets_no_hint(self) -> None:
-        from maljan.core.declaration_proposals import propose
+        from malspark.core.declaration_proposals import propose
 
         out = propose([_tool("list_functions", "items", ["name", "address", "type"])])
         assert "notes" not in out

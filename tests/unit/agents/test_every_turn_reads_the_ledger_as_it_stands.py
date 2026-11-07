@@ -21,11 +21,11 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.agents.base_agent import BaseAnalyst, current_run_state, prompt_to_messages
-from maljan.pipeline.nodes import brief_agent
-from maljan.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END, render_run_state
-from maljan.pipeline.triage_pack import PIPELINE
-from maljan.schemas.evidence import build_entry, format_entry_id
+from malspark.agents.base_agent import BaseAnalyst, current_run_state, prompt_to_messages
+from malspark.pipeline.nodes import brief_agent
+from malspark.pipeline.run_state import RUN_STATE_BEGIN, RUN_STATE_END, render_run_state
+from malspark.pipeline.triage_pack import PIPELINE
+from malspark.schemas.evidence import build_entry, format_entry_id
 from tests.linear_cost import TIME_RATIO_LIMIT, calls, cpu_seconds
 
 REPORT = "CLAIM: it decodes\nEVIDENCE: ev_0004\nCONFIDENCE: 0.6\nTECHNIQUE: T1140\n"
@@ -137,13 +137,13 @@ class TestATurnAfterTheLoop:
     def test_the_validation_retry_reads_the_entries_the_answer_cites(
         self, monkeypatch: Any
     ) -> None:
-        from maljan.pipeline.validation import Violation
-        from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+        from malspark.pipeline.validation import Violation
+        from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
         told = [Violation(code="isr.ungrounded_technique", message="cite ev_0004")]
         answers = iter([told, told, []])
         monkeypatch.setattr(
-            "maljan.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
+            "malspark.pipeline.validation.validate_isr", lambda *_a, **_k: next(answers, [])
         )
         agent = _briefed(_state())
         # The loop filed two reads after the briefing; the answer cites them.

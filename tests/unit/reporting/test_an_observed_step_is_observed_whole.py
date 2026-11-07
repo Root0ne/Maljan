@@ -14,10 +14,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.pipeline.validation import FLOW_VOICE_CODE, flow_voice_violations
-from maljan.reporting.evidence_bundles import sample_flow_fact
-from maljan.reporting.ledger_projection import network_from_ledger
-from maljan.reporting.models import (
+from malspark.pipeline.validation import FLOW_VOICE_CODE, flow_voice_violations
+from malspark.reporting.evidence_bundles import sample_flow_fact
+from malspark.reporting.ledger_projection import network_from_ledger
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkDomain,
@@ -25,7 +25,7 @@ from maljan.reporting.models import (
     NetworkIP,
     SampleIdentity,
 )
-from maljan.schemas.evidence import build_entry
+from malspark.schemas.evidence import build_entry
 
 TOOLS = {"ev_0012": "sandbox_processes", "ev_0020": "resolve_api_hashes"}
 REACHED = "192.0.2.10"

@@ -49,7 +49,7 @@ export function describeDebate(debate: DebateOptionsEntry | null): string {
 
 /**
  * What the API uses for a debate field the stage leaves out: the defaults of
- * `maljan.core.config.DebateOptions`. The settings schema does not serve them
+ * `malspark.core.config.DebateOptions`. The settings schema does not serve them
  * (needs API), so they are named here once, with their source, and only ever
  * shown, never sent.
  */

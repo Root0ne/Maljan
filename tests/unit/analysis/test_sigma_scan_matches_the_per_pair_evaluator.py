@@ -41,7 +41,7 @@ from sigma.types import (
     SpecialChars,
 )
 
-from maljan.analysis.sigma_layer import (
+from malspark.analysis.sigma_layer import (
     _DEFAULT_RULES_DIR,
     EventContext,
     SigmaLayer,

@@ -12,13 +12,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.agents.output_shortening import BOOKKEEPING_KEY, shorten_json_document
-from maljan.pipeline.nodes import _tools_that_were_shortened
-from maljan.schemas.evidence import LedgerEntry
+from malspark.agents.output_shortening import BOOKKEEPING_KEY, shorten_json_document
+from malspark.pipeline.nodes import _tools_that_were_shortened
+from malspark.schemas.evidence import LedgerEntry
 
 
 def _entry(tool: str, output: str) -> LedgerEntry:
-    from maljan.schemas.evidence import parse_structured
+    from malspark.schemas.evidence import parse_structured
 
     return LedgerEntry(
         id="ev_0001",
@@ -95,7 +95,7 @@ class TestAnAnswerCutShortInAnotherWayIsNamedToo:
         assert _tools_that_were_shortened([entry]) == {"decompile"}
 
     def test_an_answer_the_conversation_had_no_room_for_is_named(self) -> None:
-        from maljan.schemas.evidence import not_shown_record
+        from malspark.schemas.evidence import not_shown_record
 
         entry = _entry("decompile", not_shown_record(90_000))
         entry.truncated = True
@@ -119,8 +119,8 @@ class TestTheModelAndTheLedgerReadTheSameAnswer:
     """
 
     def test_the_guardrail_hands_back_one_string_both_sides_read(self) -> None:
-        from maljan.agents.mcp_client import MCPLangChainToolkit
-        from maljan.schemas.evidence import parse_structured
+        from malspark.agents.mcp_client import MCPLangChainToolkit
+        from malspark.schemas.evidence import parse_structured
 
         toolkit = MCPLangChainToolkit.__new__(MCPLangChainToolkit)
         toolkit._max_output_chars = 6000
@@ -146,8 +146,8 @@ class TestTheModelAndTheLedgerReadTheSameAnswer:
         assert _tools_that_were_shortened([_entry("strings", answer)]) == {"strings"}
 
     def test_a_value_the_shortener_dropped_is_in_neither(self) -> None:
-        from maljan.agents.mcp_client import MCPLangChainToolkit
-        from maljan.schemas.evidence import parse_structured
+        from malspark.agents.mcp_client import MCPLangChainToolkit
+        from malspark.schemas.evidence import parse_structured
 
         toolkit = MCPLangChainToolkit.__new__(MCPLangChainToolkit)
         toolkit._max_output_chars = 2000

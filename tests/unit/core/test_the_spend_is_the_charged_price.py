@@ -15,9 +15,9 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.config import ModelPrice, Settings
-from maljan.core.spend import PROVIDER_REPORTED, SpendMeter, table_prices
-from maljan.core.token_ledger import TokenLedger, turn_usage
+from malspark.core.config import ModelPrice, Settings
+from malspark.core.spend import PROVIDER_REPORTED, SpendMeter, table_prices
+from malspark.core.token_ledger import TokenLedger, turn_usage
 
 FLASH = "deepseek-flash"
 FRIDAY_17 = datetime(2026, 9, 25, 17, 0, tzinfo=UTC)
@@ -174,7 +174,7 @@ class TestTheClientStampsTheSendTime:
 
         from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-        from maljan.llm.generation_rate import with_sized_request_timeout
+        from malspark.llm.generation_rate import with_sized_request_timeout
 
         stamped = with_sized_request_timeout(FakeListChatModel)(responses=["hello"])
         before = time.time()

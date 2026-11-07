@@ -25,8 +25,8 @@ from typing import Any
 
 import pytest
 
-from maljan.agents import base_agent
-from maljan.providers import servers
+from malspark.agents import base_agent
+from malspark.providers import servers
 
 
 class _Loop:
@@ -152,5 +152,5 @@ class TestTheWatchdogThreadCannotThrow:
 
         source = pathlib.Path(inspect.getfile(base_agent)).read_text(encoding="utf-8")
 
-        assert 'name="maljan-agent-loop-watchdog"' in source
+        assert 'name="malspark-agent-loop-watchdog"' in source
         assert "daemon=True" in source

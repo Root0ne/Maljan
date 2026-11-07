@@ -53,7 +53,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
     Operators can override per-header values via constructor arguments; the
     defaults are appropriate for the API server which is consumed by the
-    Maljan SPA only.
+    Malspark SPA only.
     """
 
     def __init__(

@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from maljan.analysis.disclosure import (
+from malspark.analysis.disclosure import (
     FOOTNOTE_SENTENCE,
     INTRO_SENTENCE,
     NOT_BUILT_REPORTING_OFF,
@@ -29,8 +29,8 @@ from maljan.analysis.disclosure import (
     with_enrichment,
     with_enrichment_asked,
 )
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 SNAPSHOT = {
     "llm.provider": "openai",
@@ -104,7 +104,7 @@ def test_what_prints_as_configured_is_read_from_the_record_never_the_process_set
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A later render of a stored run prints the hosts its own run addressed, and only those."""
-    from maljan.core import config
+    from malspark.core import config
 
     record = _record()
     before = _rendered(record)
@@ -118,7 +118,7 @@ def test_what_prints_as_configured_is_read_from_the_record_never_the_process_set
 
 
 def test_the_html_report_carries_the_block() -> None:
-    from maljan.reporting.renderers.html import HtmlRenderer
+    from malspark.reporting.renderers.html import HtmlRenderer
 
     html = HtmlRenderer().render(
         _report({"final_decision": "Malware", "disclosure": _record()}), nonce="fixed"
@@ -254,18 +254,21 @@ def test_the_enrichment_queued_after_the_report_is_named_then_what_it_asked() ->
 # descends from a process running the sample (T-494): explorer.exe under
 # sihost.exe leaves the table, which has no row left and is not printed; nothing else
 # changed.
+# Re-pinned when the product took its new name (T-576): the HTML's generator
+# line names Malspark; with the previous name each HTML digest is the one
+# pinned before, and the Markdown did not change.
 STORED_RENDERS = {
-    "run7": ("87ad1594f3cbc6ea", "125193da10162be9"),
-    "run5": ("4fbb0b856aea7f8e", "60e2582c1e229b35"),
-    "run4": ("581eb11ec3924a68", "75af799857a50862"),
-    "local8": ("058e0d21f925bb0e", "8148921046a3b91c"),
-    "haiku4": ("06a395f0432b80a2", "eaaa767d3f812838"),
+    "run7": ("87ad1594f3cbc6ea", "f8c2570b24983f04"),
+    "run5": ("4fbb0b856aea7f8e", "827d5f7ebdee3768"),
+    "run4": ("581eb11ec3924a68", "0d81125d321278da"),
+    "local8": ("058e0d21f925bb0e", "6016e1c49686fbb1"),
+    "haiku4": ("06a395f0432b80a2", "a56231bf54979dba"),
 }
 
 
 @pytest.mark.parametrize("run", sorted(STORED_RENDERS))
 def test_a_stored_run_renders_as_it_did_before_the_block(run: str) -> None:
-    from maljan.reporting.renderers import HtmlRenderer
+    from malspark.reporting.renderers import HtmlRenderer
     from tests.unit.reporting.test_an_entry_without_a_source_is_read_as_before import (
         _benchmark,
     )

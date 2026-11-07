@@ -35,9 +35,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.base_agent import WRITTEN_BESIDES_CLAIMS
-from maljan.core.config import Settings
-from maljan.pipeline.debate_facts import (
+from malspark.agents.base_agent import WRITTEN_BESIDES_CLAIMS
+from malspark.core.config import Settings
+from malspark.pipeline.debate_facts import (
     NO_ANALYST_NAMED,
     OwnedClaim,
     carried_without_new_evidence,
@@ -46,8 +46,8 @@ from maljan.pipeline.debate_facts import (
     read_claim_references,
     valid_carries,
 )
-from maljan.pipeline.nodes import RevisionInput, make_revision_node
-from maljan.pipeline.revision_merge import (
+from malspark.pipeline.nodes import RevisionInput, make_revision_node
+from malspark.pipeline.revision_merge import (
     RevisionMerge,
     claim_tokens_by_number,
     merge_revision,
@@ -55,16 +55,16 @@ from maljan.pipeline.revision_merge import (
     rewritten_in,
     with_numbering_key,
 )
-from maljan.pipeline.routing import (
+from malspark.pipeline.routing import (
     CARRIED_NO_NEW_EVIDENCE,
     NO_CONSENSUS,
     POINTS_UNCHANGED,
     ConsensusRouter,
     debate_route,
 )
-from maljan.pipeline.state import AgentArgument
-from maljan.pipeline.validation import retry_drops, rewritten_pairs
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.state import AgentArgument
+from malspark.pipeline.validation import retry_drops, rewritten_pairs
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 NAMES = ["static", "reverser"]
 
@@ -270,8 +270,8 @@ def _revise(line: str) -> dict[str, Any]:
         "evidence_ledger": [],
     }
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
-        mp.setattr("maljan.pipeline.nodes.pack_text", lambda *a: "[ev_0001] identity: pe")
+        mp.setattr("malspark.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
+        mp.setattr("malspark.pipeline.nodes.pack_text", lambda *a: "[ev_0001] identity: pe")
         return asyncio.run(make_revision_node(container)(state))
 
 
@@ -649,7 +649,7 @@ POLLING_AGAIN = (
 
 
 def _restore(first: AgentISR, retried: AgentISR, kept: list[Any], answered: list[Any]) -> list:
-    from maljan.agents.base_agent import BaseAnalyst
+    from malspark.agents.base_agent import BaseAnalyst
 
     agent = MagicMock()
     drops = retry_drops(first, retried, "")

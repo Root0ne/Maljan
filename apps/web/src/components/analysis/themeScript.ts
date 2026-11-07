@@ -16,8 +16,8 @@
  * Kept out of the client module so a server layout can import the string.
  */
 
-export const THEME_STORAGE_KEY = "maljan.ui-theme";
+export const THEME_STORAGE_KEY = "malspark.ui-theme";
 
 // The key is written into the script as a literal, not interpolated, so the
 // script is one constant string; a test pins it to THEME_STORAGE_KEY.
-export const THEME_BOOT_SCRIPT = `(function(){try{if(!/^\\/analysis\\//.test(location.pathname))return;var t=null;try{t=localStorage.getItem("maljan.ui-theme")}catch(e){}if(t!=="light"&&t!=="dark"){t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"}document.documentElement.setAttribute("data-ui-theme",t)}catch(e){}})();`;
+export const THEME_BOOT_SCRIPT = `(function(){try{if(!/^\\/analysis\\//.test(location.pathname))return;var t=null;try{t=localStorage.getItem("malspark.ui-theme")}catch(e){}if(t!=="light"&&t!=="dark"){t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"}document.documentElement.setAttribute("data-ui-theme",t)}catch(e){}})();`;

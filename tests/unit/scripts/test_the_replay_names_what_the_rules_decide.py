@@ -60,7 +60,7 @@ from scripts.replay.stored import (
     read_run,
 )
 
-from maljan.pipeline import validation
+from malspark.pipeline import validation
 from tests.unit.scripts._replay_tiny import EXPECTED_TOTALS, FIXTURE
 
 # Sentences the analysts wrote in the tiny run: none is printed without the text.
@@ -403,7 +403,7 @@ def _all_flags(record: dict[str, Any]) -> Iterator[dict[str, Any]]:
 
 def test_no_value_of_the_run_is_in_the_record_without_the_text() -> None:
     runs = [FIXTURE]
-    extra = os.environ.get("MALJAN_REPLAY_RUN")
+    extra = os.environ.get("MALSPARK_REPLAY_RUN")
     if extra:
         runs.append(Path(extra))
     for run in runs:
@@ -431,7 +431,7 @@ def test_a_subject_and_its_path_carry_no_value() -> None:
     from scripts.replay.compare import _failure_named
     from scripts.replay.rules import _flag
 
-    from maljan.pipeline.validation import Violation
+    from malspark.pipeline.validation import Violation
 
     finding = Violation(
         code="stix.indicator_unattributed_flow",
@@ -466,7 +466,7 @@ def test_a_subject_and_its_path_carry_no_value() -> None:
     # An id stays as it is; a value does not pass for its shape.
     for kept in ("T1055.001", "t1055", "ev_0003"):
         assert value_free_subject(kept) == kept
-    from maljan.analysis.sandbox_sections import is_item_id
+    from malspark.analysis.sandbox_sections import is_item_id
 
     assert value_free_subject("proc:84", is_item_id) == "proc:84"
     assert value_free_subject("port:4444", is_item_id) == f"port:{digest('4444')}"
@@ -512,7 +512,7 @@ def test_a_cell_keeps_its_key_value_pairs_and_merged_rows_carry_the_key_order() 
 
 
 def test_the_replay_reaches_no_network_and_puts_every_door_back() -> None:
-    from maljan.memory import attck_loader
+    from malspark.memory import attck_loader
 
     connect, lookup, by_name = socket.create_connection, socket.getaddrinfo, socket.gethostbyname
     cache = attck_loader.ATTCK_CACHE_DIR
@@ -529,7 +529,7 @@ def test_the_replay_reaches_no_network_and_puts_every_door_back() -> None:
         ):
             datagram.sendto(b"x", ("127.0.0.1", 9))
         assert attck_loader.ATTCK_CACHE_DIR == env.cache_dir
-        assert env.cache_dir != Path.home() / ".cache" / "maljan" / "attck"
+        assert env.cache_dir != Path.home() / ".cache" / "malspark" / "attck"
     assert socket.create_connection is connect
     assert socket.getaddrinfo is lookup
     assert socket.gethostbyname is by_name
@@ -689,8 +689,8 @@ def _seconds(work: Callable[[], object]) -> float:
 
 def _flagged_answer(n: int) -> tuple[list[Any], Any]:
     """An answer of ``n`` claims, each the subject of one finding."""
-    from maljan.pipeline.validation import Violation
-    from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+    from malspark.pipeline.validation import Violation
+    from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
     claims = [
         ClaimEvidence(claim=f"claim {i}", evidence_ref=f"[ev_{i + 1:04d}]", confidence=0.5)
@@ -753,7 +753,7 @@ def _unshown_run(n: int) -> Any:
 def test_the_replay_s_own_bookkeeping_stays_linear() -> None:
     from scripts.replay.rules import _analysts, _claim_flags, _Run, _shown_to
 
-    from maljan.pipeline.validation import Violation
+    from malspark.pipeline.validation import Violation
 
     # Ten times the input in about ten times the time; a step that walked the
     # whole of it for each of its items would be a hundred.
@@ -802,11 +802,11 @@ def test_the_replay_s_own_bookkeeping_stays_linear() -> None:
 
 
 def test_stored_degradation_reasons_are_decided_again_or_named(tmp_path: Path) -> None:
-    from maljan.agents.judge_agent import VERDICT_FALLBACK_REASON
-    from maljan.pipeline.outcome import unrecognised_verdict_reason
+    from malspark.agents.judge_agent import VERDICT_FALLBACK_REASON
+    from malspark.pipeline.outcome import unrecognised_verdict_reason
 
     unreadable = unrecognised_verdict_reason(
-        SimpleNamespace(x_maljan_assessment=SimpleNamespace(verdict="Maybe"))
+        SimpleNamespace(x_malspark_assessment=SimpleNamespace(verdict="Maybe"))
     )
 
     def _decided(report: dict[str, Any]) -> None:
@@ -838,7 +838,7 @@ def test_stored_degradation_reasons_are_decided_again_or_named(tmp_path: Path) -
 
 def test_a_stored_operator_choice_is_moved_to_the_choices_and_named(tmp_path: Path) -> None:
     """T-338: a run stored with a withheld tool among its reasons replays with it listed apart."""
-    from maljan.providers.sample_open import UNCOVERED, withheld_unpinned
+    from malspark.providers.sample_open import UNCOVERED, withheld_unpinned
 
     withheld = withheld_unpinned(
         "remote http://localhost:8089 (backend 1)", "open_project", UNCOVERED

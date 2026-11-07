@@ -37,7 +37,7 @@ from tests.tool_name_reads import (
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGES = ("pipeline", "analysis", "agents")
 # Helpers any module of the product defines, for a literal handed to one imported.
-SHARED = tool_parameters_under(ROOT / "src" / "maljan")
+SHARED = tool_parameters_under(ROOT / "src" / "malspark")
 
 # ((module, what, code), count) -> why it is still by name.
 STILL_BY_NAME: dict[tuple[str, str, str], tuple[int, str]] = {
@@ -51,8 +51,8 @@ STILL_BY_NAME: dict[tuple[str, str, str], tuple[int, str]] = {
 def _found() -> Counter[tuple[str, str, str]]:
     held: Counter[tuple[str, str, str]] = Counter()
     for package in PACKAGES:
-        for path in sorted((ROOT / "src" / "maljan" / package).rglob("*.py")):
-            module = path.relative_to(ROOT / "src" / "maljan").as_posix()
+        for path in sorted((ROOT / "src" / "malspark" / package).rglob("*.py")):
+            module = path.relative_to(ROOT / "src" / "malspark").as_posix()
             for finding in findings(path.read_text(encoding="utf-8"), module, shared=SHARED):
                 held[(module, finding.what.split()[0], finding.text)] += 1
     return held
@@ -133,15 +133,15 @@ def test_the_guard_follows_a_tool_helper_imported_from_another_module() -> None:
     helper = "def find(es, tool):\n    return [e for e in es if e.tool == tool]\n"
     shared = tool_parameters(helper)
     for caller in (
-        'from maljan.core.helpers import find\nfind(es, "capa")\n',
-        'from maljan.core.helpers import find as look\nlook(es, tool="capa")\n',
-        'from maljan.core import helpers\nhelpers.find(es, "capa")\n',
-        'import maljan.core.helpers as h\nh.find(es, "capa")\n',
+        'from malspark.core.helpers import find\nfind(es, "capa")\n',
+        'from malspark.core.helpers import find as look\nlook(es, tool="capa")\n',
+        'from malspark.core import helpers\nhelpers.find(es, "capa")\n',
+        'import malspark.core.helpers as h\nh.find(es, "capa")\n',
     ):
         assert findings(caller, shared=shared), caller
         assert findings(caller) == [], caller
     for near in (
-        "from maljan.core.helpers import find\nfind(es, other)\n",
+        "from malspark.core.helpers import find\nfind(es, other)\n",
         'from elsewhere import find\nfind(es, "capa")\n',
         'import re\nre.find(es, "capa")\n',
         'def find(es, label):\n    return label\nfind(es, "capa")\n',

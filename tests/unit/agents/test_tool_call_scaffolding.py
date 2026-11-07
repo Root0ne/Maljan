@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents.base_agent import parse_structured_claims, strip_tool_call_scaffolding
-from maljan.agents.static_analyst import _parse_claim_blocks
+from malspark.agents.base_agent import parse_structured_claims, strip_tool_call_scaffolding
+from malspark.agents.static_analyst import _parse_claim_blocks
 
 # The captured shape: a Qwen-family model writing its call into the answer.
 CAPTURED = (
@@ -141,7 +141,7 @@ def _isr_from_text(text: str):
     """
     import logging
 
-    from maljan.agents.static_analyst import StaticAnalyst
+    from malspark.agents.static_analyst import StaticAnalyst
 
     analyst = StaticAnalyst.__new__(StaticAnalyst)
     analyst.name = "static_r2"
@@ -212,7 +212,7 @@ def test_evidence_that_is_only_scaffolding_leaves_the_claim_unsourced():
 
 
 def test_a_dispute_item_that_is_scaffolding_is_not_a_dispute():
-    from maljan.agents.static_analyst import _parse_disputes
+    from malspark.agents.static_analyst import _parse_disputes
 
     text = (
         "DISPUTES:\n"
@@ -230,7 +230,7 @@ def test_a_dispute_item_that_is_scaffolding_is_not_a_dispute():
 
 def test_a_multi_line_tool_call_inside_disputes_is_removed_whole():
     """The block spans lines, so a per-line check alone would never see it."""
-    from maljan.agents.static_analyst import _parse_disputes
+    from malspark.agents.static_analyst import _parse_disputes
 
     text = (
         "DISPUTES:\n"
@@ -243,7 +243,7 @@ def test_a_multi_line_tool_call_inside_disputes_is_removed_whole():
 
 
 def test_an_ordinary_disputes_section_is_unchanged():
-    from maljan.agents.static_analyst import _parse_disputes
+    from malspark.agents.static_analyst import _parse_disputes
 
     text = "DISPUTES:\n- One thing.\n- Another thing.\n"
     assert _parse_disputes(text) == ["One thing.", "Another thing."]

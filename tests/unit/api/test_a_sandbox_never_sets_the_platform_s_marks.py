@@ -21,10 +21,10 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline.sandbox_status import NOT_RUN, OBSERVED, RECORDED_FIXTURE, sandbox_status
-from maljan.providers.base import SandboxCapabilities
-from maljan.providers.sandbox.readers import required_reader
-from maljan.schemas.sandbox_document import (
+from malspark.pipeline.sandbox_status import NOT_RUN, OBSERVED, RECORDED_FIXTURE, sandbox_status
+from malspark.providers.base import SandboxCapabilities
+from malspark.providers.sandbox.readers import required_reader
+from malspark.schemas.sandbox_document import (
     FIXTURE_KEY,
     PLATFORM_MARKS,
     SYNTHETIC_KEY,
@@ -32,7 +32,7 @@ from maljan.schemas.sandbox_document import (
     sandbox_document,
     unearned_marks_removed,
 )
-from maljan.schemas.sandbox_report import SandboxRun
+from malspark.schemas.sandbox_report import SandboxRun
 
 BYTES = b"MZ synthetic sample bytes, never run\x00" * 64
 INTAKE = hashlib.sha256(BYTES).hexdigest()
@@ -87,11 +87,11 @@ class _Uploaded(_Provider):
 
 
 def _intake(provider: Any, tmp_path: Path) -> dict[str, Any]:
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
     sample = tmp_path / "s.exe"
     sample.write_bytes(BYTES)
-    app = MaljanApp(mock=True)
+    app = MalsparkApp(mock=True)
     app.container.mock = False
     app.container._sandbox_provider_cache = provider
     report = asyncio.run(app._submit_to_sandbox(str(sample)))
@@ -157,8 +157,8 @@ class TestAForgedMarkIsTakenOut:
     def test_the_target_mark_is_one_of_the_platform_s_marks_and_no_reader_earns_it(
         self,
     ) -> None:
-        from maljan.pipeline import sandbox_status as status_module
-        from maljan.providers.sandbox.readers import earned_marks, report_reader_ids
+        from malspark.pipeline import sandbox_status as status_module
+        from malspark.providers.sandbox.readers import earned_marks, report_reader_ids
 
         assert TARGET_KEY in PLATFORM_MARKS
         assert status_module.TARGET_KEY is TARGET_KEY
@@ -178,11 +178,11 @@ class TestAForgedMarkIsTakenOut:
     def test_the_target_claim_is_kept_for_a_forged_stand_in(self, tmp_path: Path) -> None:
         # A report read as a stand-in kept no target claim: the forged mark hid
         # the sandbox's own target from the comparison with the sample.
-        from maljan.app import MaljanApp
+        from malspark.app import MalsparkApp
 
         sample = tmp_path / "s.exe"
         sample.write_bytes(BYTES)
-        app = MaljanApp(mock=True)
+        app = MalsparkApp(mock=True)
         app.container.mock = False
         app.container._sandbox_provider_cache = _Provider("cape2", "cape2", _cape(synthetic=True))
         asyncio.run(app._submit_to_sandbox(str(sample)))
@@ -194,7 +194,7 @@ class TestThePlatformsOwnMarksAreKept:
     def test_the_mock_stand_in_reads_as_no_sandbox(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        from maljan.loaders.mock_sandbox_client import MockSandboxClient
+        from malspark.loaders.mock_sandbox_client import MockSandboxClient
 
         raw = MockSandboxClient._minimal_report(INTAKE, "s.exe")
         with caplog.at_level(logging.WARNING):
@@ -213,7 +213,7 @@ class TestThePlatformsOwnMarksAreKept:
         assert not any("did not set" in r.getMessage() for r in caplog.records)
 
     def test_the_mock_provider_s_own_fixture_path_keeps_its_mark(self, tmp_path: Path) -> None:
-        from maljan.providers.sandbox.mock import MockSandboxProvider
+        from malspark.providers.sandbox.mock import MockSandboxProvider
 
         (tmp_path / "dynamic").mkdir()
         (tmp_path / "dynamic" / f"{INTAKE}.json").write_text(json.dumps(_cape()))
@@ -257,8 +257,8 @@ def _cape_attached(**top: Any) -> dict[str, Any]:
 
 
 def _attached(raw: dict[str, Any]) -> Any:
-    from maljan.core.config import Settings
-    from maljan.providers.sandbox.upload import UploadSandboxProvider
+    from malspark.core.config import Settings
+    from malspark.providers.sandbox.upload import UploadSandboxProvider
 
     provider = UploadSandboxProvider.from_settings(Settings())
     provider.set_pending_blob(json.dumps(raw).encode(), filename="report.json")
@@ -292,7 +292,7 @@ class TestTheAttachedReportProvider:
 @pytest.fixture
 def plug_in_readers() -> Any:
     """Readers registered for one test, the built-in ``mock`` restored after."""
-    from maljan.providers.sandbox import readers
+    from malspark.providers.sandbox import readers
 
     mock = readers.report_reader("mock")
     added: list[str] = []
@@ -311,7 +311,7 @@ class TestAPlugInReaderEarnsNoMark:
     def test_a_reader_declaring_marks_earns_none(
         self, plug_in_readers: Any, tmp_path: Path
     ) -> None:
-        from maljan.providers.sandbox.readers import CapeReportReader
+        from malspark.providers.sandbox.readers import CapeReportReader
 
         class _Declares(CapeReportReader):
             id = "plug-marks"
@@ -325,7 +325,7 @@ class TestAPlugInReaderEarnsNoMark:
     def test_a_reader_replacing_the_mock_earns_none(
         self, plug_in_readers: Any, tmp_path: Path
     ) -> None:
-        from maljan.providers.sandbox.readers import MockReportReader
+        from malspark.providers.sandbox.readers import MockReportReader
 
         plug_in_readers(MockReportReader())
         document = _intake(_Provider("mock", "mock", _cape(synthetic=True)), tmp_path)
@@ -333,7 +333,7 @@ class TestAPlugInReaderEarnsNoMark:
         assert sandbox_status(document).status == OBSERVED
 
     def test_the_built_in_mock_still_earns_its_marks(self, tmp_path: Path) -> None:
-        from maljan.loaders.mock_sandbox_client import MockSandboxClient
+        from malspark.loaders.mock_sandbox_client import MockSandboxClient
 
         raw = MockSandboxClient._minimal_report(INTAKE, "s.exe")
         document = _intake(_Provider("mock", "mock", raw), tmp_path)
@@ -342,14 +342,14 @@ class TestAPlugInReaderEarnsNoMark:
 
 
 def _settings(**sandbox: Any) -> Any:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     cfg = Settings()
     return cfg.model_copy(update={"sandbox": cfg.sandbox.model_copy(update=sandbox)})
 
 
 def _mock_format() -> Any:
-    from maljan.core.report_formats import ReportFormat
+    from malspark.core.report_formats import ReportFormat
 
     return ReportFormat(
         name="fixture_like",
@@ -360,8 +360,8 @@ def _mock_format() -> Any:
 
 class TestNoOperatorNamesTheFixtureReader:
     def test_the_rest_sandbox_refuses_report_format_mock(self) -> None:
-        from maljan.providers.errors import ProviderConfigurationError
-        from maljan.providers.sandbox.rest import RestSandboxProvider
+        from malspark.providers.errors import ProviderConfigurationError
+        from malspark.providers.sandbox.rest import RestSandboxProvider
 
         cfg = _settings()
         rest = cfg.sandbox.rest.model_copy(
@@ -377,10 +377,10 @@ class TestNoOperatorNamesTheFixtureReader:
     def test_a_forged_mark_read_by_the_mock_through_rest_never_reaches_the_run(self) -> None:
         # Even a provider built past the check refuses at fetch, before any
         # reader reads the body.
-        from maljan.core.report_mapping import RestMappingConfig
-        from maljan.providers.errors import ProviderConfigurationError
-        from maljan.providers.sandbox.rest import RestSandboxProvider
-        from maljan.providers.sandbox.rest_mapping import compile_mapping
+        from malspark.core.report_mapping import RestMappingConfig
+        from malspark.providers.errors import ProviderConfigurationError
+        from malspark.providers.sandbox.rest import RestSandboxProvider
+        from malspark.providers.sandbox.rest_mapping import compile_mapping
 
         cfg = _settings()
         rest = cfg.sandbox.rest.model_copy(
@@ -442,9 +442,9 @@ class TestNoOperatorNamesTheFixtureReader:
         assert _fixture_reader_refusals(_settings()) == {}
 
     def test_an_upload_read_as_a_mock_format_is_refused(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.providers.errors import ProviderError
-        from maljan.providers.sandbox.upload import UploadSandboxProvider
+        from malspark.core.config import Settings
+        from malspark.providers.errors import ProviderError
+        from malspark.providers.sandbox.upload import UploadSandboxProvider
 
         cfg = Settings()
         upload = cfg.sandbox.upload.model_copy(

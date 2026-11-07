@@ -17,7 +17,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from maljan.agents.base_agent import FINAL_ANSWER_NUDGE, BaseAnalyst, nudge_turns
+from malspark.agents.base_agent import FINAL_ANSWER_NUDGE, BaseAnalyst, nudge_turns
 
 _REPORT = (
     "CLAIM: it resolves imports at runtime\nEVIDENCE: ev_0002\nCONFIDENCE: 0.7\nTECHNIQUE: T1027\n"

@@ -15,18 +15,18 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.reporting.ledger_report import (
+from malspark.reporting.ledger_report import (
     ANALYST_SECTION_SOURCES,
     build_sections,
     section_is_grounded,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     OPEN_QUESTION_SOURCE,
     EvidenceSection,
     is_open_question_section,
 )
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, OpenQuestion
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, OpenQuestion
 
 
 def _entry(entry_id: str, agent: str, tool: str, server: str = "ghidra") -> LedgerEntry:
@@ -122,7 +122,7 @@ class TestItIsNeverReadAsWhatTheRunFound:
         assert is_open_question_section(section)
 
     def test_its_words_ground_no_capability(self) -> None:
-        from maljan.pipeline.validation import CapabilityGrounding
+        from malspark.pipeline.validation import CapabilityGrounding
 
         question = EvidenceSection(
             key="open_questions",
@@ -149,7 +149,7 @@ class TestItIsNeverReadAsWhatTheRunFound:
 
 class TestTheMarkdownAppendix:
     def test_it_is_assessed_and_said_to_be_unknowns(self) -> None:
-        from maljan.reporting.renderers.markdown import OPEN_QUESTIONS_NOTE, _evidence_heading
+        from malspark.reporting.renderers.markdown import OPEN_QUESTIONS_NOTE, _evidence_heading
 
         section = EvidenceSection(
             key="open_questions", title="Open questions", kind="table", source=OPEN_QUESTION_SOURCE
@@ -160,7 +160,7 @@ class TestTheMarkdownAppendix:
 
 
 def _report_citing(entry_id: str, tool: str, *sections: EvidenceSection) -> Any:
-    from maljan.reporting.models import (
+    from malspark.reporting.models import (
         EvidenceIndexRow,
         FileHashes,
         MalwareReport,
@@ -193,7 +193,7 @@ def _cited(source: str, entry_id: str = "ev_0004") -> EvidenceSection:
 
 class TestNoHolderReadsIt:
     def test_the_entry_it_cites_holds_no_value_and_records_nothing(self) -> None:
-        from maljan.reporting.evidence_bundles import sandbox_entry_ids, value_entries
+        from malspark.reporting.evidence_bundles import sandbox_entry_ids, value_entries
 
         asked = _report_citing("ev_0004", "sandbox_network", _cited(OPEN_QUESTION_SOURCE))
         found = _report_citing("ev_0004", "sandbox_network", _cited("finding"))
@@ -204,7 +204,7 @@ class TestNoHolderReadsIt:
         assert "ev_0004" not in sandbox_entry_ids(asked)
 
     def test_the_entry_it_cites_corroborates_nothing(self) -> None:
-        from maljan.reporting.renderers.stix_renderer import _corroborating_values
+        from malspark.reporting.renderers.stix_renderer import _corroborating_values
 
         tool = EvidenceSection(
             key="tool_sandbox_network",

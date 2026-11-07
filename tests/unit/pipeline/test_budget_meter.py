@@ -15,14 +15,14 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.pipeline.events import (
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.pipeline.events import (
     BUDGET_TICK,
     STAGE_ENDED_AT_CAP,
     emit_budget_tick,
     emit_stage_ended_at_cap,
 )
-from maljan.pipeline.nodes import _budget_update
+from malspark.pipeline.nodes import _budget_update
 
 
 class TestTheBudgetEvents:
@@ -91,7 +91,7 @@ def _call(n: int) -> AIMessage:
 
 class TestTheLoopMetersItself:
     def _agent(self, script: list[Any], events: list[tuple[str, dict]]) -> Any:
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         class _Analyst(BaseAnalyst):
             def analyze(self, data: str) -> str:  # pragma: no cover - unused
@@ -130,7 +130,7 @@ class TestTheLoopMetersItself:
         assert _budget_update(agent, "static") == {}
 
     def test_a_loop_that_hits_its_step_cap_says_so(self, monkeypatch) -> None:
-        from maljan.core.config import Settings, get_settings
+        from malspark.core.config import Settings, get_settings
 
         cfg = get_settings()
         monkeypatch.setitem(cfg.react_agent_max_steps_overrides, "static", 4)
@@ -150,7 +150,7 @@ class TestTheLoopMetersItself:
         hand the record; the refresher counted the turns before every model
         turn, so the budget itself is where the last figure is.
         """
-        from maljan.agents.base_agent import LoopBudget
+        from malspark.agents.base_agent import LoopBudget
 
         events: list[tuple[str, dict]] = []
         agent = self._agent([AIMessage(content="CLAIM: x")], events)
@@ -173,7 +173,7 @@ class TestTheLoopMetersItself:
 
     def test_the_meter_s_rows_are_this_agent_s_and_not_the_class_s(self) -> None:
         """A stand-in built without ``__init__`` must not drain another one's rows."""
-        from maljan.agents.base_agent import BudgetMeter, LoopBudget
+        from malspark.agents.base_agent import BudgetMeter, LoopBudget
 
         class _StandIn(BudgetMeter):
             name = "stand-in"
@@ -188,7 +188,7 @@ class TestTheLoopMetersItself:
         assert two.drain_budget_records() == []
 
     def test_ticks_come_every_few_steps(self, monkeypatch) -> None:
-        from maljan.core.config import get_settings
+        from malspark.core.config import get_settings
 
         monkeypatch.setitem(get_settings().react_agent_max_steps_overrides, "static", 40)
         events: list[tuple[str, dict]] = []
@@ -267,8 +267,8 @@ class TestEveryPathThatDrainsALedgerDrainsTheMeter:
     """Rows written on one path and drained on another are rows nobody sees."""
 
     def test_a_callee_s_rows_travel_with_its_ledger(self) -> None:
-        from maljan.agents.base_agent import BudgetMeter, LoopBudget
-        from maljan.agents.delegation import _hand_over_the_record
+        from malspark.agents.base_agent import BudgetMeter, LoopBudget
+        from malspark.agents.delegation import _hand_over_the_record
 
         class _Agent(BudgetMeter):
             def __init__(self, name: str) -> None:
@@ -303,8 +303,8 @@ class TestEveryPathThatDrainsALedgerDrainsTheMeter:
         assert callee.drain_budget_records() == [], "the callee keeps nothing"
 
     def test_a_caller_that_has_already_finished_is_given_no_rows(self) -> None:
-        from maljan.agents.base_agent import BudgetMeter, LoopBudget
-        from maljan.agents.delegation import _hand_over_the_record
+        from malspark.agents.base_agent import BudgetMeter, LoopBudget
+        from malspark.agents.delegation import _hand_over_the_record
 
         class _Agent(BudgetMeter):
             def __init__(self, name: str) -> None:
@@ -334,7 +334,7 @@ class TestEveryPathThatDrainsALedgerDrainsTheMeter:
 
     def test_a_row_is_filed_under_the_agent_that_ran_the_loop(self) -> None:
         """A lead hands over what its specialists spent; the summary keeps them apart."""
-        from maljan.agents.base_agent import BudgetMeter, LoopBudget
+        from malspark.agents.base_agent import BudgetMeter, LoopBudget
 
         class _Agent(BudgetMeter):
             def __init__(self) -> None:
@@ -358,7 +358,7 @@ class TestEveryPathThatDrainsALedgerDrainsTheMeter:
         """Its loop has no run-state block to refresh, so nothing else counted."""
         from langchain_core.messages import AIMessage, HumanMessage
 
-        from maljan.agents.base_agent import LoopBudget, _steps_this_loop_spent
+        from malspark.agents.base_agent import LoopBudget, _steps_this_loop_spent
 
         budget = LoopBudget(max_steps=10, timeout=600.0)
         budget.note_turns([HumanMessage(content="h"), AIMessage(content="a")])
@@ -367,9 +367,9 @@ class TestEveryPathThatDrainsALedgerDrainsTheMeter:
         assert _steps_this_loop_spent(budget, []) == budget.own_steps
 
     def test_the_judge_meters_its_own_loop_and_the_container_drains_it(self) -> None:
-        from maljan.agents.base_agent import BudgetMeter, LoopBudget
-        from maljan.agents.judge_agent import JudgeAgent
-        from maljan.pipeline.nodes import _judge_budget
+        from malspark.agents.base_agent import BudgetMeter, LoopBudget
+        from malspark.agents.judge_agent import JudgeAgent
+        from malspark.pipeline.nodes import _judge_budget
 
         judge = JudgeAgent(llm=MagicMock())
         assert isinstance(judge, BudgetMeter), "the judge runs the analysts' meter"

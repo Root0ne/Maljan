@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.core.agent_key_migration import free_key, rename_colliding_agent_keys
-from maljan.core.config import BUILTIN_PROFILES, Settings, seeded_generic_agents
+from malspark.core.agent_key_migration import free_key, rename_colliding_agent_keys
+from malspark.core.config import BUILTIN_PROFILES, Settings, seeded_generic_agents
 
 
 def _settings(**over):
@@ -331,7 +331,7 @@ class TestTheRewriteLeavesAnAbsentFieldAbsent:
 
     def test_a_team_that_names_no_renamed_agent_is_the_same_object(self) -> None:
         """The rewrite must not touch what it has no business touching."""
-        from maljan.core.agent_key_migration import rename_colliding_agent_keys
+        from malspark.core.agent_key_migration import rename_colliding_agent_keys
 
         untouched = {"label": "Other", "stages": [{"key": "a", "agents": ["static"]}]}
         document = {
@@ -345,7 +345,7 @@ class TestTheRewriteLeavesAnAbsentFieldAbsent:
         assert out["agents"]["profiles"]["other"] == untouched
 
     def test_a_server_that_names_no_renamed_agent_is_the_same_object(self) -> None:
-        from maljan.core.agent_key_migration import rename_colliding_agent_keys
+        from malspark.core.agent_key_migration import rename_colliding_agent_keys
 
         untouched = {"transport": "stdio", "command": "x", "agents": ["static"]}
         document = {
@@ -359,22 +359,22 @@ class TestTheRewriteLeavesAnAbsentFieldAbsent:
 
 class TestSetIfList:
     def test_it_leaves_an_absent_field_absent(self) -> None:
-        from maljan.core.agent_key_migration import set_if_list
+        from malspark.core.agent_key_migration import set_if_list
 
         assert set_if_list({"key": "d"}, "agents", {"a": "b"}) == {"key": "d"}
 
     def test_it_leaves_a_field_that_is_not_a_list_alone(self) -> None:
-        from maljan.core.agent_key_migration import set_if_list
+        from malspark.core.agent_key_migration import set_if_list
 
         assert set_if_list({"agents": None}, "agents", {"a": "b"}) == {"agents": None}
 
     def test_it_rewrites_a_list_that_names_a_renamed_key(self) -> None:
-        from maljan.core.agent_key_migration import set_if_list
+        from malspark.core.agent_key_migration import set_if_list
 
         assert set_if_list({"agents": ["a", "z"]}, "agents", {"a": "b"}) == {"agents": ["b", "z"]}
 
     def test_it_returns_the_mapping_itself_when_nothing_changes(self) -> None:
-        from maljan.core.agent_key_migration import set_if_list
+        from malspark.core.agent_key_migration import set_if_list
 
         mapping = {"agents": ["z"]}
         assert set_if_list(mapping, "agents", {"a": "b"}) is mapping

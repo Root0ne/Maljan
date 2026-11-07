@@ -49,8 +49,8 @@ class TestTheAnalystCloseIsBounded:
     async def test_a_hanging_toolkit_does_not_hang_close_tools(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
-        from maljan.agents.static_analyst import StaticAnalyst
+        from malspark.agents import base_agent
+        from malspark.agents.static_analyst import StaticAnalyst
 
         monkeypatch.setattr(base_agent, "CLOSE_TOOLS_TIMEOUT", 0.3)
 
@@ -72,7 +72,7 @@ class TestTheAnalystCloseIsBounded:
         stuck subprocess froze the whole worker rather than just its own job."""
         import inspect
 
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         assert inspect.iscoroutinefunction(BaseAnalyst.close_tools)
 
@@ -80,8 +80,8 @@ class TestTheAnalystCloseIsBounded:
     async def test_the_loop_keeps_running_while_a_close_hangs(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
-        from maljan.agents.static_analyst import StaticAnalyst
+        from malspark.agents import base_agent
+        from malspark.agents.static_analyst import StaticAnalyst
 
         monkeypatch.setattr(base_agent, "CLOSE_TOOLS_TIMEOUT", 0.5)
         agent = StaticAnalyst(llm=MagicMock(), name="StaticAnalyst")
@@ -104,7 +104,7 @@ class TestTheContainerBoundsEachCloser:
     async def test_one_stuck_agent_does_not_block_the_others(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core import container as container_mod
+        from malspark.core import container as container_mod
 
         monkeypatch.setattr(container_mod, "_ACLOSE_BUDGET", 0.3)
 
@@ -136,7 +136,7 @@ class TestTheContainerBoundsEachCloser:
 
     @pytest.mark.asyncio
     async def test_a_stuck_judge_is_abandoned_too(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.core import container as container_mod
+        from malspark.core import container as container_mod
 
         monkeypatch.setattr(container_mod, "_ACLOSE_BUDGET", 0.3)
 
@@ -218,9 +218,9 @@ class TestTheJudgeCloseIsBounded:
         no ``wait_for`` is armed with ``CLEANUP_TIMEOUT`` for an interceptor to
         recognise.
         """
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers import servers
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers import servers
+        from malspark.providers.servers import ServerHandle
 
         monkeypatch.setattr(servers, "CLEANUP_TIMEOUT", 0.1)
         monkeypatch.setattr(servers, "CHILD_EXIT_GRACE", 0.1)
@@ -243,10 +243,10 @@ class TestTheJudgeCloseIsBounded:
         on close, exactly as the single-``toolkit`` version of this test did
         before the tool-server registry refactor (Task 7).
         """
-        from maljan.agents.judge_agent import JudgeAgent
-        from maljan.core.config import Settings
-        from maljan.providers import servers
-        from maljan.providers.servers import ServerRegistry
+        from malspark.agents.judge_agent import JudgeAgent
+        from malspark.core.config import Settings
+        from malspark.providers import servers
+        from malspark.providers.servers import ServerRegistry
 
         monkeypatch.setattr(servers, "CLEANUP_TIMEOUT", 0.1)
         monkeypatch.setattr(servers, "CHILD_EXIT_GRACE", 0.1)
@@ -363,8 +363,8 @@ class _OwnerLoopBound:
 
 def _handle_with(toolkit: Any) -> Any:
     """A handle whose toolkit factory yields ``toolkit``, nothing else patched."""
-    from maljan.core.config import MCPServerConfig
-    from maljan.providers.servers import ServerHandle
+    from malspark.core.config import MCPServerConfig
+    from malspark.providers.servers import ServerHandle
 
     handle = ServerHandle("threatintel", MCPServerConfig(enabled=True, command="mcp"))
     handle._build_toolkit = lambda *a, **kw: toolkit  # type: ignore[method-assign]
@@ -450,8 +450,8 @@ class TestADeadOwningLoopIsNotUnwoundHere:
         """A handle whose loop has stopped is reaped, not unwound in place."""
         import threading
 
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.servers import ServerHandle
 
         owner = asyncio.new_event_loop()
         running = threading.Event()
@@ -503,9 +503,9 @@ class TestTheReapSurvivesTheCallersBudget:
         is a reap that is skipped on exactly the runs that need it, which is
         how a stalled cross-loop close used to orphan its sidecar.
         """
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers import servers
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers import servers
+        from malspark.providers.servers import ServerHandle
 
         monkeypatch.setattr(servers, "CLEANUP_TIMEOUT", 30.0)
 
@@ -539,8 +539,8 @@ class TestTheSynchronousSweepCannotBlockTheFence:
         """
         import time
 
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer(config=Settings(_env_file=None), mock=True)
 
@@ -570,7 +570,7 @@ class TestTheSynchronousSweepCannotBlockTheFence:
 class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
     """BUG 7 (live run S6): the worker spun at 100 % CPU for 80 minutes.
 
-    py-spy caught the "maljan-agent-loop" thread in anyio's
+    py-spy caught the "malspark-agent-loop" thread in anyio's
     ``CancelScope._deliver_cancellation`` -> ``select(timeout=0)``: a task had
     been cancelled after a hard timeout, could not receive the cancellation
     (anyio was delivering it into a shielded wait on a child process that never
@@ -616,7 +616,7 @@ class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
     def test_a_task_that_ignores_cancellation_retires_the_agent_loop(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
         loop = base_agent._get_agent_loop()
@@ -650,7 +650,7 @@ class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The ordinary timeout: one slow call must not cost the whole loop."""
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
         loop = base_agent._get_agent_loop()
@@ -683,7 +683,7 @@ class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
         """
         import time
 
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
         loop = base_agent._get_agent_loop()
@@ -728,7 +728,7 @@ class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
         """
         import time
 
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
         loop = base_agent._get_agent_loop()
@@ -761,7 +761,7 @@ class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The other reading of an empty task list, which must not retire anything."""
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
         loop = base_agent._get_agent_loop()
@@ -779,7 +779,7 @@ class TestACancellationNobodyReceivesCannotSpinTheLoopForever:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """F2: cached clients and handles must not outlive their loop."""
-        from maljan.agents import base_agent
+        from malspark.agents import base_agent
 
         monkeypatch.setattr(base_agent, "CANCEL_DELIVERY_GRACE", 0.3, raising=False)
         seen: list[object] = []

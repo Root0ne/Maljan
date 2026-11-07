@@ -13,8 +13,8 @@ import struct
 import zlib
 from pathlib import Path
 
-from maljan.tools import crypto_constants
-from maljan.tools.crypto_constants import catalogue, find_crypto_constants
+from malspark.tools import crypto_constants
+from malspark.tools.crypto_constants import catalogue, find_crypto_constants
 from tests.linear_cost import assert_scales
 
 from .synthetic_pe import DATA_RVA, TEXT_RVA, SyntheticPE
@@ -197,7 +197,7 @@ class TestTheSetsComputeTheAlgorithms:
         assert value ^ 0xFFFFFFFF == zlib.crc32(self.MESSAGE)
 
     def test_the_fowler_noll_vo_set_computes_the_platform_s_own_hash(self) -> None:
-        from maljan.tools import api_hashes
+        from malspark.tools import api_hashes
 
         basis, prime = _set("fowler_noll_vo_32").values
         value = basis

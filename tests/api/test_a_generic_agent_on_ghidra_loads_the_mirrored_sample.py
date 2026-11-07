@@ -19,15 +19,15 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from maljan.agents.base_agent import run_coro_blocking
-from maljan.agents.composition import ResolvedAgent, pin_provider_sample
-from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
-from maljan.core.config import Settings
-from maljan.providers.base import StaticJobContext
-from maljan.providers.static.ghidra import GhidraStaticProvider
+from malspark.agents.base_agent import run_coro_blocking
+from malspark.agents.composition import ResolvedAgent, pin_provider_sample
+from malspark.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+from malspark.core.config import Settings
+from malspark.providers.base import StaticJobContext
+from malspark.providers.static.ghidra import GhidraStaticProvider
 
 MIRROR = "/data/samples/.work/" + "ab" * 32 + ".exe"
-HOST = "/home/someone/Maljan/data/samples/.work/" + "ab" * 32 + ".exe"
+HOST = "/home/someone/Malspark/data/samples/.work/" + "ab" * 32 + ".exe"
 
 SCHEMA = {
     "tools": [
@@ -183,7 +183,7 @@ def test_an_agent_without_the_provider_s_tools_pins_nothing(ghidra) -> None:
 
 
 def test_the_analyst_node_pins_it_with_the_agent_s_own_mirror(ghidra) -> None:
-    from maljan.pipeline.nodes import _pin_sample_path
+    from malspark.pipeline.nodes import _pin_sample_path
 
     url, handler = ghidra
     provider = _provider(url)
@@ -202,8 +202,8 @@ def test_the_analyst_node_pins_it_with_the_agent_s_own_mirror(ghidra) -> None:
 
 
 def test_a_generic_agent_s_head_chunk_names_only_the_path_its_tools_read() -> None:
-    from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
-    from maljan.pipeline.nodes import _augment_static_chunks_with_path
+    from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
+    from malspark.pipeline.nodes import _augment_static_chunks_with_path
 
     state = {
         "static_sample_paths": {"ghidra": MIRROR},
@@ -257,7 +257,7 @@ def test_only_the_provider_s_own_mirror_is_pinned(ghidra) -> None:
 def test_a_delegation_pins_the_callee_s_own_mirror(ghidra) -> None:
     """A lead asking the reverser on Ghidra hands it Ghidra's mirror, not the
     caller's own path."""
-    from maljan.agents.delegation import _brief_callee
+    from malspark.agents.delegation import _brief_callee
 
     url, handler = ghidra
     provider = _provider(url)

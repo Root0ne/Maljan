@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents.configurable_analyst import ConfigurableAnalyst
-from maljan.agents.dynamic_analyst import DynamicAnalyst
-from maljan.agents.network_analyst import NetworkAnalyst
-from maljan.agents.static_analyst import StaticAnalyst
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
+from malspark.agents.configurable_analyst import ConfigurableAnalyst
+from malspark.agents.dynamic_analyst import DynamicAnalyst
+from malspark.agents.network_analyst import NetworkAnalyst
+from malspark.agents.static_analyst import StaticAnalyst
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
 
 
 def _container(**agents) -> ServiceContainer:
@@ -167,7 +167,7 @@ def test_a_hyphenated_key_loads_through_the_no_sandbox_path(tmp_path):
     used to fail that analyst with a path-safety error the operator could not
     connect to the key they chose.
     """
-    from maljan.loaders.file_loader import FileDataLoader, UnsafePathError
+    from malspark.loaders.file_loader import FileDataLoader, UnsafePathError
 
     container = _container(
         definitions={"static-r2": {"role": "static", "static_provider": "r2"}},

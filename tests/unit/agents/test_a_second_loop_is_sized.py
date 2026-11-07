@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     _SYNTHESIS_MIN_SECONDS,
     BaseAnalyst,
     BudgetCeiling,
     TurnPace,
     loop_limits,
 )
-from maljan.llm.generation_rate import TIMEOUT_MARGIN
-from maljan.schemas.isr_models import AgentISR
+from malspark.llm.generation_rate import TIMEOUT_MARGIN
+from malspark.schemas.isr_models import AgentISR
 
 
 class _Analyst(BaseAnalyst):

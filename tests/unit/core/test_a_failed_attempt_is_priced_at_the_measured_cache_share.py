@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.core.spend import AT_CACHED_SHARE, SpendMeter
+from malspark.core.spend import AT_CACHED_SHARE, SpendMeter
 
 PRICE = {
     "input_usd_per_mtok": 1.0,

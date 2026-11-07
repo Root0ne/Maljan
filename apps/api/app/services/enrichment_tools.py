@@ -21,7 +21,7 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
-from maljan.core.logger import logger
+from malspark.core.logger import logger
 
 # The role a server declares to be asked as a reputation source.
 REPUTATION_ROLE = "reputation"
@@ -59,7 +59,7 @@ class ServerToolCaller:
 
     def _tools_in_force(self, server: str) -> Mapping[str, Any]:
         """``server``'s tool declarations in force: its block's, its own and what is read of it."""
-        from maljan.core.declared_reading import tools_in_force
+        from malspark.core.declared_reading import tools_in_force
 
         cfg = self._config(server)
         if cfg is None:
@@ -90,9 +90,9 @@ class ServerToolCaller:
         alone. The server is attached first, so what is read of its listing on
         a first attach is read here too.
         """
-        from maljan.core.reputation import INDICATOR_LOOKUP_KINDS
-        from maljan.core.served_declarations import derived
-        from maljan.core.tool_declarations import THIRD_PARTY_BYTES, THIRD_PARTY_HASH
+        from malspark.core.reputation import INDICATOR_LOOKUP_KINDS
+        from malspark.core.served_declarations import derived
+        from malspark.core.tool_declarations import THIRD_PARTY_BYTES, THIRD_PARTY_HASH
 
         handle = await self._handle(server)
         if handle is None:
@@ -137,7 +137,7 @@ class ServerToolCaller:
             )
             self._failed.add(server)
             return None
-        from maljan.providers.servers import ServerHandle
+        from malspark.providers.servers import ServerHandle
 
         handle = ServerHandle(server, cfg)
         try:

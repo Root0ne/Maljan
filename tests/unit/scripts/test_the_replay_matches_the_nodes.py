@@ -83,7 +83,7 @@ class _Stored(BaseChatModel):
 
 def _section_payload(stored: dict[str, Any], section: str) -> Any:
     """A composer section's answer as the stored report holds it, or the section declined."""
-    from maljan.reporting import composer as c
+    from malspark.reporting import composer as c
 
     place, key = rules.COMPOSER_PLACES.get(section, (f"technical_analysis.{section}", None))
     value = rules._stored_at(stored, place)
@@ -105,9 +105,9 @@ class _Container:
     pending_memory_case = None
 
     def __init__(self, run: Any, judge: Any, narrative: Any, composer: Any) -> None:
-        from maljan.core.config import get_settings
-        from maljan.core.token_ledger import TokenLedger
-        from maljan.core.truncation_ledger import TruncationLedger
+        from malspark.core.config import get_settings
+        from malspark.core.token_ledger import TokenLedger
+        from malspark.core.truncation_ledger import TruncationLedger
 
         self.config = get_settings()
         self._run = run
@@ -152,7 +152,7 @@ class _Container:
         return []
 
     def get_evidence_counter(self) -> Any:
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.schemas.evidence import EvidenceCounter
 
         return EvidenceCounter()
 
@@ -173,7 +173,7 @@ class _Container:
 
 def _merge(state: dict[str, Any], update: dict[str, Any]) -> None:
     """A node's update on the state, through the state's own reducers."""
-    from maljan.pipeline.state import AnalysisState
+    from malspark.pipeline.state import AnalysisState
 
     hints = typing.get_type_hints(AnalysisState, include_extras=True)
     for key, value in update.items():
@@ -197,12 +197,12 @@ def _oracle(run_dir: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Any, d
     run, replayed = seen["run"], seen["report"]
 
     with replay_environment(stored.settings):
-        from maljan.agents.judge_agent import JudgeAgent
-        from maljan.pipeline.nodes import make_judge_node, make_report_node
-        from maljan.reporting.composer import ReportComposer
-        from maljan.reporting.models import MalwareReport
-        from maljan.reporting.narrative_agent import NarrativeAgent
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.agents.judge_agent import JudgeAgent
+        from malspark.pipeline.nodes import make_judge_node, make_report_node
+        from malspark.reporting.composer import ReportComposer
+        from malspark.reporting.models import MalwareReport
+        from malspark.reporting.narrative_agent import NarrativeAgent
+        from malspark.schemas.evidence import EvidenceCounter
 
         answer = json.dumps((stored.judge or {}).get("bundle") or {})
         judge = JudgeAgent(llm=_Stored(answer_for=lambda _messages: answer))
@@ -396,7 +396,7 @@ def test_the_replay_builds_the_report_the_nodes_build(
 
 
 @pytest.mark.skipif(
-    not os.environ.get("MALJAN_REPLAY_RUN"), reason="no stored run named (MALJAN_REPLAY_RUN)"
+    not os.environ.get("MALSPARK_REPLAY_RUN"), reason="no stored run named (MALSPARK_REPLAY_RUN)"
 )
 def test_a_stored_run_replays_to_the_report_the_nodes_build(
     monkeypatch: pytest.MonkeyPatch,
@@ -407,7 +407,7 @@ def test_a_stored_run_replays_to_the_report_the_nodes_build(
     findings that survived their retries, and the judge node decides reasons
     from both; the replay keeps the run's own for them.
     """
-    replayed, nodes, verdict = _oracle(Path(os.environ["MALJAN_REPLAY_RUN"]), monkeypatch)
+    replayed, nodes, verdict = _oracle(Path(os.environ["MALSPARK_REPLAY_RUN"]), monkeypatch)
     mine, theirs = _view(replayed), _view(nodes)
     for key in ("degraded", "reasons"):
         mine.pop(key)

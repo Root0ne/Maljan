@@ -350,7 +350,7 @@ async def test_a_uuid_of_digits_and_one_e_is_read_back_whole_over_sqlite(
 def _sealed_job(engine: Any) -> tuple[uuid.UUID, list[dict[str, Any]]]:
     """A job with one ledger row, its sealed report and its seal on a chain of three."""
     from app.worker.analysis_worker import _evidence_row
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.schemas.evidence import LedgerEntry
 
     job_id = uuid.uuid4()
     entry = _evidence_row(
@@ -666,39 +666,39 @@ async def test_the_database_anchor_keeps_heads_and_refuses_another_at_the_same_s
 def test_the_protection_sentence_reads_the_roles_privileges() -> None:
     strong = audit_anchor.database_protection(
         {
-            "role": "maljan_anchor",
+            "role": "malspark_anchor",
             "owner": "postgres",
             "can_insert": True,
             "can_select": True,
             "append_only": True,
         },
-        "maljan",
+        "malspark",
         {"superuser": False},
     )
-    assert strong.startswith("The anchor role maljan_anchor may only INSERT and SELECT")
+    assert strong.startswith("The anchor role malspark_anchor may only INSERT and SELECT")
     assert "cannot move an anchored head" in strong
     same = audit_anchor.database_protection(
-        {"role": "maljan", "owner": "maljan", "can_insert": True, "can_select": True},
-        "maljan",
+        {"role": "malspark", "owner": "malspark", "can_insert": True, "can_select": True},
+        "malspark",
         None,
     )
     assert same.startswith("The anchor table is not protected")
-    assert "application's own database role (maljan)" in same
+    assert "application's own database role (malspark)" in same
     assert "no append-only trigger" in same
     owner = audit_anchor.database_protection(
         {
-            "role": "maljan_anchor",
-            "owner": "maljan",
+            "role": "malspark_anchor",
+            "owner": "malspark",
             "can_insert": True,
             "can_select": True,
             "can_update": True,
             "append_only": True,
         },
-        "maljan",
+        "malspark",
         {"superuser": False},
     )
     assert "may also UPDATE it" in owner
-    assert "the application's role maljan owns the anchor table" in owner
+    assert "the application's role malspark owns the anchor table" in owner
 
 
 # ---------------------------------------------------------------------------
@@ -920,7 +920,7 @@ def _settings(**values: Any) -> APISettings:
 
 def test_the_anchor_is_chosen_by_the_bootstrap_setting(monkeypatch: pytest.MonkeyPatch) -> None:
     assert audit_anchor.configured_kind(_settings()) == "none"
-    url = f"postgresql+asyncpg://maljan_anchor:{password()}@db:5432/maljan"
+    url = f"postgresql+asyncpg://malspark_anchor:{password()}@db:5432/malspark"
     assert audit_anchor.configured_kind(_settings(audit_anchor_database_url=url)) == "database"
     assert audit_anchor.configured_kind(_settings(audit_anchor="Object_Store")) == "object_store"
     assert (
@@ -942,8 +942,8 @@ def test_the_startup_check_refuses_a_bad_anchor_and_never_prints_its_url() -> No
     problems, _ = audit_anchor.bootstrap_findings(_settings(audit_anchor="database"))
     assert problems == ["AUDIT_ANCHOR is database but AUDIT_ANCHOR_DATABASE_URL is not set"]
     same = _settings(
-        database_url=f"postgresql+asyncpg://maljan:{secret}@db:5432/maljan",
-        audit_anchor_database_url=f"postgresql+asyncpg://maljan:{secret}@db:5432/maljan",
+        database_url=f"postgresql+asyncpg://malspark:{secret}@db:5432/malspark",
+        audit_anchor_database_url=f"postgresql+asyncpg://malspark:{secret}@db:5432/malspark",
     )
     problems, warnings = audit_anchor.bootstrap_findings(same)
     assert problems == [] and len(warnings) == 1
@@ -1249,25 +1249,30 @@ async def test_a_cancelled_anchor_write_is_counted_and_stays_cancelled(
 
 def test_an_anchor_role_that_owns_the_table_and_an_app_role_that_inserts_are_weak() -> None:
     owns = audit_anchor.database_protection(
-        {"role": "maljan_anchor", "owner": "maljan_anchor", "can_insert": True, "can_select": True},
-        "maljan",
+        {
+            "role": "malspark_anchor",
+            "owner": "malspark_anchor",
+            "can_insert": True,
+            "can_select": True,
+        },
+        "malspark",
         {"superuser": False},
     )
     assert owns.startswith("The anchor table is not protected")
-    assert "the anchor role maljan_anchor owns the anchor table" in owns
+    assert "the anchor role malspark_anchor owns the anchor table" in owns
     inserts = audit_anchor.database_protection(
         {
-            "role": "maljan_anchor",
+            "role": "malspark_anchor",
             "owner": "postgres",
             "can_insert": True,
             "can_select": True,
             "append_only": True,
         },
-        "maljan",
+        "malspark",
         {"superuser": False, "can_insert": True},
     )
     assert inserts.startswith("The anchor table is not protected")
-    assert "the application's role maljan may INSERT it" in inserts
+    assert "the application's role malspark may INSERT it" in inserts
 
 
 # ---------------------------------------------------------------------------
@@ -1296,7 +1301,7 @@ async def test_on_postgresql_the_anchor_table_refuses_every_change() -> None:
             f"no PostgreSQL reachable at the configured DATABASE_URL ({type(exc).__name__})"
         )
     # A throwaway database of its own, never the platform's.
-    name = f"maljan_anchor_test_{uuid.uuid4().hex[:12]}"
+    name = f"malspark_anchor_test_{uuid.uuid4().hex[:12]}"
     try:
         await admin.execute(f'CREATE DATABASE "{name}"')
     except asyncpg.PostgresError as exc:

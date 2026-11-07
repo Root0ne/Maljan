@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 from langchain_openai import ChatOpenAI
 
-from maljan.core.spend import SpendMeter, spend_bound
+from malspark.core.spend import SpendMeter, spend_bound
 
 # Seven minutes before a weekday peak window opens at 01:00 UTC.
 BEFORE_PEAK = datetime(2026, 9, 25, 0, 53, tzinfo=UTC)
@@ -45,7 +45,7 @@ def test_a_report_call_is_priced_over_its_request_s_deadline(
 def test_an_agent_s_call_is_priced_over_its_request_s_deadline() -> None:
     from tests.unit.agents.test_a_loop_has_no_default_limit import _analyst, _Model
 
-    from maljan.core.token_ledger import TokenLedger
+    from malspark.core.token_ledger import TokenLedger
 
     meter = _meter()
     seen: list[float | None] = []

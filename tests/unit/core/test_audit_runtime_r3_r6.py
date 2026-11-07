@@ -11,11 +11,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.core import spend
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.core.reputation import _moment
-from maljan.core.spend import Price, PriceWindow
+from malspark.core import spend
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.core.reputation import _moment
+from malspark.core.spend import Price, PriceWindow
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
@@ -71,7 +71,7 @@ def test_r6_a_failed_table_read_is_not_cached(
     bad = tmp_path / "table.json"
     bad.write_text("{not json", encoding="utf-8")
     monkeypatch.setattr(spend, "_table", None)
-    monkeypatch.setattr("maljan.core.paths.resolve_data", lambda _p: bad)
+    monkeypatch.setattr("malspark.core.paths.resolve_data", lambda _p: bad)
     with caplog.at_level("WARNING"):
         assert spend.table_prices() == {}
     assert spend._table is None
@@ -87,7 +87,7 @@ def test_r6_the_unpriced_statement_names_a_table_that_could_not_be_read(
     bad = tmp_path / "table.json"
     bad.write_text("{not json", encoding="utf-8")
     monkeypatch.setattr(spend, "_table", None)
-    monkeypatch.setattr("maljan.core.paths.resolve_data", lambda _p: bad)
+    monkeypatch.setattr("malspark.core.paths.resolve_data", lambda _p: bad)
     meter = spend.SpendMeter(10.0)
     assert meter.price_of("some-model") is None
     meter._note_unpriced("some-model")

@@ -20,9 +20,9 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 from pydantic import ValidationError
 
-from maljan.core.config import AgentLLMConfig, Settings
-from maljan.core.model_assignments import assignments_for, model_label
-from maljan.llm.fallback import (
+from malspark.core.config import AgentLLMConfig, Settings
+from malspark.core.model_assignments import assignments_for, model_label
+from malspark.llm.fallback import (
     FALLBACK_KEY,
     MODEL_KEY,
     FallbackChatModel,
@@ -262,15 +262,15 @@ class TestEveryModelOnTheListIsAModelTheRunCalls:
         assert model_label("anthropic", "claude", "the Anthropic API") == "anthropic/claude"
 
     def test_the_window_is_asked_of_the_fallback_too(self) -> None:
-        from maljan.core.model_assignments import assignments_for
-        from maljan.llm.context_window import _questions
+        from malspark.core.model_assignments import assignments_for
+        from malspark.llm.context_window import _questions
 
         settings = _settings_with_fallbacks()
         asked = _questions(settings, assignments_for(settings, ["static"]))
         assert {q["model"] for q in asked} == {"qwen", "gemma"}
 
     def test_the_salvage_is_sized_for_the_smallest_declared_window(self) -> None:
-        from maljan.agents.base_agent import _model_context_tokens
+        from malspark.agents.base_agent import _model_context_tokens
 
         settings = _settings_with_fallbacks()
         settings.llm.openai.context_size = 131072
@@ -282,7 +282,7 @@ class TestTheRegistryBuildsTheList:
     def test_an_entry_with_fallbacks_is_one_model_that_holds_them_all(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.llm import registry as reg
+        from malspark.llm import registry as reg
 
         built: list[tuple[str, str]] = []
 
@@ -309,7 +309,7 @@ class TestTheRegistryBuildsTheList:
     def test_an_entry_without_fallbacks_is_the_plain_model(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.llm import registry as reg
+        from malspark.llm import registry as reg
 
         class _Provider:
             def __init__(self, config: Any) -> None:
@@ -429,7 +429,7 @@ class TestAWrappedLocalServerIsNotSentStructuredOutput:
         return local, hosted
 
     def test_either_order_answers_as_the_local_server_would(self) -> None:
-        from maljan.llm.registry import structured_output_supported
+        from malspark.llm.registry import structured_output_supported
 
         settings = Settings()
         settings.llm.provider = "anthropic"
@@ -440,7 +440,7 @@ class TestAWrappedLocalServerIsNotSentStructuredOutput:
             assert structured_output_supported(settings, chain) is False
 
     def test_a_list_of_hosted_models_keeps_structured_output(self) -> None:
-        from maljan.llm.registry import structured_output_supported
+        from malspark.llm.registry import structured_output_supported
 
         _local, hosted = self._models()
         chain = FallbackChatModel(models=[hosted, hosted], labels=["a", "b"], agent="judge")
@@ -448,8 +448,8 @@ class TestAWrappedLocalServerIsNotSentStructuredOutput:
 
 
 def test_an_ollama_model_is_built_with_a_request_timeout() -> None:
-    from maljan.llm.ollama_provider import OllamaProvider
-    from maljan.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
+    from malspark.llm.ollama_provider import OllamaProvider
+    from malspark.llm.registry import PROVIDER_REQUEST_TIMEOUT_SECONDS
 
     model = OllamaProvider(Settings()).build_model("gemma", 0.1)
     assert model.client_kwargs["timeout"] == PROVIDER_REQUEST_TIMEOUT_SECONDS
@@ -460,8 +460,8 @@ class TestTheDeadlineIsTheLoopsOwn:
         """An ask's clock, far shorter than the agent's own budget, sets the deadline."""
         from unittest.mock import MagicMock
 
-        from maljan.agents.base_agent import BaseAnalyst, BudgetCeiling
-        from maljan.core.token_ledger import TokenLedger
+        from malspark.agents.base_agent import BaseAnalyst, BudgetCeiling
+        from malspark.core.token_ledger import TokenLedger
 
         class _Analyst(BaseAnalyst):
             def analyze(self, data: str) -> str:  # pragma: no cover - unused
@@ -533,7 +533,7 @@ class TestTheDeadlineIsTheLoopsOwn:
         assert chain._deadline(1) is None, "the last model is bounded by the loop"
 
     def test_a_deadline_with_a_fraction_prints_it(self) -> None:
-        from maljan.llm.fallback import _duration
+        from malspark.llm.fallback import _duration
 
         assert _duration(1.5) == "1.5 s"
         assert _duration(90.0) == "90 s"
@@ -552,7 +552,7 @@ def test_an_abandoned_stall_does_not_hold_up_the_process_exit() -> None:
         from langchain_core.language_models.chat_models import BaseChatModel
         from langchain_core.language_models.fake_chat_models import FakeListChatModel
         from langchain_core.messages import HumanMessage
-        from maljan.llm.fallback import FallbackChatModel
+        from malspark.llm.fallback import FallbackChatModel
 
         class Stalls(BaseChatModel):
             @property
@@ -584,7 +584,7 @@ class TestRetryAfter:
         from datetime import UTC, datetime, timedelta
         from email.utils import format_datetime
 
-        from maljan.llm.fallback import retry_after_seconds
+        from malspark.llm.fallback import retry_after_seconds
 
         when = format_datetime(datetime.now(UTC) + timedelta(seconds=10), usegmt=True)
         response = httpx.Response(503, request=_request(), headers={"retry-after": when})
@@ -595,7 +595,7 @@ class TestRetryAfter:
         from datetime import UTC, datetime, timedelta
         from email.utils import format_datetime
 
-        from maljan.llm.fallback import retry_after_seconds
+        from malspark.llm.fallback import retry_after_seconds
 
         when = format_datetime(datetime.now(UTC) + timedelta(minutes=5), usegmt=True)
         response = httpx.Response(503, request=_request(), headers={"retry-after": when})
@@ -605,9 +605,9 @@ class TestRetryAfter:
 class TestAFallbackAttemptIsAdmittedAtItsOwnPrice:
     @staticmethod
     def _list(ceiling: float, prices: dict[str, Any]) -> tuple[FallbackChatModel, Any, list[Any]]:
-        from maljan.core.spend import SpendMeter
-        from maljan.core.token_ledger import TokenLedger
-        from maljan.llm.context_window import OutputCap, record_built_cap
+        from malspark.core.spend import SpendMeter
+        from malspark.core.token_ledger import TokenLedger
+        from malspark.llm.context_window import OutputCap, record_built_cap
 
         ledger = TokenLedger(spend=SpendMeter(ceiling, prices, table={}))
         down = APIConnectionError(request=_request())
@@ -661,7 +661,7 @@ class TestAFallbackAttemptIsAdmittedAtItsOwnPrice:
     def test_a_fallback_the_ceiling_cannot_pay_for_is_not_called_and_says_what_is_left(
         self,
     ) -> None:
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         chain, ledger, seen = self._list(0.011, self.SECOND_DEAR)
         slot = object()
@@ -683,7 +683,7 @@ class TestAFallbackAttemptIsAdmittedAtItsOwnPrice:
         assert list(ledger.spend._reserved) == [slot], "the attempt holds nothing of its own"
 
     def test_an_unpriced_primary_does_not_let_a_paid_fallback_ignore_the_ceiling(self) -> None:
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         # Only the second model has a price: the first reserves nothing.
         prices = {"second": self.SECOND_DEAR["second"]}
@@ -713,7 +713,7 @@ class TestAFallbackAttemptIsAdmittedAtItsOwnPrice:
         assert not ledger.spend._reserved
 
     def test_the_async_path_admits_too(self) -> None:
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         chain, ledger, seen = self._list(0.011, self.SECOND_DEAR)
         self._admit(ledger, object())
@@ -724,8 +724,8 @@ class TestAFallbackAttemptIsAdmittedAtItsOwnPrice:
     def test_a_loop_s_binding_carries_its_turn_s_admission(self) -> None:
         import contextvars
 
-        from maljan.core.spend import SpendCeilingStop, current_admission
-        from maljan.llm.fallback import ADMISSION_KEY
+        from malspark.core.spend import SpendCeilingStop, current_admission
+        from malspark.llm.fallback import ADMISSION_KEY
 
         chain, ledger, seen = self._list(0.011, self.SECOND_DEAR)
         self._admit(ledger, object())
@@ -743,7 +743,7 @@ class TestAFallbackAttemptIsAdmittedAtItsOwnPrice:
     def test_concurrent_calls_on_one_list_are_each_admitted_by_their_own(self) -> None:
         import threading
 
-        from maljan.core.spend import SpendCeilingStop
+        from malspark.core.spend import SpendCeilingStop
 
         chain, ledger, _seen = self._list(0.011, self.SECOND_DEAR)
         outcomes: dict[str, str] = {}

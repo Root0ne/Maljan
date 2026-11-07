@@ -1,4 +1,4 @@
-"""Maljan API — Middleware package."""
+"""Malspark API — Middleware package."""
 
 from app.middleware.logging_middleware import RequestLoggingMiddleware
 from app.middleware.rate_limit_middleware import RateLimitMiddleware

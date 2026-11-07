@@ -30,7 +30,7 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import create_model
 
-from maljan.agents.tool_pinning import DELIVERY_TOOLS, names_the_sample, pin_paths
+from malspark.agents.tool_pinning import DELIVERY_TOOLS, names_the_sample, pin_paths
 
 ROOT = Path(__file__).resolve().parents[3]
 SIDECARS = {
@@ -129,7 +129,7 @@ def _as_langchain_tool(
         description=description or name,
         args_schema=schema,
         infer_schema=False,
-        metadata={"maljan_server": server},
+        metadata={"malspark_server": server},
     )
 
 
@@ -222,7 +222,7 @@ class TestTheQualifiedArgumentForACarvedFile:
 
     def test_the_pin_leaves_it_alone(self) -> None:
         """It is qualified, so it is the model's to give and is never overwritten."""
-        from maljan.agents.tool_pinning import names_the_sample
+        from malspark.agents.tool_pinning import names_the_sample
 
         assert names_the_sample(CARVED) is False
 

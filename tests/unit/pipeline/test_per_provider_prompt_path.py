@@ -13,8 +13,8 @@ import json
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.loaders.binary_chunker import TextChunk
-from maljan.pipeline.nodes import _augment_static_chunks_with_path
+from malspark.loaders.binary_chunker import TextChunk
+from malspark.pipeline.nodes import _augment_static_chunks_with_path
 from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
@@ -64,7 +64,7 @@ def test_a_provider_with_no_mirror_of_its_own_falls_back_to_the_global_path():
 
 def test_the_node_shows_a_clone_on_r2_the_r2_mirror():
     """Through the real node factory, the way a two-provider profile runs."""
-    from maljan.pipeline.nodes import make_stage_agent_node
+    from malspark.pipeline.nodes import make_stage_agent_node
 
     agent = MagicMock()
     agent._resolved.static_provider_id = "r2"

@@ -31,7 +31,7 @@ _INTERPRETER_MISSING = not sys.executable or not shutil.which(sys.executable)
 
 
 def _live_pids() -> set[int]:
-    from maljan.providers.servers import _own_child_pids
+    from malspark.providers.servers import _own_child_pids
 
     return _own_child_pids()
 
@@ -59,8 +59,8 @@ class TestAFinishedJobHoldsNoSidecar:
 
     @staticmethod
     def _container(job_id: str, tmp_path: Path) -> Any:
-        from maljan.core.container import ServiceContainer
-        from maljan.core.settings_overrides import build_settings
+        from malspark.core.container import ServiceContainer
+        from malspark.core.settings_overrides import build_settings
 
         return ServiceContainer(
             build_settings({}), mock=True, samples_dir=str(tmp_path), job_id=job_id
@@ -74,7 +74,7 @@ class TestAFinishedJobHoldsNoSidecar:
         and one is a task another task cancels while it is awaiting. All three
         reach ``container.aclose()`` the way the worker's ``finally`` does.
         """
-        from maljan.providers import servers
+        from malspark.providers import servers
 
         container = self._container(job_id, tmp_path)
         spawned: set[int] = set()
@@ -114,7 +114,7 @@ class TestAFinishedJobHoldsNoSidecar:
 
     @pytest.mark.parametrize("outcome", ["success", "failure", "cancel"])
     def test_nothing_of_the_job_is_left_attached(self, tmp_path: Path, outcome: str) -> None:
-        from maljan.providers import servers
+        from malspark.providers import servers
 
         job_id = f"lifecycle-{outcome}"
 
@@ -136,7 +136,7 @@ class TestAFinishedJobHoldsNoSidecar:
         self._run(job_id, tmp_path, "success")
         gc.collect()
 
-        from maljan.providers import servers
+        from malspark.providers import servers
 
         assert [handle for handle in servers._LIVE_HANDLES if handle._job_id == job_id] == []
 
@@ -145,8 +145,8 @@ class _Handle:
     """A handle with children, without a transport to spawn them."""
 
     def __init__(self, name: str, pids: tuple[int, ...], loop: Any) -> None:
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.servers import ServerHandle
 
         self.inner = ServerHandle(name, MCPServerConfig(transport="stdio", command="/bin/true"))
         self.inner._owner_loop = loop
@@ -171,7 +171,7 @@ class TestTheReapPaysOneGraceForTheWholeSet:
         # imports is the one to watch.
         import time as time_module
 
-        from maljan.providers import servers
+        from malspark.providers import servers
 
         slept: list[float] = []
         monkeypatch.setattr(time_module, "sleep", slept.append)
@@ -180,7 +180,7 @@ class TestTheReapPaysOneGraceForTheWholeSet:
         return slept
 
     def test_one_sleep_for_many_handles(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.providers import servers
+        from malspark.providers import servers
 
         loop = asyncio.new_event_loop()
         try:
@@ -218,7 +218,7 @@ class TestTheReapPaysOneGraceForTheWholeSet:
         try:
             [_Handle(f"r{index}", (9100 + index,), loop) for index in range(8)]
 
-            with caplog.at_level(logging.ERROR, logger="maljan"):
+            with caplog.at_level(logging.ERROR, logger="malspark"):
                 self._retire([], loop, monkeypatch)
 
             abandoned = [rec for rec in caplog.records if "retired" in rec.getMessage()]
@@ -246,7 +246,7 @@ class TestTheReapPaysOneGraceForTheWholeSet:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The watchdog stands down once pytest has closed its streams."""
-        from maljan.providers import servers
+        from malspark.providers import servers
 
         loop = asyncio.new_event_loop()
         try:

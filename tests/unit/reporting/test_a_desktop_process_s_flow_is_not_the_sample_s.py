@@ -26,11 +26,11 @@ from typing import Any
 
 import pytest
 
-from maljan.reporting.builder import MalwareReportBuilder, build_consolidated_iocs
-from maljan.reporting.detection_signatures import build_detection_rules
-from maljan.reporting.ledger_projection import network_from_ledger
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.reporting.builder import MalwareReportBuilder, build_consolidated_iocs
+from malspark.reporting.detection_signatures import build_detection_rules
+from malspark.reporting.ledger_projection import network_from_ledger
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers.stix_renderer import (
     FLOW_OUTSIDE_THE_TREE,
     MARKED_ONLY_PROCESS,
     ExtendedSTIXRenderer,
@@ -38,9 +38,9 @@ from maljan.reporting.renderers.stix_renderer import (
     publish_answer,
     publishes,
 )
-from maljan.schemas.evidence import build_entry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.sandbox_report import triage_overview_to_sandbox_report
+from malspark.schemas.evidence import build_entry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.sandbox_report import triage_overview_to_sandbox_report
 
 SHA256 = "6091f2589fef42e0ab3d7975806cd8a0da012b519637c03b73f702f7586b21ef"
 DESKTOP_ADDRESS = "20.67.186.184"

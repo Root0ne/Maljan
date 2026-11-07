@@ -21,11 +21,11 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 
-from maljan.agents import delegation
-from maljan.agents.base_agent import BudgetCeiling, LoopBudget
-from maljan.agents.composition import ResolvedAgent
-from maljan.agents.configurable_analyst import ConfigurableAnalyst
-from maljan.agents.delegation import (
+from malspark.agents import delegation
+from malspark.agents.base_agent import BudgetCeiling, LoopBudget
+from malspark.agents.composition import ResolvedAgent
+from malspark.agents.configurable_analyst import ConfigurableAnalyst
+from malspark.agents.delegation import (
     TEAM_SERVER,
     DelegationRefused,
     _brief_callee,
@@ -35,8 +35,8 @@ from maljan.agents.delegation import (
     refusal,
     tool_name,
 )
-from maljan.core.config import Settings
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.core.config import Settings
+from malspark.schemas.evidence import EvidenceCounter
 
 HELPER_REPORT = (
     "CLAIM: the sample opens a raw socket\nEVIDENCE: ev_0001\nCONFIDENCE: 0.7\nTECHNIQUE: T1095\n"
@@ -219,7 +219,7 @@ class TestTheToolIsBoundWhereTheDefinitionAsks:
         fields = tool.args_schema.model_fields
         assert fields["task"].is_required()
         assert not fields["context"].is_required()
-        assert tool.metadata["maljan_server"] == TEAM_SERVER
+        assert tool.metadata["malspark_server"] == TEAM_SERVER
 
 
 class TestAnAskThroughTheRealLoop:
@@ -259,7 +259,7 @@ class TestAnAskThroughTheRealLoop:
     def test_the_callee_s_artifacts_travel_with_its_ledger(self) -> None:
         """Only the text crosses back to the model; the structured channel needs carrying."""
         helper_answer = (
-            "```maljan-findings\n"
+            "```malspark-findings\n"
             '{"findings": [{"title": "raw socket", "evidence_ids": ["ev_0001"]}], '
             '"artifacts": [{"kind": "endpoints", "value": "1.2.3.4:443", '
             '"evidence_ids": ["ev_0001"]}]}\n'
@@ -416,7 +416,7 @@ class TestAnAskThroughTheRealLoop:
         assert seen[0] == (None, None)
 
     def test_a_short_caller_clock_still_cuts_the_ask(self) -> None:
-        from maljan.agents.delegation import _what_this_ask_gets
+        from malspark.agents.delegation import _what_this_ask_gets
 
         container = _team([], [])
         container.config.agents.delegation_steps = 12
@@ -429,7 +429,7 @@ class TestAnAskThroughTheRealLoop:
         assert ceiling.seconds is not None and 1 <= ceiling.seconds <= 60 - 15 + 1
 
     def test_a_caller_clock_cuts_an_ask_with_no_budget_of_its_own(self) -> None:
-        from maljan.agents.delegation import _what_this_ask_gets
+        from malspark.agents.delegation import _what_this_ask_gets
 
         container = _team([], [])
         ceiling = _what_this_ask_gets(container, LoopBudget(max_steps=None, timeout=60.0))
@@ -438,7 +438,7 @@ class TestAnAskThroughTheRealLoop:
         assert ceiling.seconds is not None and 1 <= ceiling.seconds <= 60 - 15 + 1
 
     def test_no_caller_clock_and_no_ask_budget_is_no_ceiling_at_all(self) -> None:
-        from maljan.agents.delegation import _what_this_ask_gets
+        from malspark.agents.delegation import _what_this_ask_gets
 
         container = _team([], [])
         ceiling = _what_this_ask_gets(container, LoopBudget(max_steps=None, timeout=None))
@@ -525,7 +525,7 @@ class TestTheGuards:
 
     def test_a_refusal_reaches_the_model_as_one_failed_ledger_entry(self) -> None:
         """What the model reads is the recorder's, not an exception the loop survives."""
-        from maljan.agents.evidence_recorder import EvidenceRecorder, record_tools
+        from malspark.agents.evidence_recorder import EvidenceRecorder, record_tools
 
         container = _team([], [])
         recorder = EvidenceRecorder("boss", stage="lead")
@@ -741,7 +741,7 @@ class TestTheGuards:
 
     def test_a_profile_with_nothing_to_call_binds_no_ask_tool(self) -> None:
         """``exclude_servers: ['*']`` is the tool-free baseline, delegation included."""
-        from maljan.agents.composition import _agent_tools
+        from malspark.agents.composition import _agent_tools
 
         container = _Container(
             _settings(profiles={"led": {"stages": _stages(), "exclude_servers": ["*"]}}),
@@ -764,7 +764,7 @@ class TestTheCeiling:
         assert helper._loop_limits() == (300, 12)
 
     def test_the_seeded_lead_has_room_for_several_asks(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         seeded = Settings(_env_file=None)
         lead = seeded.agents.definitions["lead"]
@@ -782,7 +782,7 @@ class TestTheCeiling:
         operator edits, so a clone of the lead arrived with five specialists
         to ask and the deployment's default ten steps to do it in.
         """
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         seeded = Settings(_env_file=None)
 
@@ -796,7 +796,7 @@ class TestTheCeiling:
         that makes a lead stop asking and close with no techniques, whatever
         the budget underneath it does.
         """
-        from maljan.agents.prompts import LEAD_PROMPT
+        from malspark.agents.prompts import LEAD_PROMPT
 
         described = next(
             t for t in team.get_agent("boss").tools if t.name == tool_name("helper")
@@ -854,7 +854,7 @@ class TestACalleeAtItsCapWritesUpWhatItHas:
         assert isr is not None
 
     def test_a_callee_s_recursion_limit_is_the_delegation_s_steps(self) -> None:
-        from maljan.agents.delegation import _what_this_ask_gets
+        from malspark.agents.delegation import _what_this_ask_gets
 
         container = _team([], [])
         container.config.agents.delegation_steps = 7
@@ -975,7 +975,7 @@ class TestOneAgentDoesOneThingAtATime:
             holder.join(timeout=5)
 
     def test_the_wait_is_what_the_caller_can_spare(self) -> None:
-        from maljan.agents.delegation import SECONDS_WAITING_OUTSIDE_A_LOOP, _seconds_to_wait_for
+        from malspark.agents.delegation import SECONDS_WAITING_OUTSIDE_A_LOOP, _seconds_to_wait_for
 
         container = _team([], [])
         boss = container.get_agent("boss")
@@ -1000,7 +1000,7 @@ class TestOneAgentDoesOneThingAtATime:
 
 class TestACalleeNeverOutlivesItsCaller:
     def test_the_hard_cap_is_the_ceiling_when_the_ceiling_is_the_shorter(self) -> None:
-        from maljan.agents.base_agent import hard_cap
+        from malspark.agents.base_agent import hard_cap
 
         assert hard_cap(120.0) == 150.0
         assert hard_cap(45.0, BudgetCeiling(steps=4, seconds=45.7)) == 45.7
@@ -1009,8 +1009,8 @@ class TestACalleeNeverOutlivesItsCaller:
 
     def test_a_caller_whose_loop_ended_is_not_given_the_record(self) -> None:
         """Its node has already drained it; appending now loses the entries or repeats them."""
-        from maljan.agents.delegation import _hand_over_the_record
-        from maljan.schemas.evidence import build_entry
+        from malspark.agents.delegation import _hand_over_the_record
+        from malspark.schemas.evidence import build_entry
 
         container = _team([], [])
         boss = container.get_agent("boss")
@@ -1080,7 +1080,7 @@ class TestTheLoopBudget:
 
 class TestTheNodeBriefsALeadLikeAStaticAgent:
     def test_the_lead_role_is_sample_fed_and_keeps_the_path_choices(self) -> None:
-        from maljan.pipeline.nodes import SAMPLE_FED_ROLES, _pin_sample_path
+        from malspark.pipeline.nodes import SAMPLE_FED_ROLES, _pin_sample_path
 
         assert "lead" in SAMPLE_FED_ROLES and "generic" in SAMPLE_FED_ROLES
         container = _team([], [])
@@ -1097,7 +1097,7 @@ class TestTheNodeBriefsALeadLikeAStaticAgent:
         assert boss.sample_path_choices["static"] == "/mirror/s.bin"
 
     def test_a_callee_opens_its_own_provider_s_mirror(self) -> None:
-        from maljan.agents.delegation import _brief_callee
+        from malspark.agents.delegation import _brief_callee
 
         container = _team([], [])
         boss = container.get_agent("boss")
@@ -1127,7 +1127,7 @@ class TestAHandedOverRowStaysWithinTheBound:
     """
 
     def test_one_level_reads_as_it_always_did(self) -> None:
-        from maljan.agents.delegation import joined_within_the_bound
+        from malspark.agents.delegation import joined_within_the_bound
 
         assert joined_within_the_bound(["scout"], "the id cites no evidence") == (
             "scout: the id cites no evidence",
@@ -1135,7 +1135,7 @@ class TestAHandedOverRowStaysWithinTheBound:
         )
 
     def test_no_route_leaves_the_sentence_alone(self) -> None:
-        from maljan.agents.delegation import joined_within_the_bound
+        from malspark.agents.delegation import joined_within_the_bound
 
         assert joined_within_the_bound([], "the id cites no evidence") == (
             "the id cites no evidence",
@@ -1143,7 +1143,7 @@ class TestAHandedOverRowStaysWithinTheBound:
         )
 
     def test_a_chain_stays_under_the_limit(self) -> None:
-        from maljan.agents.delegation import HANDED_OVER_LIMIT, joined_within_the_bound
+        from malspark.agents.delegation import HANDED_OVER_LIMIT, joined_within_the_bound
 
         sentence = "the technique id cites no evidence id from this run. " * 12
         assert len(sentence) < HANDED_OVER_LIMIT
@@ -1153,7 +1153,7 @@ class TestAHandedOverRowStaysWithinTheBound:
             assert len(message) <= HANDED_OVER_LIMIT
 
     def test_the_finding_s_own_sentence_survives_the_cut(self) -> None:
-        from maljan.agents.delegation import joined_within_the_bound
+        from malspark.agents.delegation import joined_within_the_bound
 
         sentence = "the technique id cites no evidence id from this run. " * 12
         route: tuple[str, ...] = ()
@@ -1164,7 +1164,7 @@ class TestAHandedOverRowStaysWithinTheBound:
         assert message.endswith(sentence)
 
     def test_the_innermost_names_are_the_ones_kept(self) -> None:
-        from maljan.agents.delegation import ELIDED_CHAIN, joined_within_the_bound
+        from malspark.agents.delegation import ELIDED_CHAIN, joined_within_the_bound
 
         sentence = "x" * 770
         route: tuple[str, ...] = ()
@@ -1179,7 +1179,7 @@ class TestAHandedOverRowStaysWithinTheBound:
         assert message.endswith(sentence)
 
     def test_a_sentence_over_the_bound_keeps_every_character_of_itself(self) -> None:
-        from maljan.agents.delegation import (
+        from malspark.agents.delegation import (
             ELIDED_CHAIN,
             HANDED_OVER_LIMIT,
             joined_within_the_bound,
@@ -1196,7 +1196,7 @@ class TestAHandedOverRowStaysWithinTheBound:
 
     def test_a_sentence_that_opens_with_an_identifier_keeps_it(self) -> None:
         """The reviewer's two lengths: the shapes that lost ``T1055: ``."""
-        from maljan.agents.delegation import joined_within_the_bound
+        from malspark.agents.delegation import joined_within_the_bound
 
         for length in (805, 850):
             sentence = "T1055: the technique id cites no evidence id from this run. "
@@ -1209,7 +1209,7 @@ class TestAHandedOverRowStaysWithinTheBound:
             assert "T1055: " in message, length
 
     def test_a_sentence_full_of_colons_is_never_read_as_a_route(self) -> None:
-        from maljan.agents.delegation import joined_within_the_bound
+        from malspark.agents.delegation import joined_within_the_bound
 
         sentence = "a: b: c: the finding's own words"
 
@@ -1219,7 +1219,7 @@ class TestAHandedOverRowStaysWithinTheBound:
         assert route == ("scout",)
 
     def test_the_marker_is_there_whenever_anything_was_elided(self) -> None:
-        from maljan.agents.delegation import ELIDED_CHAIN, joined_within_the_bound
+        from malspark.agents.delegation import ELIDED_CHAIN, joined_within_the_bound
 
         sentence = "z" * 780
         message, route = joined_within_the_bound(["alpha", "bravo", "charlie"], sentence)
@@ -1235,7 +1235,7 @@ class TestAWaitWithNoClock:
     def test_two_agents_asking_each_other_are_both_refused_rather_than_stuck(self) -> None:
         from types import SimpleNamespace
 
-        from maljan.agents.delegation import _held_unless_waiting_on_each_other
+        from malspark.agents.delegation import _held_unless_waiting_on_each_other
 
         first = SimpleNamespace(name="first", delegation_lock=threading.Lock())
         second = SimpleNamespace(name="second", delegation_lock=threading.Lock())
@@ -1268,7 +1268,7 @@ class TestAWaitWithNoClock:
     def test_a_busy_callee_that_frees_up_is_waited_for(self) -> None:
         from types import SimpleNamespace
 
-        from maljan.agents.delegation import _held_unless_waiting_on_each_other
+        from malspark.agents.delegation import _held_unless_waiting_on_each_other
 
         caller = SimpleNamespace(name="caller")
         callee = SimpleNamespace(name="callee", delegation_lock=threading.Lock())

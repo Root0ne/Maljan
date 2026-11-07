@@ -23,7 +23,7 @@ from alembic.runtime.migration import MigrationContext
 
 from app.schemas.evidence import EvidenceEntryResponse
 from app.worker.analysis_worker import _evidence_row
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 
 _REV = (
     Path(__file__).resolve().parents[3]

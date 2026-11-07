@@ -14,10 +14,10 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.pipeline import sandbox_status as status
-from maljan.pipeline.triage_pack import PIPELINE, render_pack, run_pack
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.pipeline import sandbox_status as status
+from malspark.pipeline.triage_pack import PIPELINE, render_pack, run_pack
+from malspark.schemas.evidence import EvidenceCounter
 from tests.unit.pipeline.test_triage_pack import SANDBOX_REPORT, _inputs, _write
 from tests.unit.tools.test_binary import _pe
 
@@ -123,8 +123,8 @@ class TestThePack:
 
 class TestTheProviderMarksAFixture:
     def _run(self, raw: dict[str, Any], provider: str, source_format: str) -> dict[str, Any]:
-        from maljan.providers.sandbox.readers import required_reader
-        from maljan.schemas.sandbox_document import sandbox_document
+        from malspark.providers.sandbox.readers import required_reader
+        from malspark.schemas.sandbox_document import sandbox_document
 
         report = required_reader(source_format).read(raw, provider=provider, task_id="1")
         return sandbox_document(report)
@@ -152,14 +152,14 @@ class TestTheProviderMarksAFixture:
 class TestTheDegradationReason:
     @pytest.mark.parametrize("report", [None, {}])
     def test_no_report_keeps_its_reason(self, report: Any) -> None:
-        from maljan.pipeline.nodes import sandbox_degradation_reason
+        from malspark.pipeline.nodes import sandbox_degradation_reason
 
         assert sandbox_degradation_reason(report) == (
             "no sandbox report (dynamic detonation unavailable) — static-only evidence"
         )
 
     def test_a_stand_in_report_is_the_same_absence(self) -> None:
-        from maljan.pipeline.nodes import sandbox_degradation_reason
+        from malspark.pipeline.nodes import sandbox_degradation_reason
 
         reason = sandbox_degradation_reason(SYNTHETIC)
 
@@ -169,14 +169,14 @@ class TestTheDegradationReason:
 
     @pytest.mark.parametrize("report", [FIXTURE, SANDBOX_REPORT])
     def test_a_report_with_contents_is_no_degradation(self, report: Any) -> None:
-        from maljan.pipeline.nodes import sandbox_degradation_reason
+        from malspark.pipeline.nodes import sandbox_degradation_reason
 
         assert sandbox_degradation_reason(report) is None
 
 
 class TestTheRunSummary:
     def _summary(self, report: Any) -> Any:
-        from maljan.analysis.run_summary import RunSummaryBuilder
+        from malspark.analysis.run_summary import RunSummaryBuilder
 
         return RunSummaryBuilder(start_time=0.0).set_sandbox(report).build()
 
@@ -205,8 +205,8 @@ class TestTheRunSummary:
 
 class TestTheReportSection:
     def test_the_status_entry_is_a_sandbox_section_of_its_own(self) -> None:
-        from maljan.reporting.ledger_report import build_sections
-        from maljan.schemas.evidence import build_entry, format_entry_id
+        from malspark.reporting.ledger_report import build_sections
+        from malspark.schemas.evidence import build_entry, format_entry_id
 
         statement = status.sandbox_status(SYNTHETIC).statement
         entry = build_entry(
@@ -230,8 +230,8 @@ class TestTheReportSection:
 
 def _run_summary_text(run_summary: dict) -> str:
     """The report's run-summary appendix for a report carrying ``run_summary``."""
-    from maljan.reporting.models import MalwareReport
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.models import MalwareReport
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     report = MalwareReport.model_validate(
         {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}

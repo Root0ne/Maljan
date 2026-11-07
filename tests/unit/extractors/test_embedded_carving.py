@@ -18,8 +18,8 @@ payload to the YARA scan, which is where most of the value was.
 
 from __future__ import annotations
 
-from maljan.extractors.pe_extractor import _carve_embedded, carve_payloads
-from maljan.reporting.models import PESection
+from malspark.extractors.pe_extractor import _carve_embedded, carve_payloads
+from malspark.reporting.models import PESection
 
 _PE_MAGIC = b"MZ\x90\x00"
 
@@ -98,7 +98,7 @@ class TestCarvingDoesNotInventFindings:
         assert [r["left_out"] for r in rows if not r["carved"]] == [52]
 
     def test_an_oversized_input_is_skipped(self) -> None:
-        from maljan.extractors import pe_extractor
+        from malspark.extractors import pe_extractor
 
         assert _carve_embedded(b"MZ" * (pe_extractor._MAX_CARVE_INPUT // 2 + 8), []) == []
 
@@ -126,7 +126,7 @@ class TestTheYaraMatchRemembersWhereItFired:
     def test_a_carved_hit_is_labelled(self) -> None:
         """'This dropper carries Emotet' and 'this is Emotet' are different
         claims, and the second one is an attribution error."""
-        from maljan.analysis.yara_layer import YaraMatch
+        from malspark.analysis.yara_layer import YaraMatch
 
         hit = YaraMatch(
             rule_id="emotet_stage2",
@@ -139,7 +139,7 @@ class TestTheYaraMatchRemembersWhereItFired:
         assert "[overlay+0x1a400]" in hit.evidence_ref
 
     def test_a_sample_hit_is_not_labelled(self) -> None:
-        from maljan.analysis.yara_layer import YaraMatch
+        from malspark.analysis.yara_layer import YaraMatch
 
         hit = YaraMatch(rule_id="r", technique_id="T1055", confidence=0.9, description="d")
         assert not hit.evidence_ref.startswith("[")

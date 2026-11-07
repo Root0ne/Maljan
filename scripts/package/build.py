@@ -30,7 +30,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+from malspark.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 
 
 def build(

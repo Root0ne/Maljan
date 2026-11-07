@@ -65,7 +65,7 @@ export const EVIDENCE_BUNDLE_JSON = "evidence-bundle.json";
 /**
  * The file names the console's downloads have always had, kept as they were
  * when the downloads moved into this menu: a script that picks up
- * `maljan-<hash>-mitre.json` or `maljan-stix-bundle.json` keeps working.
+ * `malspark-<hash>-mitre.json` or `malspark-stix-bundle.json` keeps working.
  * Only the full-analysis JSON is new to the menu and named here first.
  *
  * The evidence bundle is saved under exactly the names the analyst report
@@ -83,7 +83,7 @@ export function exportFileNames(baseName: string) {
     stixDraft: STIX_DRAFT_FILE,
     misp: `${baseName}-misp.json`,
     attackLayer: NAVIGATOR_LAYER_FILE,
-    rules: (kind: DetectionKind) => `maljan-${kind}.${RULE_EXT[kind]}`,
+    rules: (kind: DetectionKind) => `malspark-${kind}.${RULE_EXT[kind]}`,
     report: `${baseName}-report.json`,
     techniques: `${baseName}-mitre.json`,
     timeline: `${baseName}-timeline.json`,
@@ -110,7 +110,7 @@ export function ruleKinds(mr: MalwareReport | null | undefined): DetectionKind[]
 /**
  * The menu for one stored report.
  *
- * `baseName` starts the report's own file names ("maljan-9f86d081884c"), so a
+ * `baseName` starts the report's own file names ("malspark-9f86d081884c"), so a
  * folder of downloads sorts by sample (`exportFileNames`). `storedStix` is the
  * bundle the report record carries, downloaded when the STIX endpoint fails.
  */

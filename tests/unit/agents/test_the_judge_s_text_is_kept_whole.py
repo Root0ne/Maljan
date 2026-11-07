@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import JudgeAgent
+from malspark.agents.judge_agent import JudgeAgent
 
 _LONG = "\n".join(f"Line {n}: the reasoning goes on about the sample." for n in range(200))
 
@@ -27,7 +27,7 @@ class TestTheFallbackVerdictKeepsTheJudgesText:
         malware = next(
             o for o in bundle.model_dump(mode="json")["objects"] if o["type"] == "malware"
         )
-        assert malware["x_maljan_fallback_reasoning"] == text
+        assert malware["x_malspark_fallback_reasoning"] == text
 
     def test_a_note_carries_the_reasoning_whole(self) -> None:
         text = f"Verdict: Suspicious.\n{_LONG}"
@@ -37,7 +37,7 @@ class TestTheFallbackVerdictKeepsTheJudgesText:
 
         objects = bundle.model_dump(mode="json").get("objects") or []
         notes = [o for o in objects if o["type"] == "note"]
-        stored = notes[0]["content"] if notes else bundle.x_maljan_fallback_verdict.reasoning
+        stored = notes[0]["content"] if notes else bundle.x_malspark_fallback_verdict.reasoning
         assert stored == text
 
 

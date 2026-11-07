@@ -97,7 +97,7 @@ class TestTheReportNodeOffloadsItsSynchronousWork:
         """`collect_evidence` shells out to capa under a 900s budget, and
         `build_deterministic` walks every report section; both used to run on
         the loop, back to back, in the phase the heartbeat went quiet in."""
-        from maljan.pipeline import nodes
+        from malspark.pipeline import nodes
 
         source = inspect.getsource(nodes.make_report_node)
         for call in ("collect_evidence", "build_deterministic"):
@@ -111,8 +111,8 @@ class TestTheSandboxStageOffloadsItsSynchronousClient:
         provider's completion budget allows. Called bare from
         `_submit_to_sandbox`, that is the worker's loop stopped for the whole
         detonation."""
-        from maljan.app import MaljanApp
+        from malspark.app import MalsparkApp
 
-        source = inspect.getsource(MaljanApp._submit_to_sandbox)
+        source = inspect.getsource(MalsparkApp._submit_to_sandbox)
         for call in ("client.submit(", "client.wait_for_completion(", "client.fetch_report("):
             _assert_offloaded(source, call)

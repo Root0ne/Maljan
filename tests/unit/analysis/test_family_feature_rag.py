@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from maljan.analysis.family_feature_rag import (
+from malspark.analysis.family_feature_rag import (
     build_family_fingerprint_text,
     build_rag_hint,
     build_sample_profile_text,
     retrieve_candidates,
     to_report_dicts,
 )
-from maljan.memory.family_fingerprint_index import FamilyCandidate
-from maljan.reporting.models import ImportRow, PESection, StaticAnalysis
+from malspark.memory.family_fingerprint_index import FamilyCandidate
+from malspark.reporting.models import ImportRow, PESection, StaticAnalysis
 
 
 def _static(**kw) -> StaticAnalysis:
@@ -100,7 +100,7 @@ class TestToReportDicts:
                 "malware_category": "rat",
                 "sample_count": 12,
                 "match_method": "family-feature-rag",
-                "source": "maljan-family-fingerprints",
+                "source": "malspark-family-fingerprints",
             }
         ]
 

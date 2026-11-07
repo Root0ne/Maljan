@@ -8,9 +8,9 @@ still counts every one, and a row left once reads as it always did.
 
 from __future__ import annotations
 
-from maljan.pipeline.validation import Violation, folded_rows, validation_metrics
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
+from malspark.pipeline.validation import Violation, folded_rows, validation_metrics
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
 
 CODE = "attck.claim_does_not_describe"
 
@@ -66,7 +66,7 @@ def test_section_13_lists_a_stored_repeated_row_once_with_its_count() -> None:
 
 
 def test_the_run_summary_counts_every_finding_left() -> None:
-    from maljan.analysis.run_summary import RunSummaryBuilder
+    from malspark.analysis.run_summary import RunSummaryBuilder
 
     same = _violation("CLAIM 'x' carries TECHNIQUE T1001.")
     other = _violation("CLAIM 'y' carries TECHNIQUE T1001.")

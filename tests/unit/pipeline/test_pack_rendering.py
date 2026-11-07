@@ -13,14 +13,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from maljan.pipeline.triage_pack import (
+from malspark.pipeline.triage_pack import (
     PACK_HEADING,
     PIPELINE,
     pack_block,
     pack_entries,
     render_pack,
 )
-from maljan.schemas.evidence import build_entry, format_entry_id
+from malspark.schemas.evidence import build_entry, format_entry_id
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "ledger"
 
@@ -359,7 +359,7 @@ class TestTheCut:
 
 class TestABudgetTrimmedEntry:
     def test_it_says_the_output_was_dropped_rather_than_recorded(self) -> None:
-        from maljan.schemas.evidence import apply_budget
+        from malspark.schemas.evidence import apply_budget
 
         entry = _entry("capa", '{"capabilities": [{"rule": "x"}]}')
         apply_budget([entry], 1)

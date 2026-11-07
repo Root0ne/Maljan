@@ -18,19 +18,19 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.function_map import INDEX_NOT_KEPT, function_artefacts
-from maljan.pipeline import function_claims as fc
-from maljan.pipeline.function_claims import (
+from malspark.agents.function_map import INDEX_NOT_KEPT, function_artefacts
+from malspark.pipeline import function_claims as fc
+from malspark.pipeline.function_claims import (
     FUNCTION_CLAIM_UNHELD_CODE,
     check_function_claims,
     function_facts,
     listed_functions,
     named_values,
 )
-from maljan.pipeline.validation import FUNCTION_QUESTION_ASK
-from maljan.schemas.evidence import LedgerEntry, not_shown_record
-from maljan.schemas.isr_models import ClaimEvidence
-from maljan.tools.artefact_index import SELF, row_line
+from malspark.pipeline.validation import FUNCTION_QUESTION_ASK
+from malspark.schemas.evidence import LedgerEntry, not_shown_record
+from malspark.schemas.isr_models import ClaimEvidence
+from malspark.tools.artefact_index import SELF, row_line
 
 BASE = 0x140000000
 MAIN = 0x2340
@@ -596,7 +596,7 @@ class TestTheWholeValueLookup:
         ],
     )
     def test_the_lookup_agrees_with_whole_value_in(self, value: str) -> None:
-        from maljan.agents._indicator_denylists import whole_value_in
+        from malspark.agents._indicator_denylists import whole_value_in
 
         lookup = fc._WholeTexts(self.TEXTS)
         within = frozenset(self.TEXTS)

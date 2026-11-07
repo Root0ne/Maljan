@@ -18,8 +18,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from maljan.core.config import _builtin_profiles
-from maljan.core.settings_annotations import GROUP_ORDER
+from malspark.core.config import _builtin_profiles
+from malspark.core.settings_annotations import GROUP_ORDER
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIGURATION = ROOT / "apps" / "docs" / "content" / "docs" / "configuration.mdx"

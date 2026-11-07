@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
-STATIC = ROOT / "src" / "maljan" / "providers" / "static"
+STATIC = ROOT / "src" / "malspark" / "providers" / "static"
 
 
 def _imported(path: Path) -> set[str]:
@@ -40,8 +40,8 @@ def test_a_declared_scan_imports_nothing_of_ghidra() -> None:
 
 
 def test_ghidra_s_pass_and_a_declared_scan_state_by_the_same_rule() -> None:
-    from maljan.analysis import anti_analysis
-    from maljan.providers.static.ghidra import passes
+    from malspark.analysis import anti_analysis
+    from malspark.providers.static.ghidra import passes
 
     assert passes.STATED_RULE is anti_analysis.STATED_RULE
     assert passes.read_findings is anti_analysis.read_findings
@@ -50,10 +50,10 @@ def test_ghidra_s_pass_and_a_declared_scan_state_by_the_same_rule() -> None:
 def test_a_declared_scan_reads_its_rows_with_ghidra_s_module_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.providers.static.declared_prepass import DeclaredScan
+    from malspark.providers.static.declared_prepass import DeclaredScan
 
-    # Importing ``maljan.providers.static.ghidra.passes`` now fails.
-    monkeypatch.setitem(sys.modules, "maljan.providers.static.ghidra.passes", None)
+    # Importing ``malspark.providers.static.ghidra.passes`` now fails.
+    monkeypatch.setitem(sys.modules, "malspark.providers.static.ghidra.passes", None)
     rows: list[dict[str, Any]] = [
         {
             "category": "suspicious_instruction",
@@ -66,7 +66,7 @@ def test_a_declared_scan_reads_its_rows_with_ghidra_s_module_absent(
         provider="acme", formats=frozenset({"pe"}), tool="scan_for_tricks", call=lambda: rows
     )
     answer = scan.anti_analysis()
-    from maljan.analysis.anti_analysis import STATED_RULE
+    from malspark.analysis.anti_analysis import STATED_RULE
 
     assert answer["how"] == STATED_RULE
     assert answer["server"] == "acme"
@@ -74,7 +74,7 @@ def test_a_declared_scan_reads_its_rows_with_ghidra_s_module_absent(
 
 
 def test_the_shared_submit_helpers_hold_no_sandbox_s_vocabulary() -> None:
-    from maljan.providers.sandbox import cape2, formats
+    from malspark.providers.sandbox import cape2, formats
 
     assert not hasattr(formats, "CAPE_PLATFORMS")
     assert not hasattr(formats, "cape_platform")

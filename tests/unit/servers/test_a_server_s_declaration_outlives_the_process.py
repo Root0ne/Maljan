@@ -32,25 +32,25 @@ from typing import Any
 
 import pytest
 
-from maljan.core import config as config_module
-from maljan.core import served_declarations as sd
-from maljan.core.config import Settings
-from maljan.core.declared_reading import (
+from malspark.core import config as config_module
+from malspark.core import served_declarations as sd
+from malspark.core.config import Settings
+from malspark.core.declared_reading import (
     builtin_tools,
     facts_record,
     routed_formats_of,
     shipped_by_name,
     ships_tool,
 )
-from maljan.core.pack_steps import PackStep, default_steps, effective_steps, server_steps
-from maljan.core.tool_declarations import (
+from malspark.core.pack_steps import PackStep, default_steps, effective_steps, server_steps
+from malspark.core.tool_declarations import (
     ToolDeclarations,
     ToolFacts,
     launch_identity,
     shipped_launch,
 )
-from maljan.providers import served_listing
-from maljan.providers.served_listing import unlisted as _unlisted
+from malspark.providers import served_listing
+from malspark.providers.served_listing import unlisted as _unlisted
 
 ROOT = Path(__file__).resolve().parents[3]
 CAPTURED = json.loads((ROOT / "tests" / "fixtures" / "own_server_tool_facts.json").read_text())
@@ -218,7 +218,7 @@ def test_two_names_of_one_program_in_one_place_are_one_launch(tmp_path: Path) ->
 def test_a_moved_trusted_built_in_is_read_through_its_block_by_every_reader(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.agents.prompt_tools import known_tool_names
+    from malspark.agents.prompt_tools import known_tool_names
 
     settings = Settings(_env_file=None)
     moved = settings.mcp.servers["analysis"].model_copy(
@@ -286,7 +286,7 @@ def test_before_its_first_listing_nothing_is_refused(fresh_install: Settings) ->
 
 
 def _reader_container(settings: Settings) -> Any:
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     servers = dict(settings.mcp.servers)
     servers["analysis"] = servers["analysis"].model_copy(
@@ -302,13 +302,13 @@ def _reader_container(settings: Settings) -> Any:
 
 def _readers() -> dict[str, Callable[[Settings], Any]]:
     """Each rerouted reader family, read over the settings in force."""
-    from maljan.agents.composition import servers_of_capability
-    from maljan.agents.prompt_tools import known_tool_names
-    from maljan.core import pack_servers
-    from maljan.core.reputation import pack_lookups
-    from maljan.pipeline.validation import shipped_matcher_names
-    from maljan.providers.servers import _handle_tools_in_force
-    from maljan.providers.static.declared_prepass import block_declaration
+    from malspark.agents.composition import servers_of_capability
+    from malspark.agents.prompt_tools import known_tool_names
+    from malspark.core import pack_servers
+    from malspark.core.reputation import pack_lookups
+    from malspark.pipeline.validation import shipped_matcher_names
+    from malspark.providers.servers import _handle_tools_in_force
+    from malspark.providers.static.declared_prepass import block_declaration
 
     def die_step_kind(s: Settings) -> str:
         return s._step_tool_kind(PackStep(id="die_scan", server="die", tool="die_scan"))
@@ -366,7 +366,7 @@ def test_each_reader_reads_a_fresh_install_as_undeclared_and_the_listing_once_ke
 def test_a_job_lists_each_trusted_server_nothing_is_kept_for(
     fresh_install: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.providers import server_probe
+    from malspark.providers import server_probe
 
     monkeypatch.setattr(served_listing, "unlisted", _unlisted)
     reached: list[str] = []
@@ -402,7 +402,7 @@ def test_a_job_lists_each_trusted_server_nothing_is_kept_for(
 def test_a_listing_that_declares_nothing_rests_too_and_its_rest_ends(
     fresh_install: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.providers import server_probe
+    from malspark.providers import server_probe
 
     monkeypatch.setattr(served_listing, "unlisted", _unlisted)
     reached: list[str] = []
@@ -428,7 +428,7 @@ def test_a_listing_that_declares_nothing_rests_too_and_its_rest_ends(
 def test_at_most_four_servers_are_listed_at_once(
     fresh_install: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.providers import server_probe
+    from malspark.providers import server_probe
 
     for key in CAPTURED:
         fresh_install.mcp.servers[key].enabled = True
@@ -451,7 +451,7 @@ def test_at_most_four_servers_are_listed_at_once(
 def test_all_the_listings_together_keep_within_one_budget(
     fresh_install: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.providers import server_probe
+    from malspark.providers import server_probe
 
     monkeypatch.setattr(served_listing, "unlisted", _unlisted)
     monkeypatch.setattr(served_listing, "AT_ONCE", 1)

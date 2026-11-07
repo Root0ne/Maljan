@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.extractors.sample_identity import (
+from malspark.extractors.sample_identity import (
     _detect_file_type,
     _detect_language_or_compiler,
     _infer_platform,

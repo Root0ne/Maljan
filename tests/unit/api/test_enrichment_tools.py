@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from app.services.enrichment_tools import ServerToolCaller
-from maljan.core.config import MCPServerConfig
+from malspark.core.config import MCPServerConfig
 
 
 class _Tool:
@@ -73,7 +73,7 @@ async def test_it_attaches_once_calls_the_named_tool_and_closes() -> None:
     _Handle.made = []
     caller = ServerToolCaller(_settings(intelsrv=_server()), job_key="enrich-1")
     assert caller.arguments("intelsrv", "lookup_address") == {"ip": "addr"}
-    with patch("maljan.providers.servers.ServerHandle", _Handle):
+    with patch("malspark.providers.servers.ServerHandle", _Handle):
         first = await caller("intelsrv", "lookup_address", {"addr": "8.8.4.4"})
         await caller("intelsrv", "lookup_address", {"addr": "8.8.8.8"})
         missing = await caller("intelsrv", "nothing_here", {})
@@ -92,7 +92,7 @@ async def test_a_server_that_is_off_or_not_a_reputation_server_is_not_asked(
 ) -> None:
     _Handle.made = []
     caller = ServerToolCaller(_settings(intelsrv=_server(**over)), job_key="enrich-1")
-    with patch("maljan.providers.servers.ServerHandle", _Handle):
+    with patch("malspark.providers.servers.ServerHandle", _Handle):
         assert await caller("intelsrv", "lookup_address", {"addr": "8.8.4.4"}) is None
         assert await caller("absent", "lookup_address", {}) is None
     assert _Handle.made == []
@@ -100,11 +100,11 @@ async def test_a_server_that_is_off_or_not_a_reputation_server_is_not_asked(
 
 @pytest.mark.asyncio
 async def test_a_withheld_tool_is_recorded_with_its_reason_and_said_in_the_disclosure() -> None:
-    from maljan.analysis.disclosure import disclosure_lines, with_enrichment_asked
+    from malspark.analysis.disclosure import disclosure_lines, with_enrichment_asked
 
     _Handle.made = []
     caller = ServerToolCaller(_settings(intelsrv=_server()), job_key="enrich-1")
-    with patch("maljan.providers.servers.ServerHandle", _Handle):
+    with patch("malspark.providers.servers.ServerHandle", _Handle):
         reason = await caller.withheld_reason("intelsrv", "withheld_lookup")
         assert reason == WITHHELD["withheld_lookup"]
         assert await caller.withheld_reason("intelsrv", "lookup_address") is None

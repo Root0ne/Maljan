@@ -251,7 +251,7 @@ export interface McpServerEntry {
    *  (zero: no deadline of its own; null: the deployment's floor). Optional because an API older than the
    *  field sends none; the server editor keeps it as stored. */
   call_timeout_seconds?: number | null;
-  /* The server's declaration (`maljan.core.tool_declarations`): what the
+  /* The server's declaration (`malspark.core.tool_declarations`): what the
    * platform reads about the server and its tools. Optional because an API
    * older than a field sends none, and a new server sends none until the
    * operator writes one; the API fills a built-in's from what it ships. */
@@ -359,7 +359,7 @@ export interface ToolFactsEntry {
 
 /**
  * One tool source an agent definition asks for, mirroring
- * `maljan.core.config.ToolRef`. `kind: "mcp"` names a server and, optionally,
+ * `malspark.core.config.ToolRef`. `kind: "mcp"` names a server and, optionally,
  * one of its tools — `name: null` means the server's whole allow-listed set.
  * `kind: "provider"` means "this agent's static provider's tools" and carries
  * nothing else, unless it names a provider by id (`provider: "r2"`): then it
@@ -435,7 +435,7 @@ export interface AgentDefinitionEntry {
 }
 
 /** How hard one debate stage argues before it hands over, mirroring
- *  `maljan.core.config.DebateOptions`. `null` on a stage means the global
+ *  `malspark.core.config.DebateOptions`. `null` on a stage means the global
  *  negotiation settings it was seeded from. */
 export interface DebateOptionsEntry {
   /** A field left out takes the value the API gives it. */
@@ -449,7 +449,7 @@ export type StageMode = "parallel" | "sequential";
 export type InjectUpstream = "none" | "findings" | "full";
 
 /**
- * One stage of a team, mirroring `maljan.core.config.StageDefinition`.
+ * One stage of a team, mirroring `malspark.core.config.StageDefinition`.
  *
  * `depends_on` may only name stages declared earlier, which is what makes the
  * card order the run order and a cycle unrepresentable. `when` is an
@@ -654,14 +654,14 @@ export interface PatchResult {
 
 /** The wire format `GET /settings/export` writes, mirrored from
  *  `EXPORT_FORMAT` in `apps/api/app/api/v1/settings.py`. */
-export const SETTINGS_EXPORT_FORMAT = "maljan-settings/3";
+export const SETTINGS_EXPORT_FORMAT = "malspark-settings/3";
 /** Every format `POST /settings/import` reads (`IMPORT_FORMATS`): `/2`, written
  *  before a server's call budget left the static blocks, and `/1`, written
  *  before a built-in block's tool declarations were stored per tool, too. */
 export const SETTINGS_IMPORT_FORMATS: readonly string[] = [
   SETTINGS_EXPORT_FORMAT,
-  "maljan-settings/2",
-  "maljan-settings/1",
+  "malspark-settings/2",
+  "malspark-settings/1",
 ];
 
 export interface ExportResponse {

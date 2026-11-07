@@ -15,10 +15,10 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.safe_json import DEEPER_MARK, DEPTH_GUARD
-from maljan.providers.sandbox.upload import UploadSandboxProvider
-from maljan.schemas.sandbox_document import sandbox_document
+from malspark.core.config import Settings
+from malspark.core.safe_json import DEEPER_MARK, DEPTH_GUARD
+from malspark.providers.sandbox.upload import UploadSandboxProvider
+from malspark.schemas.sandbox_document import sandbox_document
 
 DEPTH = 10_000
 
@@ -84,13 +84,13 @@ def _every_dump(
     document: dict[str, Any], tmp_path: Path, sources: tuple[str, ...] = ()
 ) -> list[str]:
     """Each path that writes ``document`` or a part of it out, as the text it wrote."""
-    from maljan.agents.evidence_recorder import result_text
-    from maljan.analysis import sandbox_sections as ss
-    from maljan.app import MaljanApp
-    from maljan.providers import sandbox_tools as st
+    from malspark.agents.evidence_recorder import result_text
+    from malspark.analysis import sandbox_sections as ss
+    from malspark.app import MalsparkApp
+    from malspark.providers import sandbox_tools as st
 
     texts: list[str] = []
-    app = MaljanApp(mock=True)
+    app = MalsparkApp(mock=True)
     slices = sources or ("sandbox.target", "sandbox.network", "sandbox.behavior", "sandbox.full")
     for source in slices:
         chunks = app.container._sandbox_slice("dynamic", source, document)
@@ -160,9 +160,9 @@ def test_a_document_nested_as_deeply_in_process_is_written_out_marked(tmp_path: 
 
 
 def test_the_pack_indexes_and_records_a_deep_upload(tmp_path: Path) -> None:
-    from maljan.agents.evidence_recorder import EvidenceRecorder
-    from maljan.pipeline.triage_pack import PIPELINE, run_pack
-    from maljan.schemas.evidence import EvidenceCounter
+    from malspark.agents.evidence_recorder import EvidenceRecorder
+    from malspark.pipeline.triage_pack import PIPELINE, run_pack
+    from malspark.schemas.evidence import EvidenceCounter
     from tests.unit.pipeline.test_triage_pack import _inputs, _write
     from tests.unit.tools.test_binary import _pe
 

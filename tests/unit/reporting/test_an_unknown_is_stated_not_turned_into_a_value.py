@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.reporting.dedupe import distinct_signatures
-from maljan.reporting.ledger_projection import dynamic_from_ledger
-from maljan.reporting.models import MalwareReport, SandboxSignature
-from maljan.reporting.renderers.markdown import MarkdownRenderer, _signature_row
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.reporting.dedupe import distinct_signatures
+from malspark.reporting.ledger_projection import dynamic_from_ledger
+from malspark.reporting.models import MalwareReport, SandboxSignature
+from malspark.reporting.renderers.markdown import MarkdownRenderer, _signature_row
+from malspark.schemas.evidence import EvidenceCounter
 from tests.unit._ledger_helpers import entry
 from tests.unit.reporting._report_shapes import rich_report
 
@@ -76,7 +76,7 @@ class TestEverywhereASeverityIsRead:
         return report
 
     def test_the_draft_rule_names_sort_unknown_below_every_number(self) -> None:
-        from maljan.reporting.detection_signatures import _collect_signature_names
+        from malspark.reporting.detection_signatures import _collect_signature_names
 
         report = self._with(
             SandboxSignature(name="n1", description="unknown one", severity=None),
@@ -87,7 +87,7 @@ class TestEverywhereASeverityIsRead:
         assert _collect_signature_names(report) == ["high", "zero", "unknown one", "unknown two"]
 
     def test_the_narrative_prompt_says_severity_unknown(self) -> None:
-        from maljan.reporting.narrative_agent import build_prompt_text
+        from malspark.reporting.narrative_agent import build_prompt_text
 
         report = self._with(
             SandboxSignature(name="sigx", severity=None),

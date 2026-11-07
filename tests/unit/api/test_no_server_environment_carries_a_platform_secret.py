@@ -24,16 +24,16 @@ from pydantic import SecretStr, ValidationError
 from tests.credential_shapes import lowercase_body, password
 
 from app.config import APISettings
-from maljan.core import settings_secrets
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.core.platform_secrets import (
+from malspark.core import settings_secrets
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.core.platform_secrets import (
     PLATFORM_SECRET_NAMES,
     PlatformSecret,
     PlatformSecrets,
     is_platform_secret,
 )
-from maljan.core.settings_catalog import names_a_credential_value
-from maljan.core.settings_overrides import StoredValueRefused
+from malspark.core.settings_catalog import names_a_credential_value
+from malspark.core.settings_overrides import StoredValueRefused
 
 ROOT = Path(__file__).resolve().parents[3]
 COMPOSE = ROOT / "docker" / "docker-compose.yml"
@@ -172,7 +172,7 @@ def test_a_declaration_that_needs_one_is_refused_the_same_way() -> None:
         MCPServerConfig(
             transport="stdio",
             command="/bin/true",
-            required_env_allow=["MALJAN_SAMPLE_ROOTS", "DATABASE_URL"],
+            required_env_allow=["MALSPARK_SAMPLE_ROOTS", "DATABASE_URL"],
         )
     (error,) = refused.value.errors()
     assert error["loc"] == ("required_env_allow",)
@@ -182,8 +182,8 @@ def test_a_declaration_that_needs_one_is_refused_the_same_way() -> None:
     MCPServerConfig(
         transport="stdio",
         command="/bin/true",
-        required_env_allow=["MALJAN_SAMPLE_ROOTS"],
-        variable_names=["MALJAN_SAMPLE_ROOTS"],
+        required_env_allow=["MALSPARK_SAMPLE_ROOTS"],
+        variable_names=["MALSPARK_SAMPLE_ROOTS"],
     )
 
 
@@ -201,14 +201,14 @@ def test_ordinary_names_still_pass() -> None:
     config = MCPServerConfig(
         transport="stdio",
         command="/bin/true",
-        env_allow=["PATH", "VIRUSTOTAL_API_KEY", "OPENAI_API_KEY", "MALJAN_SAMPLE_ROOTS"],
+        env_allow=["PATH", "VIRUSTOTAL_API_KEY", "OPENAI_API_KEY", "MALSPARK_SAMPLE_ROOTS"],
         env={"JAVA_HOME": "/opt/jdk", "ANTHROPIC_API_KEY": lowercase_body(24)},
     )
     assert config.env_allow == [
         "PATH",
         "VIRUSTOTAL_API_KEY",
         "OPENAI_API_KEY",
-        "MALJAN_SAMPLE_ROOTS",
+        "MALSPARK_SAMPLE_ROOTS",
     ]
     assert not any(is_platform_secret(name) for name in (*config.env_allow, *config.env))
     # Every block that ships validates: none of them names one.

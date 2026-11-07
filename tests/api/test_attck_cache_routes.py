@@ -26,7 +26,7 @@ from app.deps import require_active_user, require_admin
 from app.models.user import UserRole
 from app.services import attck_cache
 from app.worker import attck_worker
-from maljan.memory import attck_loader, attck_update
+from malspark.memory import attck_loader, attck_update
 
 ADMIN_ID = "00000000-0000-0000-0000-000000000001"
 JOB_ID = "0" * 31 + "1"

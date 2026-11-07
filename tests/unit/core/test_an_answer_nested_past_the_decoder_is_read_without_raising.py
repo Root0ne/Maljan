@@ -11,11 +11,11 @@ Every value is synthetic.
 
 from __future__ import annotations
 
-from maljan.core.reputation import read_answer
-from maljan.core.rule_matches import rule_matches_of
-from maljan.core.tool_declarations import ToolFacts
-from maljan.core.undeclared_tools import code_listing
-from maljan.schemas.evidence import LedgerEntry
+from malspark.core.reputation import read_answer
+from malspark.core.rule_matches import rule_matches_of
+from malspark.core.tool_declarations import ToolFacts
+from malspark.core.undeclared_tools import code_listing
+from malspark.schemas.evidence import LedgerEntry
 
 _DEEP = "[" * 50_000 + "]" * 50_000
 _DEEP_IN_AN_OBJECT = '{"code": ' + _DEEP + "}"

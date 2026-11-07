@@ -15,13 +15,13 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.agents.function_map import (
+from malspark.agents.function_map import (
     FUNCTION_MAP_HEAD,
     build_function_map,
     function_artefacts,
     function_map_block,
 )
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 
 BASE = 0x140000000
 

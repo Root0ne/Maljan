@@ -25,18 +25,18 @@ from typing import Any
 import pytest
 
 from app.services.tool_availability import WORKER, as_rows, unavailable_tools
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import Settings
-from maljan.core.paths import OUTSIDE_PROJECT, get_project_root, host_paths_masked
-from maljan.pipeline.operator_choice import SampleFacts, lost_tool_rows
-from maljan.pipeline.triage_pack import PIPELINE, run_is_degraded, run_pack
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers import MarkdownRenderer
-from maljan.reporting.renderers.layout import ANALYST
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.tools import capabilities, emulated_strings, rules, sidecar_needs
-from maljan.tools.errors import BAD_ARGUMENT, MISSING_DEPENDENCY, error_parts
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.core.config import Settings
+from malspark.core.paths import OUTSIDE_PROJECT, get_project_root, host_paths_masked
+from malspark.pipeline.operator_choice import SampleFacts, lost_tool_rows
+from malspark.pipeline.triage_pack import PIPELINE, run_is_degraded, run_pack
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers import MarkdownRenderer
+from malspark.reporting.renderers.layout import ANALYST
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.tools import capabilities, emulated_strings, rules, sidecar_needs
+from malspark.tools.errors import BAD_ARGUMENT, MISSING_DEPENDENCY, error_parts
 from tests.unit.pipeline.test_triage_pack import SANDBOX_REPORT, _inputs, _write
 from tests.unit.tools.test_binary import _pe
 from tests.unit.tools.test_rules import SIGMA_RULE
@@ -138,7 +138,9 @@ class TestTheEngineAnswer:
     ) -> None:
         monkeypatch.setenv(rules.SIGMA_RULES_ENV, str(tmp_path / "gone"))
         _code, message, _remedy = _failure(rules.sigma_match([]))
-        assert message.startswith("no rule was loaded from the path MALJAN_SIGMA_RULES_DIR names,")
+        assert message.startswith(
+            "no rule was loaded from the path MALSPARK_SIGMA_RULES_DIR names,"
+        )
         assert str(tmp_path) not in message
         _code, message, _remedy = _failure(rules.sigma_match([], ruleset=str(tmp_path / "x")))
         assert message.startswith("no rule was loaded from the ruleset named,")
@@ -152,7 +154,7 @@ class TestADirectoryCorpus:
     def test_its_files_are_compiled_once_and_a_bad_one_is_named_and_skipped(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        from maljan.analysis import yara_layer
+        from malspark.analysis import yara_layer
 
         corpus = tmp_path / "yara"
         corpus.mkdir()
@@ -194,7 +196,7 @@ class TestADirectoryCorpusNoneOfWhoseFilesReads:
         code, message, _remedy = _failure(answer)
         assert code == MISSING_DEPENDENCY
         assert message == (
-            "no rule was loaded from the path MALJAN_YARA_RULES_DIR names: none of its 2 rule "
+            "no rule was loaded from the path MALSPARK_YARA_RULES_DIR names: none of its 2 rule "
             "files could be read, so no rule was run"
         )
         assert [row["file"] for row in answer["files_not_loaded"]] == ["a.yml", "b.yaml"]
@@ -232,8 +234,8 @@ class TestTheEvidenceOnlyProvider:
         import sys
         import types
 
-        from maljan.core.config import StaticCapaConfig, StaticYaraConfig
-        from maljan.providers.static.capa_yara import CapaYaraStaticProvider
+        from malspark.core.config import StaticCapaConfig, StaticYaraConfig
+        from malspark.providers.static.capa_yara import CapaYaraStaticProvider
 
         # capa's modules present, so the rules are what is missing.
         for name in (
@@ -395,7 +397,7 @@ class TestTheReportSaysItDidNotRun:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """The reason was masked when written; rendering reads no host and no project root."""
-        from maljan.core import paths
+        from malspark.core import paths
 
         report = _degraded_report("rules at /srv/run-hk8/data/capa-rules are missing")
         here = MarkdownRenderer(layout=ANALYST).render(report)
@@ -465,7 +467,7 @@ class TestTheCheckBeforeAJobNamesIt:
         ]
 
     def test_rows_that_differ_stay_apart(self) -> None:
-        from maljan.tools.capabilities import Unavailable
+        from malspark.tools.capabilities import Unavailable
 
         def row(server: str, reason: str, remedy: str = "fetch it") -> Unavailable:
             return Unavailable(server=server, tool="t", reason=reason, remediation=remedy)
@@ -508,5 +510,5 @@ class TestTheCheckBeforeAJobNamesIt:
         (host / "data" / "sigma_rules" / "r.yml").write_text(SIGMA_RULE, encoding="utf-8")
         (row,) = as_rows(unavailable_tools(settings))
         assert (row["server"], row["tool"]) == ("analysis", "yara_scan")
-        assert row["reason"] == "data/none is missing or empty (named by MALJAN_YARA_RULES_DIR)"
+        assert row["reason"] == "data/none is missing or empty (named by MALSPARK_YARA_RULES_DIR)"
         assert row["still_answers"] == ""

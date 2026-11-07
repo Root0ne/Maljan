@@ -12,10 +12,10 @@ from types import MethodType, SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.core.config import ChunkingConfig
-from maljan.core.container import ServiceContainer
-from maljan.core.truncation_ledger import TruncationLedger
-from maljan.loaders.binary_chunker import BinaryChunker, ChunkStrategy, TextChunk, header_chars
+from malspark.core.config import ChunkingConfig
+from malspark.core.container import ServiceContainer
+from malspark.core.truncation_ledger import TruncationLedger
+from malspark.loaders.binary_chunker import BinaryChunker, ChunkStrategy, TextChunk, header_chars
 
 
 def _room(chars: int | None) -> Any:

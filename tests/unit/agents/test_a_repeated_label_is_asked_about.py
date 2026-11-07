@@ -22,14 +22,14 @@ import copy
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.agents.judge_postprocess import (
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.agents.judge_postprocess import (
     DUPLICATE_LABEL_CODE,
     duplicate_label_violations,
     postprocess_judge_bundle,
 )
-from maljan.pipeline.validation import Violation, drop_ungrounded_indicators
-from maljan.schemas.stix_models import Bundle, Indicator
+from malspark.pipeline.validation import Violation, drop_ungrounded_indicators
+from malspark.schemas.stix_models import Bundle, Indicator
 
 
 def _answer() -> dict:
@@ -55,7 +55,7 @@ def _answer() -> dict:
                 "relationship_type": "indicates",
                 "source_ref": "indicator--1",
                 "target_ref": "malware--1",
-                "x_maljan_confidence": 0.9,
+                "x_malspark_confidence": 0.9,
             },
             {
                 "type": "relationship",
@@ -63,7 +63,7 @@ def _answer() -> dict:
                 "relationship_type": "indicates",
                 "source_ref": "indicator--1",
                 "target_ref": "malware--1",
-                "x_maljan_confidence": 0.4,
+                "x_malspark_confidence": 0.4,
             },
         ],
     }
@@ -126,7 +126,7 @@ def _verdict(answer: dict) -> Any:
     import json
 
     answer = copy.deepcopy(answer)
-    answer["x_maljan_assessment"] = {
+    answer["x_malspark_assessment"] = {
         "verdict": "Malware",
         "confidence": 0.9,
         "severity": {"rating": "High", "rationale": "a loader"},

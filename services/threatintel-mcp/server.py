@@ -37,23 +37,26 @@ import httpx
 import idna
 from mcp.server.fastmcp import FastMCP
 
-from maljan.core.stdio_safe import route_logging_to_stderr
+from malspark.core.stdio_safe import route_logging_to_stderr
 
 # Only when run as the stdio server: a test or tool that imports this module
 # in-process keeps its own logging.
 if __name__ == "__main__":
     route_logging_to_stderr()
+    from malspark.core.previous_name import warn_previous_environment
 
-from maljan.tools.arguments import says_unquoted, unquoted, with_read_as
-from maljan.tools.capabilities import (
+    warn_previous_environment()
+
+from malspark.tools.arguments import says_unquoted, unquoted, with_read_as
+from malspark.tools.capabilities import (
     CAPABILITIES_TOOL,
     Requirement,
     ToolNeeds,
     env,
     manifest,
 )
-from maljan.tools.declared_facts import NO_EFFECT, tool_declaration
-from maljan.tools.errors import (
+from malspark.tools.declared_facts import NO_EFFECT, tool_declaration
+from malspark.tools.errors import (
     BAD_ARGUMENT,
     NOT_CONFIGURED,
     TIMEOUT,
@@ -130,7 +133,7 @@ TOOL_NEEDS: list[ToolNeeds] = [
 ]
 CAPABILITIES = manifest("threatintel", TOOL_NEEDS)
 
-# What each tool declares of itself (``maljan.tools.declared_facts``). Every
+# What each tool declares of itself (``malspark.tools.declared_facts``). Every
 # lookup asks an outside service whose answer moves, so none is read-only. The
 # hash lookup answers JSON: the engine counts under ``last_analysis_stats``,
 # this server's own sentence under ``summary``, and the service's text about

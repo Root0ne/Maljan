@@ -19,10 +19,10 @@ from typing import Any
 import pytest
 
 from app.worker import analysis_worker, sample_files
-from maljan.core.config import MCPServerConfig
-from maljan.core.settings_overrides import build_settings
-from maljan.providers.base import DEFAULT_WORK_DIR, MirrorSpec, path_in_server
-from maljan.providers.registry import mirror_work_dirs, static_provider_class
+from malspark.core.config import MCPServerConfig
+from malspark.core.settings_overrides import build_settings
+from malspark.providers.base import DEFAULT_WORK_DIR, MirrorSpec, path_in_server
+from malspark.providers.registry import mirror_work_dirs, static_provider_class
 
 SHA = "a" * 64
 
@@ -245,7 +245,7 @@ class TestTheDirectoriesComeFromTheConfiguration:
         self, samples: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         added: list[Path] = []
-        monkeypatch.setattr("maljan.tools.roots.add_sample_root", added.append)
+        monkeypatch.setattr("malspark.tools.roots.add_sample_root", added.append)
         sample_files.export_sample_roots(mirror_work_dirs(_generic(_remote(work_dir="mine-work"))))
         assert (samples / "mine-work").resolve() in added
 
@@ -325,7 +325,7 @@ class TestTheOperatorsOwnDirectoriesAreNeverTouched:
         self, corpus: dict[str, Path], samples: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         added: list[Path] = []
-        monkeypatch.setattr("maljan.tools.roots.add_sample_root", added.append)
+        monkeypatch.setattr("malspark.tools.roots.add_sample_root", added.append)
         sample_files.export_sample_roots(["static", "linked"])
         assert {p.name for p in added} >= {".work", "r2-work"}
         assert not {p.name for p in added} & {"static", "linked", "elsewhere"}

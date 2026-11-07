@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from maljan.memory import attck_loader
+from malspark.memory import attck_loader
 
 
 class FakeResponse:
@@ -239,7 +239,7 @@ def test_an_empty_cache_is_filled_from_the_pinned_bundle(
 
     monkeypatch.setattr(attck_loader, "_fetch_bundle", fetch)
     monkeypatch.setattr(attck_loader, "_save_cache", lambda raw, path: None)
-    from maljan.memory import attck_update
+    from malspark.memory import attck_update
 
     monkeypatch.setattr(attck_update, "refresh_refusal", lambda raw, compared: None)
     attck_loader._load_raw_bundle(

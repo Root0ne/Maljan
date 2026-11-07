@@ -2,7 +2,7 @@
  * The evidence bundle, read for the console's Evidence tab.
  *
  * The bundle is the record behind the analyst report
- * (`maljan-evidence-bundle/1`, served at `/evidence-bundle.json`): the notes
+ * (`malspark-evidence-bundle/1`, served at `/evidence-bundle.json`): the notes
  * the report cites, the evidence index (one row per tool call) and every
  * section of the single-file report as Markdown under its anchor. The
  * console draws it as the bundle's HTML does, with the same anchors, so a
@@ -10,9 +10,10 @@
  * lands on the same place in the other.
  */
 
+import { underCurrentName } from "@/lib/previousName";
 import { inlineText, subsectionTitles } from "./safeMarkdown";
 
-export const BUNDLE_FORMAT = "maljan-evidence-bundle/1";
+export const BUNDLE_FORMAT = "malspark-evidence-bundle/1";
 
 /** The anchors of the two sections the console draws from the bundle's data
  *  rather than from their Markdown. */
@@ -79,7 +80,9 @@ export function readBundle(body: string): { bundle: EvidenceBundle } | { problem
   }
   if (!data || typeof data !== "object") return { problem: "the server's answer is not a bundle" };
   const doc = data as Record<string, unknown>;
-  if (doc.format !== BUNDLE_FORMAT) {
+  // A bundle stored before the rename names the same format under the
+  // previous name (`@/lib/previousName`).
+  if (underCurrentName(doc.format) !== BUNDLE_FORMAT) {
     return { problem: `the server sent a bundle of format ${JSON.stringify(doc.format ?? null)}, not ${BUNDLE_FORMAT}` };
   }
   const report = (doc.report && typeof doc.report === "object" ? doc.report : {}) as Record<string, unknown>;

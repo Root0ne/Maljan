@@ -16,8 +16,8 @@ from app.worker.analysis_worker import (  # noqa: E402
     mirror_target_for,
     profile_static_providers,
 )
-from maljan.core.config import Settings  # noqa: E402
-from maljan.core.container import ServiceContainer  # noqa: E402
+from malspark.core.config import Settings  # noqa: E402
+from malspark.core.container import ServiceContainer  # noqa: E402
 
 
 def _container(**agents) -> ServiceContainer:
@@ -80,7 +80,7 @@ def test_each_provider_gets_its_own_container_visible_path():
 
 
 def test_the_state_carries_a_path_per_provider_and_keeps_the_global_key():
-    from maljan.pipeline.state import AnalysisState
+    from malspark.pipeline.state import AnalysisState
 
     assert "static_sample_paths" in AnalysisState.__annotations__
     assert "static_sample_path" in AnalysisState.__annotations__

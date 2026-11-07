@@ -27,9 +27,9 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline import triage_pack
-from maljan.tools import binary, emulated_strings, identify, rules, string_blobs, strings
-from maljan.tools.ioc_spans import string_iocs_with_spans
+from malspark.pipeline import triage_pack
+from malspark.tools import binary, emulated_strings, identify, rules, string_blobs, strings
+from malspark.tools.ioc_spans import string_iocs_with_spans
 from tests.linear_cost import assert_scales
 
 from .synthetic_pe import TEXT_RVA, SyntheticPE
@@ -315,7 +315,7 @@ def _floss_document() -> dict[str, Any]:
 class TestFlossStreamsAndWhatIsRemembered:
     @pytest.fixture(autouse=True)
     def _scratch(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("MALJAN_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
         emulated_strings.forget_documents()
 
     def test_stdout_is_read_whole_and_stderr_only_its_tail(self, tmp_path: Path) -> None:
@@ -347,7 +347,7 @@ class TestFlossStreamsAndWhatIsRemembered:
     def test_a_caller_waiting_when_the_server_ends_starts_no_child(self, tmp_path: Path) -> None:
         import threading
 
-        from maljan.tools import children
+        from malspark.tools import children
 
         target = tmp_path / "s.dll"
         target.write_bytes(b"MZ" + bytes(62))
@@ -378,7 +378,7 @@ class TestFlossStreamsAndWhatIsRemembered:
         assert answers[0]["error"] == emulated_strings.SERVER_ENDING
 
     def test_a_child_registered_after_the_end_is_killed_at_once(self) -> None:
-        from maljan.tools import children
+        from malspark.tools import children
 
         killed: list[int] = []
         children.kill_all()
@@ -590,7 +590,7 @@ def test_a_fifty_megabyte_name_is_cut_by_the_answer_guardrail(tmp_path: Path) ->
     answer too large for the document shortener (``MAX_SHORTENABLE_CHARS``) is cut
     by characters there, so the tool holds no limit of its own.
     """
-    from maljan.agents.mcp_client import MCPLangChainToolkit
+    from malspark.agents.mcp_client import MCPLangChainToolkit
 
     length = 50 * 1024 * 1024
     target = tmp_path / "big.gz"

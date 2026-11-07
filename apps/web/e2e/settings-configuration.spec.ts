@@ -413,7 +413,7 @@ test.describe("Settings → Configuration (admin)", () => {
     });
   });
 
-  test("export requests the JSON export and downloads it as maljan-settings.json", async ({
+  test("export requests the JSON export and downloads it as malspark-settings.json", async ({
     authenticatedPage: page,
   }) => {
     await page.goto(NEGOTIATION_PATH);
@@ -424,9 +424,9 @@ test.describe("Settings → Configuration (admin)", () => {
       return r.fulfill({
         status: 200,
         contentType: "application/json",
-        headers: { "content-disposition": "attachment; filename=maljan-settings.json" },
+        headers: { "content-disposition": "attachment; filename=malspark-settings.json" },
         body: JSON.stringify({
-          format: "maljan-settings/1",
+          format: "malspark-settings/1",
           exported_at: "2026-08-01T00:00:00Z",
           values: { "core.negotiation.retry_delay": 10 },
           secrets_omitted: [],
@@ -439,9 +439,9 @@ test.describe("Settings → Configuration (admin)", () => {
       page.getByRole("button", { name: "Export configuration", exact: true }).click(),
     ]);
     expect(exportRequested).toBe(true);
-    expect(download.suggestedFilename()).toBe("maljan-settings.json");
+    expect(download.suggestedFilename()).toBe("malspark-settings.json");
     await expect(
-      page.getByText("Configuration downloaded as maljan-settings.json")
+      page.getByText("Configuration downloaded as malspark-settings.json")
     ).toBeVisible();
   });
 
@@ -476,11 +476,11 @@ test.describe("Settings → Configuration (admin)", () => {
 
     // `max_iterations` is 5 (default) in the fixture; the file changes it to 9.
     const fixture = {
-      format: "maljan-settings/1",
+      format: "malspark-settings/1",
       values: { "core.negotiation.max_iterations": 9 },
     };
     await page.getByLabel("Settings file").setInputFiles({
-      name: "maljan-settings.json",
+      name: "malspark-settings.json",
       mimeType: "application/json",
       buffer: Buffer.from(JSON.stringify(fixture)),
     });
@@ -500,7 +500,7 @@ test.describe("Settings → Configuration (admin)", () => {
     await importButton.click();
     await expect.poll(() => importBody).not.toBeNull();
     expect(importBody).toEqual({
-      format: "maljan-settings/1",
+      format: "malspark-settings/1",
       values: { "core.negotiation.max_iterations": 9 },
     });
     await expect(dialog.getByText(/Applied 1 setting/)).toBeVisible();
@@ -514,7 +514,7 @@ test.describe("Settings → Configuration (admin)", () => {
     await page.getByRole("button", { name: "Import configuration" }).click();
     const dialog = page.getByRole("dialog", { name: "Import configuration" });
 
-    const fixture = { format: "maljan-settings/1", values: { "core.no.such.key": 1 } };
+    const fixture = { format: "malspark-settings/1", values: { "core.no.such.key": 1 } };
     await page.getByLabel("Settings file").setInputFiles({
       name: "bad.json",
       mimeType: "application/json",
@@ -534,11 +534,11 @@ test.describe("Settings → Configuration (admin)", () => {
     const dialog = page.getByRole("dialog", { name: "Import configuration" });
 
     const fixture = {
-      format: "maljan-settings/1",
+      format: "malspark-settings/1",
       values: { "core.negotiation.max_iterations": 9 },
     };
     await page.getByLabel("Settings file").setInputFiles({
-      name: "maljan-settings.json",
+      name: "malspark-settings.json",
       mimeType: "application/json",
       buffer: Buffer.from(JSON.stringify(fixture)),
     });

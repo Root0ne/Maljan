@@ -95,7 +95,7 @@ class TestMain:
         )
         assert main() == 0
         doc = json.loads(out.read_text(encoding="utf-8"))
-        assert doc["schema"] == "maljan-attck-case-corpus/v1"
+        assert doc["schema"] == "malspark-attck-case-corpus/v1"
         by_id = {c["sample_id"]: c for c in doc["cases"]}
         assert set(by_id) == {"s1", "s2"}  # s3 dropped by floor
         assert by_id["s2"]["summary_text"] == "new"  # dedup keeps last
@@ -194,5 +194,5 @@ class TestCasesFromMabel:
         )
         assert main() == 0
         doc = json.loads(out.read_text(encoding="utf-8"))
-        assert doc["schema"] == "maljan-attck-case-corpus/v1"
+        assert doc["schema"] == "malspark-attck-case-corpus/v1"
         assert doc["cases"][0]["technique_ids"] == ["T1055"]

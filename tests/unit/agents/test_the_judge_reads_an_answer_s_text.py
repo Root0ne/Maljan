@@ -5,7 +5,7 @@
 ``str()``, that list is its own repr, signature and all: the judge never found
 the bundle in it, asked once more at its output cap and ended in the text
 fallback on every verdict. The judge's readers now go through
-``maljan.llm.answer_text.answer_text`` (the narrative's own reader already
+``malspark.llm.answer_text.answer_text`` (the narrative's own reader already
 skipped every block without text); a string answer (OpenAI-compatible
 providers, which keep reasoning apart) is read exactly as before.
 """
@@ -19,13 +19,13 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from maljan.agents.judge_agent import JudgeAgent, _answer_text, _is_not_json
+from malspark.agents.judge_agent import JudgeAgent, _answer_text, _is_not_json
 
 _BUNDLE = json.dumps(
     {
         "type": "bundle",
         "objects": [{"type": "malware", "id": "malware--1", "name": "x", "is_family": False}],
-        "x_maljan_assessment": {"verdict": "Malware", "confidence": 0.85},
+        "x_malspark_assessment": {"verdict": "Malware", "confidence": 0.85},
     }
 )
 _THINKING = {"type": "thinking", "thinking": "", "signature": "c2lnbmF0dXJl"}
@@ -73,8 +73,8 @@ class TestTheVerdictIsReadFromItsText:
     def test_every_block_shape_parses_to_the_bundle_a_plain_answer_does(self) -> None:
         judge = JudgeAgent(llm=MagicMock())
         plain = _dump(judge._bundle_from_response(AIMessage(content=_BUNDLE), {}, None))
-        assert plain.get("x_maljan_fallback_verdict") is None
-        assert plain["x_maljan_assessment"]["confidence"] == 0.85
+        assert plain.get("x_malspark_fallback_verdict") is None
+        assert plain["x_malspark_assessment"]["confidence"] == 0.85
 
         for name, answer in _shapes(_BUNDLE).items():
             parsed = _dump(JudgeAgent(llm=MagicMock())._bundle_from_response(answer, {}, None))
@@ -127,7 +127,7 @@ class TestTheMediatorsQuestionsAreReadFromTheirText:
     def test_a_question_the_judge_asks_in_its_loop_is_published_as_its_text(
         self, monkeypatch: Any
     ) -> None:
-        import maljan.agents.judge_agent as judge_module
+        import malspark.agents.judge_agent as judge_module
 
         judge = JudgeAgent(llm=MagicMock())
         published: list[str] = []
@@ -148,7 +148,7 @@ class TestTheMediatorsQuestionsAreReadFromTheirText:
 
 class TestTheOtherReadersReadTheText:
     def test_the_narrative_reads_the_answer_s_text(self) -> None:
-        from maljan.reporting.narrative_agent import _message_text
+        from malspark.reporting.narrative_agent import _message_text
 
         for name, answer in _shapes('{"summary": "s"}').items():
             assert _message_text(answer) == '{"summary": "s"}', name
@@ -156,7 +156,7 @@ class TestTheOtherReadersReadTheText:
         assert _message_text(None) == ""
 
     def test_a_correction_turn_sends_the_answer_back_as_it_came(self) -> None:
-        from maljan.pipeline.validation import _with_feedback
+        from malspark.pipeline.validation import _with_feedback
 
         answer = _blocks(_THINKING, _text(_BUNDLE))
         turns = _with_feedback([HumanMessage(content="ask")], answer, [])
@@ -164,7 +164,7 @@ class TestTheOtherReadersReadTheText:
         assert turns[1].content == answer.content
 
     def test_a_correction_turn_leaves_a_tool_call_out_of_the_answer(self) -> None:
-        from maljan.pipeline.validation import _with_feedback
+        from malspark.pipeline.validation import _with_feedback
 
         call = {"type": "tool_use", "id": "t1", "name": "x", "input": {}}
         answer = _blocks(_THINKING, _text(_BUNDLE), call)
@@ -173,7 +173,7 @@ class TestTheOtherReadersReadTheText:
         assert turns[1].content == [_THINKING, _text(_BUNDLE)]
 
     def test_an_answer_with_no_text_is_never_replayed_as_a_turn_of_thinking_alone(self) -> None:
-        from maljan.pipeline.validation import _with_feedback
+        from malspark.pipeline.validation import _with_feedback
 
         call = {"type": "tool_use", "id": "t1", "name": "x", "input": {}}
         for answer in (_blocks(_THINKING), _blocks(_THINKING, call), _blocks(_REDACTED)):
@@ -185,7 +185,7 @@ class TestTheOtherReadersReadTheText:
             assert len(str(turns[0].content)) > len("ask")
 
     def test_a_correction_turn_after_a_string_answer_is_unchanged(self) -> None:
-        from maljan.pipeline.validation import _with_feedback
+        from malspark.pipeline.validation import _with_feedback
 
         turns = _with_feedback([HumanMessage(content="ask")], AIMessage(content=_BUNDLE), [])
 

@@ -2,7 +2,7 @@
 
 The job's ledger rows are written the way the worker writes them, read back by
 the real ``AnalysisService`` over an in-memory SQLite session, and the map is
-the one ``maljan.reporting.call_map`` draws from the same entries. Nothing is
+the one ``malspark.reporting.call_map`` draws from the same entries. Nothing is
 written; another account's job is not found.
 """
 
@@ -26,8 +26,8 @@ from app.models.evidence import EvidenceEntry
 from app.models.job import AnalysisJob
 from app.models.sample import Sample
 from app.worker.analysis_worker import _evidence_row
-from maljan.reporting.call_map import call_map
-from maljan.schemas.evidence import LedgerEntry
+from malspark.reporting.call_map import call_map
+from malspark.schemas.evidence import LedgerEntry
 from tests.api.test_follow_up_routes import _Awaited, _user
 
 BASE = 0x2470000

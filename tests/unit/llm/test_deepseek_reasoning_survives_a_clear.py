@@ -19,8 +19,8 @@ from unittest.mock import patch
 
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
-from maljan.llm import context_window as cw
+from malspark.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+from malspark.llm import context_window as cw
 
 from . import test_deepseek_reasoning_is_sent_back as sent_back
 from .test_deepseek_reasoning_is_sent_back import THOUGHT, _Analyst, _DeepSeek, _model, _What
@@ -70,7 +70,7 @@ def test_every_request_after_a_clear_carries_every_reasoning() -> None:
     ]
     with (
         patch.object(sent_back, "reply", _counted),
-        patch("maljan.agents.base_agent.get_settings") as settings,
+        patch("malspark.agents.base_agent.get_settings") as settings,
     ):
         cfg = settings.return_value
         cfg.react_agent_timeout = None

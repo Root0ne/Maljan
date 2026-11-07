@@ -9,11 +9,11 @@ layers that read ``report.static``.
 
 from __future__ import annotations
 
-from maljan.providers.base import StaticEvidenceBundle
-from maljan.providers.static.capa_yara import ledger_entries
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.providers.base import StaticEvidenceBundle
+from malspark.providers.static.capa_yara import ledger_entries
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import EvidenceCounter
 
 _CAPA_ROW = {
     "namespace": "data-manipulation/encryption/rc4",

@@ -17,19 +17,19 @@ from typing import Any
 
 import pytest
 
-from maljan.core.builtin_declarations import BUILDER_OF_KIND
-from maljan.reporting import legacy_tool_names as legacy
-from maljan.reporting import tool_kinds
-from maljan.reporting.ledger_report import SHAPE_RULE_SECTION, build_sections
-from maljan.reporting.models import NetworkIP, RecoveredValue
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.core.builtin_declarations import BUILDER_OF_KIND
+from malspark.reporting import legacy_tool_names as legacy
+from malspark.reporting import tool_kinds
+from malspark.reporting.ledger_report import SHAPE_RULE_SECTION, build_sections
+from malspark.reporting.models import NetworkIP, RecoveredValue
+from malspark.reporting.renderers.stix_renderer import (
     FILE_ONLY_PROCESS,
     MARKED_ONLY_PROCESS,
     disputed_flow_reason,
     emulation_from_ledger,
     recovered_by_words,
 )
-from maljan.schemas.evidence import build_entry
+from malspark.schemas.evidence import build_entry
 
 # The tables as ``ledger_report``, ``evidence_bundles``, ``figures``,
 # ``renderers.markdown`` and ``renderers.stix_renderer`` wrote them.
@@ -170,9 +170,9 @@ def test_no_two_built_in_sources_declare_one_name_two_ways() -> None:
     become the legacy reading of a name another source declares a kind for,
     which takes the first source in its order (``shipped_by_name``).
     """
-    from maljan.core.config import Settings
-    from maljan.core.declared_reading import shipped_by_name
-    from maljan.core.tool_declarations import ToolDeclarations
+    from malspark.core.config import Settings
+    from malspark.core.declared_reading import shipped_by_name
+    from malspark.core.tool_declarations import ToolDeclarations
 
     seen: dict[str, tuple[str, str]] = {}
     unread: set[str] = set()
@@ -235,7 +235,7 @@ def test_a_record_built_from_entries_with_no_source_is_written_as_before() -> No
 
 def test_a_stored_record_reads_its_tool_by_name() -> None:
     stored = RecoveredValue(tool="floss", entry="ev_0002", scheme="stack", functions=["0x9"])
-    from maljan.reporting.models import EmulatedStrings
+    from malspark.reporting.models import EmulatedStrings
 
     record = EmulatedStrings(values={C2: "ev_0002"}, recovered_by={C2: [stored]})
     assert (
@@ -253,7 +253,7 @@ def test_a_stored_disputed_row_names_the_only_sandbox_that_marked_one() -> None:
 
 
 def test_a_stored_flow_marked_orig_is_read_as_marked() -> None:
-    from maljan.reporting.ledger_projection import network_from_ledger
+    from malspark.reporting.ledger_projection import network_from_ledger
 
     answer = {
         "tcp": [
@@ -347,7 +347,7 @@ def _benchmark() -> Path | None:
 
 @pytest.mark.parametrize("run", sorted(STORED_REBUILDS))
 def test_a_stored_run_s_ledger_rebuilds_the_sections_dev_drew(run: str) -> None:
-    from maljan.schemas.evidence import LedgerEntry
+    from malspark.schemas.evidence import LedgerEntry
 
     root = _benchmark()
     if root is None or not (root / run / "evidence.json").is_file():

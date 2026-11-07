@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from maljan.reporting.ledger_report import _binary_info, _Sections
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.reporting.ledger_report import _binary_info, _Sections
+from malspark.schemas.evidence import EvidenceCounter
 from tests.unit._ledger_helpers import entry
 
 

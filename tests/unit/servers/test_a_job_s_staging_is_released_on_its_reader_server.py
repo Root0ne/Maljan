@@ -25,9 +25,9 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.tool_pinning import DELIVERY_TOOLS
-from maljan.tools import readers, staging
-from maljan.tools.readers import RELEASE_JOB
+from malspark.agents.tool_pinning import DELIVERY_TOOLS
+from malspark.tools import readers, staging
+from malspark.tools.readers import RELEASE_JOB
 
 JOB = "a3d1c0de-0000-4000-8000-000000000025"
 OTHER = "a3d1c0de-0000-4000-8000-000000000026"
@@ -238,7 +238,7 @@ def _container(registry: _Registry) -> Any:
 @pytest.fixture
 def waits(monkeypatch: pytest.MonkeyPatch) -> list[float | None]:
     """Each coroutine run on this thread, its hard cap kept."""
-    from maljan.agents import base_agent
+    from malspark.agents import base_agent
 
     held: list[float | None] = []
 
@@ -252,14 +252,14 @@ def waits(monkeypatch: pytest.MonkeyPatch) -> list[float | None]:
 
 def _read_once(container: Any, key: str) -> None:
     """One reading sent to server ``key`` through its place, as the pack sends one."""
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     place = nodes._reader_place(container, key, SimpleNamespace(), None)
     place.call({"reader": "hashes", "arguments": {}, "job": JOB}, 1.0)
 
 
 def test_each_server_a_reading_ran_on_is_sent_the_job_s_release(waits: list[Any]) -> None:
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     analysis = _Handle([readers.RUN_READER, RELEASE_JOB])
     network = _Handle([readers.RUN_READER, RELEASE_JOB])
@@ -281,7 +281,7 @@ def test_each_server_a_reading_ran_on_is_sent_the_job_s_release(waits: list[Any]
 
 
 def test_a_job_whose_readings_all_ran_here_asks_no_server(waits: list[Any]) -> None:
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     registry = _Registry({"analysis": _Handle([RELEASE_JOB])})
     assert nodes.release_reader_staging(_container(registry)) == []
@@ -291,7 +291,7 @@ def test_a_job_whose_readings_all_ran_here_asks_no_server(waits: list[Any]) -> N
 def test_a_server_built_before_the_call_is_left_to_its_ttl_without_a_failure(
     waits: list[Any], caplog: pytest.LogCaptureFixture
 ) -> None:
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     old = _Handle([readers.RUN_READER])
     container = _container(_Registry({"analysis": old}))
@@ -313,7 +313,7 @@ def test_a_server_built_before_the_call_is_left_to_its_ttl_without_a_failure(
 def test_a_release_that_fails_is_logged_and_never_fails_the_job(
     answer: Any, raises: Exception | None, waits: list[Any]
 ) -> None:
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     handle = _Handle([readers.RUN_READER, RELEASE_JOB])
     container = _container(_Registry({"analysis": handle}))
@@ -323,7 +323,7 @@ def test_a_release_that_fails_is_logged_and_never_fails_the_job(
 
 
 def test_a_server_that_cannot_be_attached_is_left_to_its_ttl(waits: list[Any]) -> None:
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     handle = _Handle([readers.RUN_READER, RELEASE_JOB])
     container = _container(_Registry({"analysis": handle}))
@@ -336,7 +336,7 @@ def test_a_server_that_cannot_be_attached_is_left_to_its_ttl(waits: list[Any]) -
 def test_what_was_noted_for_another_job_is_never_released_for_this_one(
     waits: list[Any],
 ) -> None:
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     handle = _Handle([readers.RUN_READER, RELEASE_JOB])
     container = _container(_Registry({"analysis": handle}))
@@ -361,8 +361,8 @@ class _TornDown:
 
 
 def _service_container(tmp_path: Path) -> Any:
-    from maljan.core.container import ServiceContainer
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.container import ServiceContainer
+    from malspark.core.settings_overrides import build_settings
 
     return ServiceContainer(build_settings({}), mock=True, samples_dir=str(tmp_path), job_id=JOB)
 
@@ -370,7 +370,7 @@ def _service_container(tmp_path: Path) -> Any:
 def test_the_release_runs_at_teardown_before_the_servers_are_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     order: list[str] = []
     container = _service_container(tmp_path)
@@ -390,8 +390,8 @@ def test_the_release_runs_at_teardown_before_the_servers_are_closed(
 def test_a_release_that_hangs_or_raises_never_holds_or_fails_the_teardown(
     ending: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.core import container as container_module
-    from maljan.pipeline import nodes
+    from malspark.core import container as container_module
+    from malspark.pipeline import nodes
 
     order: list[str] = []
     container = _service_container(tmp_path)
@@ -419,7 +419,7 @@ def test_a_release_that_hangs_or_raises_never_holds_or_fails_the_teardown(
 def test_no_release_is_asked_of_a_job_that_attached_no_server(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     called: list[Any] = []
     monkeypatch.setattr(nodes, "release_reader_staging", called.append)
@@ -455,7 +455,7 @@ class _SlowToSet:
 def test_two_threads_noting_their_servers_at_once_lose_neither() -> None:
     import threading
 
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     keys = [f"server{n}" for n in range(8)]
     for _round in range(5):
@@ -486,7 +486,7 @@ class _SlowHandle(_Handle):
 
 
 def test_every_server_is_asked_at_once(waits: list[Any]) -> None:
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     handles = {key: _SlowHandle([readers.RUN_READER, RELEASE_JOB]) for key in ("a", "b", "c")}
     container = _container(_Registry(dict(handles)))
@@ -501,7 +501,7 @@ def test_every_server_is_asked_at_once(waits: list[Any]) -> None:
 def test_a_release_that_outlasts_its_cap_is_abandoned_not_waited_for(
     waits: list[Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.pipeline import nodes
+    from malspark.pipeline import nodes
 
     monkeypatch.setattr(nodes, "RELEASE_CALL_CAP_SECONDS", 0.2)
     container = _container(_Registry({"a": _SlowHandle([readers.RUN_READER, RELEASE_JOB])}))
@@ -512,8 +512,8 @@ def test_a_release_that_outlasts_its_cap_is_abandoned_not_waited_for(
 
 
 def test_the_teardown_budget_is_one_call_s_cap_and_a_second() -> None:
-    from maljan.core import container as container_module
-    from maljan.pipeline import nodes
+    from malspark.core import container as container_module
+    from malspark.pipeline import nodes
 
     assert nodes.RELEASE_CALL_CAP_SECONDS < container_module._RELEASE_BUDGET <= 6.0
     # The release and the synchronous sweep together stay inside the worker's 60 s cap.
@@ -521,9 +521,9 @@ def test_the_teardown_budget_is_one_call_s_cap_and_a_second() -> None:
 
 
 def test_a_cancelled_job_still_releases() -> None:
-    from maljan.agents.base_agent import run_coro_blocking
-    from maljan.core.cancellation import Cancellation, JobCancelled, bound
-    from maljan.pipeline import nodes
+    from malspark.agents.base_agent import run_coro_blocking
+    from malspark.core.cancellation import Cancellation, JobCancelled, bound
+    from malspark.pipeline import nodes
 
     handle = _Handle([readers.RUN_READER, RELEASE_JOB])
     container = _container(_Registry({"analysis": handle}))
@@ -545,10 +545,10 @@ def test_a_cancelled_job_still_releases() -> None:
 
 
 def test_a_server_that_declares_only_the_release_is_never_chosen_to_run_readings() -> None:
-    from maljan.core.config import Settings
-    from maljan.core.declared_reading import builtin_tools
-    from maljan.pipeline import nodes
-    from maljan.providers.servers import READER_DELIVERY_KIND, RELEASE_DELIVERY_KIND
+    from malspark.core.config import Settings
+    from malspark.core.declared_reading import builtin_tools
+    from malspark.pipeline import nodes
+    from malspark.providers.servers import READER_DELIVERY_KIND, RELEASE_DELIVERY_KIND
 
     servers = dict(Settings(_env_file=None).mcp.servers)
     analysis = servers["analysis"]
@@ -572,8 +572,8 @@ def test_a_server_that_declares_only_the_release_is_never_chosen_to_run_readings
 
 
 def test_a_mixed_entry_s_row_reads_as_its_least_isolated_place() -> None:
-    from maljan.analysis.isolation import CHILD, IN_PROCESS, LOCAL_SERVICE, REMOTE_SERVICE
-    from maljan.analysis.tool_effects import _least_isolated
+    from malspark.analysis.isolation import CHILD, IN_PROCESS, LOCAL_SERVICE, REMOTE_SERVICE
+    from malspark.analysis.tool_effects import _least_isolated
 
     placed = {
         "pack": (IN_PROCESS, False, ""),

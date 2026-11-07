@@ -25,20 +25,20 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from maljan.agents.judge_agent import JudgeVerdict
-from maljan.core.config import JUDGE_AGENT_KEY, ChunkingConfig, Settings
-from maljan.core.token_ledger import TokenLedger
-from maljan.core.truncation_ledger import TruncationLedger
-from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
-from maljan.pipeline.nodes import (
+from malspark.agents.judge_agent import JudgeVerdict
+from malspark.core.config import JUDGE_AGENT_KEY, ChunkingConfig, Settings
+from malspark.core.token_ledger import TokenLedger
+from malspark.core.truncation_ledger import TruncationLedger
+from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
+from malspark.pipeline.nodes import (
     ROOM_SPEAKER,
     make_judge_node,
     make_negotiation_node,
     make_revision_node,
 )
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import Bundle
 from tests.stages import paper_profile
 from tests.unit.pipeline.test_evidence_ledger_channel import _JudgeContainer
 from tests.unit.pipeline.test_pipeline_events import Recorder, _container
@@ -156,7 +156,7 @@ class TestAWatcherIsNotAParticipant:
             claims=[ClaimEvidence(claim="identical", evidence_ref="r", confidence=0.9)],
         )
         node = make_negotiation_node(container)
-        with patch("maljan.pipeline.nodes.detect_sycophancy", return_value=syco):
+        with patch("malspark.pipeline.nodes.detect_sycophancy", return_value=syco):
             asyncio.run(
                 node(
                     {

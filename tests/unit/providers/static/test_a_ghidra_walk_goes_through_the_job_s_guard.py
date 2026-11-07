@@ -15,13 +15,13 @@ from typing import Any
 import httpx
 import pytest
 
-from maljan.core.config import Settings
-from maljan.providers.base import StaticJobContext
-from maljan.providers.server_guard import ServerGuard, ServerResting, guarded_http
-from maljan.providers.static.ghidra import function_hashes as hashes
-from maljan.providers.static.ghidra import provider as ghidra_provider
-from maljan.providers.static.ghidra.passes import GhidraPasses, GhidraPassFailed
-from maljan.providers.static.ghidra.provider import GhidraStaticProvider
+from malspark.core.config import Settings
+from malspark.providers.base import StaticJobContext
+from malspark.providers.server_guard import ServerGuard, ServerResting, guarded_http
+from malspark.providers.static.ghidra import function_hashes as hashes
+from malspark.providers.static.ghidra import provider as ghidra_provider
+from malspark.providers.static.ghidra.passes import GhidraPasses, GhidraPassFailed
+from malspark.providers.static.ghidra.provider import GhidraStaticProvider
 
 URL = "http://ghidra.invalid"
 HELD = "/data/samples/.work/s.exe"
@@ -133,7 +133,7 @@ class TestTheShippedDeclaration:
     def test_the_hash_walk_on_a_shared_ghidra_sends_nothing_to_a_resting_one(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.providers.sample_open import SampleNotes
+        from malspark.providers.sample_open import SampleNotes
 
         sent: list[str] = []
 
@@ -159,7 +159,7 @@ class TestTheShippedDeclaration:
         assert not got and "tool server 'ghidra' is resting" in got.unavailable
 
     def test_the_pass_sends_nothing_to_a_resting_ghidra(self) -> None:
-        from maljan.providers.sample_open import SampleNotes
+        from malspark.providers.sample_open import SampleNotes
 
         sent: list[str] = []
 
@@ -314,7 +314,7 @@ class TestOneGuardPerJob:
     def test_the_agents_and_the_walks_share_the_provider_s_guard(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.providers.static.ghidra import http_client as ghidra_http_client
+        from malspark.providers.static.ghidra import http_client as ghidra_http_client
 
         built: list[Any] = []
 

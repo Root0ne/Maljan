@@ -25,7 +25,7 @@ so the extractor makes one pass over the blob instead of one per pattern.
 
 from __future__ import annotations
 
-from maljan.extractors.pe_extractor import _extract_string_iocs
+from malspark.extractors.pe_extractor import _extract_string_iocs
 
 
 def _kinds(blob: bytes) -> dict[str, list[str]]:

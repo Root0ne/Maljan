@@ -15,10 +15,10 @@ from typing import Any
 
 import pytest
 
-from maljan.memory import embeddings
-from maljan.memory.function_hash_store import FunctionHashStore
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import (
+from malspark.memory import embeddings
+from malspark.memory.function_hash_store import FunctionHashStore
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.memory.long_term_memory import (
     ISOLATED_JOB_SCOPE,
     OWNER_PATH_SEPARATOR,
     StoredCase,
@@ -28,8 +28,8 @@ from maljan.memory.long_term_memory import (
     owner_prefix_segments,
     owner_under,
 )
-from maljan.memory.memory_repair import OwnerPurgeFailed, purge_owned_points
-from maljan.memory.qdrant_store import OWNER_KEY, QdrantStore
+from malspark.memory.memory_repair import OwnerPurgeFailed, purge_owned_points
+from malspark.memory.qdrant_store import OWNER_KEY, QdrantStore
 
 UID = "3f1c2b9e-6a1d-4f7e-9b2a-0c8d7e6f5a41"
 JOBS = f"{UID}/job/"

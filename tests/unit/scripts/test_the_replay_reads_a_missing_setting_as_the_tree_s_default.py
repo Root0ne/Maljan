@@ -24,7 +24,7 @@ def _run(snapshot: dict[str, object]) -> rules._Run:
 
 
 def test_a_validation_setting_follows_the_tree_s_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    from maljan.core import settings_overrides
+    from malspark.core import settings_overrides
 
     real = settings_overrides.build_settings
 
@@ -42,8 +42,8 @@ def test_the_analyst_checks_run_on_a_moved_default(monkeypatch: pytest.MonkeyPat
     """A replay's answer checks are handed the tree's default, not a number of the replay's."""
     from types import SimpleNamespace
 
-    from maljan.core import settings_overrides
-    from maljan.pipeline import validation
+    from malspark.core import settings_overrides
+    from malspark.pipeline import validation
 
     real = settings_overrides.build_settings
 
@@ -74,7 +74,7 @@ def test_the_analyst_checks_run_on_a_moved_default(monkeypatch: pytest.MonkeyPat
 def test_an_agent_s_field_the_snapshot_lacks_is_the_tree_s_model_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.core.config import AgentDefinition
+    from malspark.core.config import AgentDefinition
 
     assert rules._agent_setting(_run({}), "static", "attck_techniques") is True
     monkeypatch.setattr(AgentDefinition.model_fields["attck_techniques"], "default", False)

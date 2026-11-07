@@ -28,8 +28,8 @@ from datetime import UTC, datetime
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.core.spend import LOOP_TURN_CALL, SpendCeilingStop, SpendMeter, validation_retry
-from maljan.llm.context_window import CHARS_PER_TOKEN
+from malspark.core.spend import LOOP_TURN_CALL, SpendCeilingStop, SpendMeter, validation_retry
+from malspark.llm.context_window import CHARS_PER_TOKEN
 
 FLASH = "deepseek-flash"
 CAP = 393_216
@@ -179,7 +179,7 @@ class TestALongPaidRunsTail:
 
 class TestARetryIsCountedAsOne:
     def test_a_validation_loop_s_correction_turn_is_admitted_as_a_retry(self) -> None:
-        from maljan.pipeline.validation import Violation, retry_with_feedback_sync
+        from malspark.pipeline.validation import Violation, retry_with_feedback_sync
 
         meter = SpendMeter(10.00, clock=lambda: OFF_PEAK)
         meter.plan_tail({"report": (FLASH, 2, ALLOWED, CAP)})

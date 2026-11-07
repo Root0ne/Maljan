@@ -21,14 +21,14 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     COMPACT_BUNDLE_RULES,
     JUDGE_VERDICT_SYSTEM,
     VERDICT_CUT_CODE,
     JudgeAgent,
     verdict_cut_violation,
 )
-from maljan.extractors.capability_matrix import _judge_relationship_rows
+from malspark.extractors.capability_matrix import _judge_relationship_rows
 
 DIGEST = "a" * 64
 
@@ -38,7 +38,7 @@ def _compact_bundle() -> dict[str, Any]:
     return {
         "type": "bundle",
         "id": "bundle--1",
-        "x_maljan_assessment": {"verdict": "Malware", "confidence": 0.9},
+        "x_malspark_assessment": {"verdict": "Malware", "confidence": 0.9},
         "objects": [
             {"type": "malware", "id": "malware--1", "name": "sample", "is_family": False},
             {
@@ -53,8 +53,8 @@ def _compact_bundle() -> dict[str, Any]:
                 "relationship_type": "uses",
                 "source_ref": "malware--1",
                 "target_ref": "attack-pattern--1",
-                "x_maljan_confidence": 0.8,
-                "x_maljan_evidence_basis": "static",
+                "x_malspark_confidence": 0.8,
+                "x_malspark_evidence_basis": "static",
             },
             {
                 "type": "indicator",
@@ -74,7 +74,7 @@ def _compact_bundle() -> dict[str, Any]:
                 "relationship_type": "indicates",
                 "source_ref": "indicator--1",
                 "target_ref": "malware--1",
-                "x_maljan_confidence": 1.0,
+                "x_malspark_confidence": 1.0,
             },
         ],
     }
@@ -134,7 +134,7 @@ class TestTheContract:
         assert "on the relationship only, never again on the attack-pattern or indicator" in text
         assert "leave out pattern_type" in text
         assert "on one line without indentation" in text
-        assert '{"type": "bundle", "id": "bundle--1", "x_maljan_assessment": {' in text
+        assert '{"type": "bundle", "id": "bundle--1", "x_malspark_assessment": {' in text
 
     def test_it_does_not_say_the_platform_writes_a_relationship(self) -> None:
         assert "the platform relates" not in JUDGE_VERDICT_SYSTEM

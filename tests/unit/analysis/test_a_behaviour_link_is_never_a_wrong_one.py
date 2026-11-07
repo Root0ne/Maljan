@@ -22,9 +22,9 @@ from tests.unit.analysis.test_observed_behaviour_is_linked_to_code import (
     _strings,
 )
 
-from maljan.analysis import behaviour_code as bc
-from maljan.reporting.detection_signatures import hiveless_key
-from maljan.reporting.ledger_report import BEHAVIOUR_CODE_SECTION, build_sections
+from malspark.analysis import behaviour_code as bc
+from malspark.reporting.detection_signatures import hiveless_key
+from malspark.reporting.ledger_report import BEHAVIOUR_CODE_SECTION, build_sections
 
 
 def _strings_of(*texts: str, total: int | None = None) -> bc.StaticInputs:
@@ -153,7 +153,7 @@ class TestTheGuestsOwnTraffic:
         assert link["attribution"] == bc.SAMPLE_TREE
 
     def test_a_value_no_row_attributes_is_marked_in_the_line_and_the_table(self) -> None:
-        from maljan.pipeline.triage_pack import render_pack
+        from malspark.pipeline.triage_pack import render_pack
 
         report = _network(tcp=[{"dst": "192.0.2.7"}])
         answer = bc.link_behaviour_to_code(report, None, _strings_of("192.0.2.7"))
@@ -280,7 +280,7 @@ class TestNothingSkippedSilently:
 def test_a_step_begun_after_the_pack_s_budget_is_a_not_run_entry(tmp_path: Any) -> None:
     from tests.unit.analysis.test_observed_behaviour_is_linked_to_code import _pack
 
-    from maljan.core.pack_steps import shipped_step
+    from malspark.core.pack_steps import shipped_step
 
     pack = _pack(tmp_path, _report())
     # One step has run, as the pack's earlier steps always have by now.

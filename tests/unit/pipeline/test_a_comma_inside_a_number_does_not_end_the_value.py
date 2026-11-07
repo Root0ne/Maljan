@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.pipeline.validation import field_pair_in
+from malspark.pipeline.validation import field_pair_in
 
 
 @pytest.mark.parametrize(

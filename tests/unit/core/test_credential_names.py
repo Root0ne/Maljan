@@ -10,9 +10,9 @@ from __future__ import annotations
 import pytest
 from tests.credential_shapes import lowercase_body, password
 
-from maljan.core import settings_masking as sm
-from maljan.core.config import MCPServerConfig
-from maljan.core.settings_catalog import (
+from malspark.core import settings_masking as sm
+from malspark.core.config import MCPServerConfig
+from malspark.core.settings_catalog import (
     configured_secret_values,
     names_a_credential_value,
     shown_secret_values,
@@ -156,7 +156,7 @@ def test_the_structural_rules_mask_a_credential_named_entry_whatever_its_value()
 
 @pytest.mark.parametrize("key", ["auth", "jwt", "cookie", "session_cookies", "PGPASSWORD"])
 def test_a_credential_named_query_value_is_masked_in_an_event(key):
-    from maljan.pipeline import events
+    from malspark.pipeline import events
 
     value = _secret(4)
     events.remember_secret_values([_secret(5)], scope="test")
@@ -169,7 +169,7 @@ def test_a_credential_named_query_value_is_masked_in_an_event(key):
 
 @pytest.mark.parametrize("key", ["author", "oauth", "authority", "auth_mode"])
 def test_a_query_value_about_a_credential_is_kept_in_an_event(key):
-    from maljan.pipeline import events
+    from malspark.pipeline import events
 
     events.remember_secret_values([_secret(5)], scope="test")
     try:

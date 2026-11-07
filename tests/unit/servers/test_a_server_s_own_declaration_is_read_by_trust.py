@@ -21,12 +21,12 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis.disclosure import disclosure_record
-from maljan.analysis.tool_effects import SERVER_STATED, effects_lines, effects_part
-from maljan.core.builtin_declarations import builtin_server_names, server_declaration
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.core.declaration_proposals import propose_tool
-from maljan.core.declared_reading import (
+from malspark.analysis.disclosure import disclosure_record
+from malspark.analysis.tool_effects import SERVER_STATED, effects_lines, effects_part
+from malspark.core.builtin_declarations import builtin_server_names, server_declaration
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.core.declaration_proposals import propose_tool
+from malspark.core.declared_reading import (
     SERVED_CLAIMS_KEY,
     SERVED_KEY,
     facts_of,
@@ -37,14 +37,14 @@ from maljan.core.declared_reading import (
     served_statement,
     tools_in_force,
 )
-from maljan.core.served_declarations import (
+from malspark.core.served_declarations import (
     FACTS_META_KEY,
     forget_served,
     register_served,
     served,
     served_tool_facts,
 )
-from maljan.core.tool_declarations import ToolDeclarations, declaration_version, launch_identity
+from malspark.core.tool_declarations import ToolDeclarations, declaration_version, launch_identity
 
 ROOT = Path(__file__).resolve().parents[3]
 OWN = (
@@ -121,7 +121,7 @@ def test_the_platform_s_own_sidecars_ship_the_trust_and_no_other_block_does() ->
 def test_a_block_without_the_trust_keeps_its_recorded_digest() -> None:
     off = MCPServerConfig.model_validate({"command": "x"})
     on = MCPServerConfig.model_validate({"command": "x", "trusts_served_declaration": True})
-    from maljan.core.tool_declarations import declaration_digest
+    from malspark.core.tool_declarations import declaration_digest
 
     # Off, the block's digest is the one it had before the field existed.
     before = off.model_dump(mode="json")
@@ -157,7 +157,7 @@ def test_a_hostile_listing_is_not_counted_as_observed_nor_declared_safe() -> Non
         }
         for i, tool in enumerate(("upload_to_cloud", "fake_run"))
     ]
-    from maljan.core.declared_reading import kind_of
+    from malspark.core.declared_reading import kind_of
 
     assert {kind_of(entry) for entry in entries} == {""}
     snapshot = {"mcp.servers.evil.transport": "stdio", "mcp.servers.evil.url": ""}
@@ -266,25 +266,25 @@ def test_an_untrusted_kind_changes_no_reader_but_the_reuse_veto(
 ) -> None:
     from types import SimpleNamespace
 
-    from maljan.agents.prompt_fragments import DECLARED_SOURCE_METADATA_KEY
-    from maljan.agents.prompt_tools import known_tool_names
-    from maljan.agents.tool_pinning import (
+    from malspark.agents.prompt_fragments import DECLARED_SOURCE_METADATA_KEY
+    from malspark.agents.prompt_tools import known_tool_names
+    from malspark.agents.tool_pinning import (
         SERVER_HINTS_METADATA_KEY,
         answers_the_job_again,
         changes_nothing,
     )
-    from maljan.core.declared_reading import declarations
-    from maljan.core.undeclared_tools import categories_of
+    from malspark.core.declared_reading import declarations
+    from malspark.core.undeclared_tools import categories_of
 
     settings = _settings()
     block = settings.mcp.servers["evil"]
-    monkeypatch.setattr("maljan.core.config.get_settings", lambda: settings)
+    monkeypatch.setattr("malspark.core.config.get_settings", lambda: settings)
     tool = SimpleNamespace(
         name="poll",
         metadata={
             DECLARED_SOURCE_METADATA_KEY: "mcp:evil",
             SERVER_HINTS_METADATA_KEY: {"readOnlyHint": True, "idempotentHint": True},
-            "maljan_read_only": True,
+            "malspark_read_only": True,
         },
     )
     before_digests = ToolDeclarations.from_settings(settings).digests()
@@ -482,7 +482,7 @@ def _block(**over: Any) -> MCPServerConfig:
 
 @pytest.fixture
 def toolkit(monkeypatch: pytest.MonkeyPatch) -> type[_Toolkit]:
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _Toolkit)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _Toolkit)
     _Toolkit.served = served_tool_facts(
         [_definition("t", {"kind": "strings", "long_running": True, "timeout_seconds": 90})]
     )
@@ -490,8 +490,8 @@ def toolkit(monkeypatch: pytest.MonkeyPatch) -> type[_Toolkit]:
 
 
 def test_a_synchronous_attach_keeps_the_server_s_declaration(toolkit: type[_Toolkit]) -> None:
-    from maljan.providers.server_guard import ServerGuard
-    from maljan.providers.servers import ServerHandle
+    from malspark.providers.server_guard import ServerGuard
+    from malspark.providers.servers import ServerHandle
 
     handle = ServerHandle("mine", _block(trusts_served_declaration=True))
     handle.guard = ServerGuard("mine")
@@ -509,8 +509,8 @@ def test_a_synchronous_attach_keeps_the_server_s_declaration(toolkit: type[_Tool
 def test_an_async_attach_keeps_it_and_the_guard_reads_the_server_s_budget(
     toolkit: type[_Toolkit],
 ) -> None:
-    from maljan.providers.server_guard import ServerGuard
-    from maljan.providers.servers import ServerHandle
+    from malspark.providers.server_guard import ServerGuard
+    from malspark.providers.servers import ServerHandle
 
     async def run() -> None:
         handle = ServerHandle("mine", _block(trusts_served_declaration=True))
@@ -529,7 +529,7 @@ def test_an_async_attach_keeps_it_and_the_guard_reads_the_server_s_budget(
 def test_a_replica_with_the_same_listing_changes_nothing_and_a_new_listing_does(
     toolkit: type[_Toolkit],
 ) -> None:
-    from maljan.providers.servers import ServerHandle
+    from malspark.providers.servers import ServerHandle
 
     first = ServerHandle("mine", _block())
     first.open("job-1")
@@ -552,8 +552,8 @@ def test_a_ghidra_stdio_attach_keeps_its_server_s_declaration(
 ) -> None:
     from mcp.types import Tool
 
-    from maljan.providers.base import StaticJobContext
-    from maljan.providers.static.ghidra import GhidraStaticProvider
+    from malspark.providers.base import StaticJobContext
+    from malspark.providers.static.ghidra import GhidraStaticProvider
 
     # The real toolkit over a listing that declares its tool's tag and budget.
     _stub_session(
@@ -589,7 +589,7 @@ def test_a_ghidra_stdio_attach_keeps_its_server_s_declaration(
     )
     settings = base.model_copy(update={"static": base.static.model_copy(update={"ghidra": cfg})})
     monkeypatch.setattr(
-        "maljan.providers.static.ghidra.provider.get_settings_or_none", lambda: settings
+        "malspark.providers.static.ghidra.provider.get_settings_or_none", lambda: settings
     )
     provider = GhidraStaticProvider.from_settings(settings)
     monkeypatch.setattr(provider, "_run_async", lambda coro: asyncio.run(coro))
@@ -613,8 +613,8 @@ def test_a_ghidra_stdio_attach_keeps_its_server_s_declaration(
 def test_the_toolkit_reads_the_listing_and_a_declaration_never_costs_an_attach(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.agents import mcp_client
-    from maljan.agents.mcp_client import MCPLangChainToolkit
+    from malspark.agents import mcp_client
+    from malspark.agents.mcp_client import MCPLangChainToolkit
 
     kit = MCPLangChainToolkit(label="probe")
     listing = [_definition("t", {"kind": "strings"})]
@@ -623,7 +623,7 @@ def test_the_toolkit_reads_the_listing_and_a_declaration_never_costs_an_attach(
     def broken(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("unreadable")
 
-    monkeypatch.setattr("maljan.core.served_declarations.served_tool_facts", broken)
+    monkeypatch.setattr("malspark.core.served_declarations.served_tool_facts", broken)
     assert kit._served_tool_facts(listing) == {}
     assert mcp_client is not None
 
@@ -631,7 +631,7 @@ def test_the_toolkit_reads_the_listing_and_a_declaration_never_costs_an_attach(
 def test_the_toolkit_tags_its_tools_as_in_force_from_the_first_attach() -> None:
     from types import SimpleNamespace
 
-    from maljan.agents.mcp_client import MCPLangChainToolkit
+    from malspark.agents.mcp_client import MCPLangChainToolkit
 
     asked: list[Any] = []
 
@@ -655,7 +655,7 @@ def test_the_toolkit_tags_its_tools_as_in_force_from_the_first_attach() -> None:
 def test_initialize_fills_what_a_real_server_declares() -> None:
     from mcp import StdioServerParameters
 
-    from maljan.agents.mcp_client import MCPLangChainToolkit
+    from malspark.agents.mcp_client import MCPLangChainToolkit
 
     params = StdioServerParameters(
         command=sys.executable,
@@ -736,7 +736,7 @@ def test_an_untrusted_kind_never_replaces_a_proposed_outward_one() -> None:
 def test_a_served_value_is_taken_only_where_it_is_no_less_careful(
     name: str, before: Any, said: Any, kept: Any
 ) -> None:
-    from maljan.core.declaration_proposals import _more_careful
+    from malspark.core.declaration_proposals import _more_careful
 
     assert _more_careful(name, before, said) == kept
 
@@ -752,7 +752,7 @@ def test_the_shipped_trust_holds_for_the_shipped_server() -> None:
 
 
 def test_the_shipped_trust_is_off_for_a_block_pointed_at_another_server() -> None:
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     settings = build_settings({"mcp": {"servers": {"analysis": {"command": "/usr/bin/other"}}}})
     assert settings.mcp.servers["analysis"].trusts_served_declaration is True
@@ -764,7 +764,7 @@ def test_the_shipped_trust_is_off_for_a_block_pointed_at_another_server() -> Non
 
 
 def test_an_operator_s_own_trust_holds_wherever_the_block_points() -> None:
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     settings = build_settings(
         {
@@ -788,7 +788,7 @@ def _stub_session(monkeypatch: pytest.MonkeyPatch, listing: list[Any]) -> None:
     from contextlib import asynccontextmanager
     from types import SimpleNamespace
 
-    from maljan.agents import mcp_client
+    from malspark.agents import mcp_client
 
     @asynccontextmanager
     async def stdio(params: Any) -> Any:
@@ -832,7 +832,7 @@ def _tagged_listing() -> list[Any]:
 def _kit(**kwargs: Any) -> Any:
     from mcp import StdioServerParameters
 
-    from maljan.agents.mcp_client import MCPLangChainToolkit
+    from malspark.agents.mcp_client import MCPLangChainToolkit
 
     params = StdioServerParameters(command=sys.executable, args=[])
     return MCPLangChainToolkit(params, label="stub", **kwargs)
@@ -882,7 +882,7 @@ def test_a_tag_that_cannot_be_read_keeps_the_given_ones(monkeypatch: pytest.Monk
 def test_a_failed_attach_keeps_nothing_the_server_declared(
     toolkit: type[_Toolkit],
 ) -> None:
-    from maljan.providers.servers import ServerHandle
+    from malspark.providers.servers import ServerHandle
 
     class _Failing(_Toolkit):
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -894,7 +894,7 @@ def test_a_failed_attach_keeps_nothing_the_server_declared(
             assert self._ask(self.served_tool_facts) is not None
             raise RuntimeError("the handshake failed")
 
-    import maljan.agents.mcp_client as mcp_client
+    import malspark.agents.mcp_client as mcp_client
 
     original = mcp_client.MCPLangChainToolkit
     mcp_client.MCPLangChainToolkit = _Failing  # type: ignore[misc]

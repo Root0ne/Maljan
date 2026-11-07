@@ -8,9 +8,9 @@ by its old id, so both read as the step it became.
 
 from __future__ import annotations
 
-from maljan.analysis.anti_analysis import SCAN_RENDERER, SCAN_TOOL
-from maljan.core import pack_steps
-from maljan.core.pack_steps import (
+from malspark.analysis.anti_analysis import SCAN_RENDERER, SCAN_TOOL
+from malspark.core import pack_steps
+from malspark.core.pack_steps import (
     LEGACY_STEP_NAMES,
     PackStep,
     effective_steps,
@@ -62,7 +62,7 @@ def test_a_server_step_keeps_the_tool_name_it_calls() -> None:
 
 
 def test_the_old_name_stays_declared_with_the_same_kind() -> None:
-    from maljan.core.builtin_declarations import _PACK_TOOLS
+    from malspark.core.builtin_declarations import _PACK_TOOLS
 
     assert _PACK_TOOLS[OLD] == _PACK_TOOLS[NEW]
     assert _PACK_TOOLS[NEW]["kind"] == "anti_analysis_scan"

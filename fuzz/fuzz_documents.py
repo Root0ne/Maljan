@@ -22,7 +22,7 @@ import atheris
 sys.modules["py7zr"] = None  # type: ignore[assignment]
 
 with atheris.instrument_imports():
-    from maljan.tools import binary
+    from malspark.tools import binary
 
 RELATIONSHIPS = (
     '<?xml version="1.0" encoding="UTF-8"?>'

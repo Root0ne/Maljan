@@ -21,7 +21,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from maljan.agents.base_agent import (
+from malspark.agents.base_agent import (
     FINAL_ANSWER_NUDGE,
     NO_STRUCTURED_REPORT_REASON,
     NO_STRUCTURED_REPORT_STATUS,
@@ -82,7 +82,7 @@ class TestWhatCountsAsAReport:
         assert answer_is_isr(_REPORT)
 
     def test_a_findings_block_is_a_report(self) -> None:
-        block = '```maljan-findings\n{"findings": []}\n```'
+        block = '```malspark-findings\n{"findings": []}\n```'
         assert answer_is_isr(f"Some prose.\n\n{block}")
 
     def test_an_intention_sentence_is_not(self) -> None:
@@ -208,8 +208,8 @@ class TestTheStatusItReports:
 
 class TestTheStatusTheNodeReads:
     def test_the_declared_status_wins(self) -> None:
-        from maljan.pipeline.nodes import isr_status
-        from maljan.schemas.isr_models import AgentISR
+        from malspark.pipeline.nodes import isr_status
+        from malspark.schemas.isr_models import AgentISR
 
         isr = AgentISR(
             agent_id="static",
@@ -220,8 +220,8 @@ class TestTheStatusTheNodeReads:
         assert isr_status(isr) == NO_STRUCTURED_REPORT_STATUS
 
     def test_the_claim_list_decides_otherwise(self) -> None:
-        from maljan.pipeline.nodes import isr_status
-        from maljan.schemas.isr_models import AgentISR
+        from malspark.pipeline.nodes import isr_status
+        from malspark.schemas.isr_models import AgentISR
 
         assert isr_status(AgentISR(agent_id="static", domain="static")) == "no_data"
 
@@ -270,7 +270,7 @@ class TestTheLoopKeepsWhatItHad:
         analyst = _Analyst(_FakeLLM([]))
         asked: list[bool] = []
         analyst._nudge_for_final_answer = lambda *a, **k: asked.append(True)  # type: ignore[method-assign,return-value]
-        block = 'Here is what I found.\n\n```maljan-findings\n{"findings": []}\n```'
+        block = 'Here is what I found.\n\n```malspark-findings\n{"findings": []}\n```'
 
         assert analyst._settle_final_answer(block, _conversation(), 60, 1.0, 40) == block
         assert asked == []

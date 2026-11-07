@@ -33,14 +33,14 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import Settings
-from maljan.core.exceptions import AnalystError
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.fallback import FallbackChatModel
-from maljan.llm.generation_rate import note_pieces
-from maljan.llm.transient import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.core.config import Settings
+from malspark.core.exceptions import AnalystError
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.fallback import FallbackChatModel
+from malspark.llm.generation_rate import note_pieces
+from malspark.llm.transient import (
     FAILED_ATTEMPT_CALL,
     PIECES_ATTRIBUTE,
     RETRIES_KEY,
@@ -75,7 +75,7 @@ def _no_real_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(asyncio, "sleep", _instant)
-    monkeypatch.setattr("maljan.llm.transient.time.sleep", lambda _s: None)
+    monkeypatch.setattr("malspark.llm.transient.time.sleep", lambda _s: None)
 
 
 class _Spend:
@@ -256,7 +256,7 @@ class TestAFailedAttemptIsChargedAsBilled:
         assert spend.failed_attempts() == []
 
     def test_a_cancelled_request_is_charged_the_prompt_it_sent(self) -> None:
-        from maljan.llm.transient import recorder_of
+        from malspark.llm.transient import recorder_of
 
         spend = _Spend()
         ledger = TokenLedger(spend=spend)
@@ -271,7 +271,7 @@ class TestAFailedAttemptIsChargedAsBilled:
         assert "cancelled" in estimated["source"]
 
     def test_an_abandoned_structured_answer_is_charged_its_tool_call_arguments(self) -> None:
-        from maljan.llm.transient import charge_abandoned
+        from malspark.llm.transient import charge_abandoned
 
         spend = _Spend()
         llm = attach_retry_recorder(_model([]), TokenLedger(spend=spend), "static")
@@ -487,7 +487,7 @@ def _text_then_overloaded(
 
 
 def _broken_then_answered(server: ThreadingHTTPServer, broken: bytes) -> _Spend:
-    from maljan.llm.anthropic_provider import AnthropicProvider
+    from malspark.llm.anthropic_provider import AnthropicProvider
 
     server.script = [broken, streamed(_answer("answered"))]  # type: ignore[attr-defined]
     host, port = server.server_address[:2]
@@ -508,9 +508,9 @@ def test_a_broken_anthropic_stream_is_charged_the_prompt_usage_it_reported(
     server: ThreadingHTTPServer,
 ) -> None:
     """``message_start`` stated the input; only the output that streamed is estimated."""
-    from maljan.core.spend import OUTPUT_ESTIMATED
-    from maljan.llm.context_window import CHARS_PER_TOKEN
-    from maljan.llm.transient import FAILED_STREAM_OUTPUT_ESTIMATE
+    from malspark.core.spend import OUTPUT_ESTIMATED
+    from malspark.llm.context_window import CHARS_PER_TOKEN
+    from malspark.llm.transient import FAILED_STREAM_OUTPUT_ESTIMATE
 
     opening = {
         "input_tokens": 40,
@@ -555,7 +555,7 @@ def test_a_stream_broken_before_its_answer_is_charged_its_prompt_alone(
 
 def test_an_output_estimate_is_priced_beside_the_reported_prompt() -> None:
     """The record says which part is estimated, and only that part counts as estimated."""
-    from maljan.core.spend import OUTPUT_ESTIMATED, SpendMeter
+    from malspark.core.spend import OUTPUT_ESTIMATED, SpendMeter
 
     prices = {"m1": {"input_usd_per_mtok": 1.0, "output_usd_per_mtok": 4.0}}
     meter = SpendMeter(None, prices)

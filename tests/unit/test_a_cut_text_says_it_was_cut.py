@@ -13,10 +13,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from maljan.agents.base_agent import evidence_ref_text
-from maljan.pipeline.events import claims_to_payload
-from maljan.reporting.composer import _bundle_text
-from maljan.utils.marked_cut import CUT_MARK, marked_cut
+from malspark.agents.base_agent import evidence_ref_text
+from malspark.pipeline.events import claims_to_payload
+from malspark.reporting.composer import _bundle_text
+from malspark.utils.marked_cut import CUT_MARK, marked_cut
 
 # The shape of the stored evidence that was printed as prose: a line longer
 # than the field, the model's own next sentence starting just before the cut.
@@ -44,7 +44,7 @@ class TestTheMark:
 class TestTheStoredEvidence:
     def test_a_cut_line_says_so(self) -> None:
         width = len(LONG_EVIDENCE) - 60
-        with patch("maljan.agents.base_agent.evidence_ref_width", return_value=width):
+        with patch("malspark.agents.base_agent.evidence_ref_width", return_value=width):
             stored = evidence_ref_text(LONG_EVIDENCE)
 
         assert CUT_MARK in stored
@@ -80,7 +80,7 @@ class TestWhereItIsShown:
 
     def test_the_attack_table_shows_a_long_procedure_whole(self) -> None:
         """The matrix may wrap a statement; it never cuts one, so there is no mark to add."""
-        from maljan.extractors.capability_matrix import build_capability_matrix
+        from malspark.extractors.capability_matrix import build_capability_matrix
 
         claim = SimpleNamespace(
             claim="w" * 400,

@@ -11,7 +11,7 @@ one is asked about, once, and never filled in.
 
 from __future__ import annotations
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     INDICATOR_TYPE_CONTRADICTS_VERDICT_CODE,
     INDICATOR_TYPE_VOCABULARY_CODE,
     IS_FAMILY_CONTRADICTS_FAMILY_CODE,
@@ -20,7 +20,7 @@ from maljan.pipeline.validation import (
     MALWARE_TYPES,
     validate_verdict_bundle,
 )
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.stix_models import Bundle
 
 DOMAIN = "putty.projects.tartarus.org"
 
@@ -29,7 +29,7 @@ def _bundle(verdict: str, *objects: dict) -> Bundle:
     return Bundle.model_validate(
         {
             "objects": list(objects),
-            "x_maljan_assessment": {"verdict": verdict, "confidence": 0.9},
+            "x_malspark_assessment": {"verdict": verdict, "confidence": 0.9},
         }
     )
 
@@ -93,7 +93,7 @@ def _attributed(*objects: dict) -> Bundle:
     return Bundle.model_validate(
         {
             "objects": list(objects),
-            "x_maljan_assessment": {
+            "x_malspark_assessment": {
                 "verdict": "Malware",
                 "confidence": 0.9,
                 "family": {"name": FAMILY, "confidence": 0.9, "evidence_ids": ["ev_0001"]},
@@ -231,7 +231,7 @@ class TestAMalwareObjectsKind:
         }
 
     def test_the_prompt_says_when_an_object_stands_for_the_family(self) -> None:
-        from maljan.agents.judge_agent import JUDGE_VERDICT_SYSTEM, MALWARE_OBJECT_RULE
+        from malspark.agents.judge_agent import JUDGE_VERDICT_SYSTEM, MALWARE_OBJECT_RULE
 
         assert MALWARE_OBJECT_RULE in JUDGE_VERDICT_SYSTEM
         assert "family.name" in MALWARE_OBJECT_RULE
@@ -251,12 +251,12 @@ class TestTheQuestionsReadTheAnswerTheJudgeWrote:
         import json
         from unittest.mock import MagicMock
 
-        from maljan.agents.judge_agent import JudgeAgent
+        from malspark.agents.judge_agent import JudgeAgent
 
         answer = {
             "type": "bundle",
             "id": "bundle--1",
-            "x_maljan_assessment": {
+            "x_malspark_assessment": {
                 "verdict": "Malware",
                 "confidence": 0.9,
                 "family": {"name": FAMILY, "confidence": 0.9, "evidence_ids": ["ev_0001"]},

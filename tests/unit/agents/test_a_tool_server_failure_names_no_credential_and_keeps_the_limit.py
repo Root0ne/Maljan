@@ -18,8 +18,8 @@ import pytest
 from mcp import StdioServerParameters
 from mcp.types import CallToolResult, TextContent
 
-from maljan.agents.mcp_client import TRUNCATION_MARKER, MCPLangChainToolkit
-from maljan.core.truncation_ledger import TruncationLedger
+from malspark.agents.mcp_client import TRUNCATION_MARKER, MCPLangChainToolkit
+from malspark.core.truncation_ledger import TruncationLedger
 from tests.credential_shapes import password
 
 
@@ -67,7 +67,7 @@ class TestNoCredentialIsNamed:
         def _refuse(params: Any) -> Any:
             raise OSError("cannot start")
 
-        monkeypatch.setattr("maljan.agents.mcp_client.stdio_client", _refuse)
+        monkeypatch.setattr("malspark.agents.mcp_client.stdio_client", _refuse)
         params = StdioServerParameters(command="tool-server", args=["--api-key", secret, "--v"])
         toolkit = MCPLangChainToolkit(params)
         with caplog.at_level("INFO"), pytest.raises(OSError):
@@ -126,7 +126,7 @@ class TestAnErrorIsHeldToTheLimit:
 
 class TestEveryArgumentShapeIsMasked:
     def test_a_credential_assignment_or_header_is_masked_whatever_flag_precedes_it(self) -> None:
-        from maljan.core.settings_masking import masked_args
+        from malspark.core.settings_masking import masked_args
 
         secret = password()
         args = [
@@ -160,7 +160,7 @@ class TestEveryArgumentShapeIsMasked:
 
 class TestEveryCredentialHeaderIsMasked:
     def test_a_cookie_and_a_secret_header_are_masked(self) -> None:
-        from maljan.core.settings_masking import masked_args
+        from malspark.core.settings_masking import masked_args
 
         secret = password()
         masked = masked_args(["-H", f"Cookie: sid={secret}", "-H", f"X-Client-Secret: {secret}"])

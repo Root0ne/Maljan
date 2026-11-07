@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.static_analyst import _parse_disputes
+from malspark.agents.static_analyst import _parse_disputes
 
 LENIENT = (
     # No EVIDENCE line: the strict reader reads no claim, the lenient one does.
@@ -77,9 +77,9 @@ class TestTheSectionReader:
 @pytest.mark.parametrize(
     "module, cls",
     [
-        ("maljan.agents.static_analyst", "StaticAnalyst"),
-        ("maljan.agents.dynamic_analyst", "DynamicAnalyst"),
-        ("maljan.agents.network_analyst", "NetworkAnalyst"),
+        ("malspark.agents.static_analyst", "StaticAnalyst"),
+        ("malspark.agents.dynamic_analyst", "DynamicAnalyst"),
+        ("malspark.agents.network_analyst", "NetworkAnalyst"),
     ],
 )
 def test_the_lenient_reading_keeps_the_disputes(module: str, cls: str) -> None:
@@ -93,8 +93,8 @@ def test_the_lenient_reading_keeps_the_disputes(module: str, cls: str) -> None:
 
 
 def test_a_generic_agent_s_revision_keeps_its_disputes() -> None:
-    from maljan.agents.composition import ResolvedAgent
-    from maljan.agents.configurable_analyst import ConfigurableAnalyst, _Run
+    from malspark.agents.composition import ResolvedAgent
+    from malspark.agents.configurable_analyst import ConfigurableAnalyst, _Run
 
     resolved = ResolvedAgent(
         key="reverser_x",
@@ -111,8 +111,8 @@ def test_a_generic_agent_s_revision_keeps_its_disputes() -> None:
 
 
 def test_a_generic_agent_s_findings_block_is_no_dispute() -> None:
-    from maljan.agents.composition import ResolvedAgent
-    from maljan.agents.configurable_analyst import ConfigurableAnalyst, _Run
+    from malspark.agents.composition import ResolvedAgent
+    from malspark.agents.configurable_analyst import ConfigurableAnalyst, _Run
 
     resolved = ResolvedAgent(
         key="reverser_x",
@@ -123,7 +123,7 @@ def test_a_generic_agent_s_findings_block_is_no_dispute() -> None:
         llm=None,
     )
     analyst = ConfigurableAnalyst("reverser_x", resolved, llm=None)  # type: ignore[arg-type]
-    fenced = LENIENT + '```maljan-findings\n{"findings": [], "artifacts": []}\n```\n'
+    fenced = LENIENT + '```malspark-findings\n{"findings": [], "artifacts": []}\n```\n'
     analyst._run = lambda messages, what: _Run(text=fenced, degraded=False)  # type: ignore[method-assign]
     _text, isr = analyst.revise_isr("{}", "own", {"peer": "theirs"}, "feedback", 1)
     assert isr.dissent_items == ["Dynamic analyst claims no injection but the strings name it."]

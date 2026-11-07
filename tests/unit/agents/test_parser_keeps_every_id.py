@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import logging
 
-from maljan.analysis.technique_ids import technique_ids_in
+from malspark.analysis.technique_ids import technique_ids_in
 
 
 def _analyst():
     """A real analyst's free-text path with nothing behind it (see
     test_tool_call_scaffolding._isr_from_text)."""
-    from maljan.agents.static_analyst import StaticAnalyst
+    from malspark.agents.static_analyst import StaticAnalyst
 
     analyst = StaticAnalyst.__new__(StaticAnalyst)
     analyst.name = "static"

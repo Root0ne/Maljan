@@ -29,16 +29,16 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage
 
-from maljan.core.config import Settings, get_settings, install_settings
-from maljan.pipeline.validation import EntryTexts
-from maljan.reporting.absence_answers import (
+from malspark.core.config import Settings, get_settings, install_settings
+from malspark.pipeline.validation import EntryTexts
+from malspark.reporting.absence_answers import (
     FailureCounts,
     count_disagrees,
     failure_counts,
     kept_absence,
     quote_stands,
 )
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     BoundValue,
     FileHashes,
     FlowStep,
@@ -47,7 +47,7 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.section_agreement import (
+from malspark.reporting.section_agreement import (
     ABSENCE_KEPT_CODE,
     DROPPED_CODE,
     FAILURE_COUNT_CODE,
@@ -65,7 +65,7 @@ from maljan.reporting.section_agreement import (
     passages_of,
     prompt_text,
 )
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 from tests.unit.reporting._report_inventory import stored_runs
 
 BASE = 0x2470000
@@ -583,7 +583,7 @@ def test_a_quote_stands_whole_and_long_enough() -> None:
 
 
 def _stored(name: str) -> tuple[MalwareReport, list[Any]]:
-    from maljan.reporting.follow_up import stored_ledger
+    from malspark.reporting.follow_up import stored_ledger
 
     root = stored_runs()
     if root is None or not (root / name / "report.json").is_file():
@@ -672,7 +672,7 @@ def test_haiku12_s_retry_names_the_sources_a_true_limitation_may_be_kept_on(
 
 
 def test_haiku12_s_true_limitation_kept_on_the_named_source_stands() -> None:
-    from maljan.reporting.section_agreement import apply_rows
+    from malspark.reporting.section_agreement import apply_rows
 
     report, ledger = _stored("haiku12")
     passages = passages_of(report, entries=ledger)
@@ -694,7 +694,7 @@ def test_haiku12_s_true_limitation_kept_on_the_named_source_stands() -> None:
 
 
 def test_haiku12_s_c1_to_c6_kept_unsourced_again_are_left_out_and_recorded() -> None:
-    from maljan.reporting.section_agreement import apply_rows
+    from malspark.reporting.section_agreement import apply_rows
 
     report, ledger = _stored("haiku12")
     passages = passages_of(report, entries=ledger)
@@ -729,7 +729,7 @@ def test_haiku12_s_c2_to_c5_are_kept_on_no_generic_quote_and_no_empty_source(whi
 
 
 def test_haiku12_s_c2_to_c5_kept_unsourced_on_both_answers_are_left_out_and_recorded() -> None:
-    from maljan.reporting.section_agreement import apply_rows
+    from malspark.reporting.section_agreement import apply_rows
 
     report, ledger = _stored("haiku12")
     passages = passages_of(report, entries=ledger)
@@ -837,7 +837,7 @@ def test_haiku12_s_brute_forced_keeps_are_refused(which: str, source: str, quote
 
 
 def test_a_keep_resting_on_fewer_than_two_subject_words_is_recorded() -> None:
-    from maljan.reporting.section_agreement import Passage, apply_rows
+    from malspark.reporting.section_agreement import Passage, apply_rows
 
     sentence = "Packing is not established [ev_0002]."
     closing = Passage(
@@ -982,7 +982,7 @@ def test_haiku12_s_c1_c4_c5_c6_stay_refused_on_any_body_sentence() -> None:
 def test_haiku12_s_framed_false_claims_are_kept_on_no_scene_setting_quote(
     sentence: str, source: str, quote: str
 ) -> None:
-    from maljan.reporting.section_agreement import _quote_problem, generic_words
+    from malspark.reporting.section_agreement import _quote_problem, generic_words
 
     _passages, by_id, _said = _haiku12_limitations()
     for generic in (frozenset(), generic_words(by_id)):
@@ -992,7 +992,7 @@ def test_haiku12_s_framed_false_claims_are_kept_on_no_scene_setting_quote(
 def _keepable(run: str, passage: str, opening: str) -> bool:
     """Whether a closing sentence of a stored run can be kept: on no source, or on some
     source sentence or denying clause, beside a fact tying its address."""
-    from maljan.reporting.absence_answers import negated_clauses
+    from malspark.reporting.absence_answers import negated_clauses
 
     report, ledger = _stored(run)
     passages = passages_of(report, entries=ledger)
@@ -1082,7 +1082,7 @@ def test_the_stored_runs_false_closing_sentences_cannot_be_kept(
 def test_haiku12_s_reading_fact_backs_no_other_denial_of_its_address(
     sentence: str, sources: tuple[str, ...]
 ) -> None:
-    from maljan.reporting.section_agreement import _quote_problem
+    from malspark.reporting.section_agreement import _quote_problem
 
     _passages, by_id, _said = _haiku12_limitations()
     facts = [by_id[_fact_about(by_id, offset)] for offset in sources]
@@ -1090,7 +1090,7 @@ def test_haiku12_s_reading_fact_backs_no_other_denial_of_its_address(
 
 
 def test_haiku12_s_reading_denial_is_kept_on_its_own_unread_fact() -> None:
-    from maljan.reporting.section_agreement import _quote_problem
+    from malspark.reporting.section_agreement import _quote_problem
 
     _passages, by_id, said = _haiku12_limitations()
     fact = by_id[_fact_about(by_id, "0xc42c")]
@@ -1101,7 +1101,11 @@ def test_a_list_keep_leaving_out_an_item_a_source_speaks_of_is_refused() -> None
     passages, by_id, _said = _haiku12_limitations()
     sentence = "Whether the gates pass, and the C2 reply format, were not established."
     quote = "Whether the gates pass on a live host is not established from the sandbox run."
-    from maljan.reporting.section_agreement import _quote_problem, generic_words, keep_record_reason
+    from malspark.reporting.section_agreement import (
+        _quote_problem,
+        generic_words,
+        keep_record_reason,
+    )
 
     problem = _quote_problem(
         sentence, quote, [by_id["command_and_control"]], generic_words(by_id), by_id
@@ -1145,7 +1149,7 @@ def test_haiku8_s_true_limitation_repeated_on_its_body_passage_stands() -> None:
 
 
 def test_a_subject_of_generic_words_alone_stands_as_it_is() -> None:
-    from maljan.reporting.section_agreement import kept_subject
+    from malspark.reporting.section_agreement import kept_subject
 
     sentence = "The sandbox run was not observed."
     assert kept_subject(sentence, frozenset({"sandbox", "run"})) == frozenset({"sandbox", "run"})

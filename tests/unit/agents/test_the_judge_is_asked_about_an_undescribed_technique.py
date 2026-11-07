@@ -15,22 +15,22 @@ import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     TECHNIQUE_QUESTION_SYSTEM,
     JudgeAgent,
     technique_question_text,
 )
-from maljan.extractors.capability_matrix import (
+from malspark.extractors.capability_matrix import (
     build_capability_matrix,
     judge_questions,
     techniques_for_the_judge,
 )
-from maljan.pipeline.validation import undescribed_technique_finding
-from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import Bundle, TechniqueReview
-from maljan.tools import knowledge
+from malspark.pipeline.validation import undescribed_technique_finding
+from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import Bundle, TechniqueReview
+from malspark.tools import knowledge
 
 UNDESCRIBED = "T1003"  # OS Credential Dumping, carried by the bundle
 DESCRIBED = "T1112"  # Modify Registry, carried and described
@@ -109,7 +109,7 @@ def _ask(answer: str) -> tuple[TechniqueReview | None, _Llm]:
 
 def _cells(review: TechniqueReview | None) -> tuple[dict[str, Any], set[str]]:
     bundle = _bundle()
-    bundle.x_maljan_technique_review = review
+    bundle.x_malspark_technique_review = review
     cells, mappings = build_capability_matrix(stix_output=bundle.model_dump(), isr_reports=_isrs())
     return {c.technique_id: c for c in cells}, {m.technique_id for m in mappings}
 
@@ -189,7 +189,7 @@ class TestTheReportShowsTheAnswer:
     def test_the_markdown_carries_both(self) -> None:
         review, _ = _ask(f"{UNDESCRIBED}: drop: nothing reads credentials\n{LEFT_OUT}: drop: no")
         bundle = _bundle()
-        bundle.x_maljan_technique_review = review
+        bundle.x_malspark_technique_review = review
         cells, mappings = build_capability_matrix(
             stix_output=bundle.model_dump(), isr_reports=_isrs()
         )

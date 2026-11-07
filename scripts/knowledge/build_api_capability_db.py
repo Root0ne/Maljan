@@ -2803,7 +2803,7 @@ def main() -> int:
         return 1
 
     behaviour = {
-        "schema": "maljan-api-behaviour/v1",
+        "schema": "malspark-api-behaviour/v1",
         "version": "1.0",
         "platforms": {
             platform: {cat: _block(platform, cat) for cat in categories}
@@ -2811,7 +2811,7 @@ def main() -> int:
         },
     }
     attck = {
-        "schema": "maljan-api-attck/v1",
+        "schema": "malspark-api-attck/v1",
         "version": "1.0",
         "techniques": [_emitted(t) for t in techniques],
     }

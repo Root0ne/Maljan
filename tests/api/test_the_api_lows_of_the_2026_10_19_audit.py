@@ -55,7 +55,7 @@ async def test_a_client_that_keeps_pinging_loses_its_socket_when_the_token_expir
 
     user_id = uuid.uuid4()
     ws = MagicMock(spec=WebSocket)
-    ws.headers = {"sec-websocket-protocol": "maljan.v1, maljan.v1.tok"}
+    ws.headers = {"sec-websocket-protocol": "malspark.v1, malspark.v1.tok"}
     ws.close = AsyncMock()
     ws.accept = AsyncMock()
     ws.send_text = AsyncMock()
@@ -132,7 +132,7 @@ async def test_a_job_that_is_not_there_and_one_that_is_not_yours_are_refused_ali
     reasons: list[str] = []
     for owner in (None, uuid.uuid4()):
         ws = MagicMock(spec=WebSocket)
-        ws.headers = {"sec-websocket-protocol": "maljan.v1, maljan.v1.tok"}
+        ws.headers = {"sec-websocket-protocol": "malspark.v1, malspark.v1.tok"}
         ws.close = AsyncMock()
         ws.accept = AsyncMock()
         account = MagicMock(is_active=True, token_generation=0)
@@ -170,7 +170,9 @@ async def test_the_deep_health_check_serves_the_kind_of_failure_not_the_drivers_
     secret_host = ".".join(["10", "9", "8", "7"])
 
     async def _boom() -> None:
-        raise ConnectionError(f'password authentication failed for user "maljan" at {secret_host}')
+        raise ConnectionError(
+            f'password authentication failed for user "malspark" at {secret_host}'
+        )
 
     async def _ok() -> None:
         return None
@@ -193,7 +195,7 @@ class _ThreadNoting:
     """An in-memory store that records which thread each purge ran on."""
 
     def __init__(self) -> None:
-        from maljan.memory.in_memory_store import InMemoryStore
+        from malspark.memory.in_memory_store import InMemoryStore
 
         self.inner = InMemoryStore()
         self.threads: list[int] = []
@@ -378,8 +380,8 @@ async def test_a_job_read_of_the_settings_refuses_a_secret_it_cannot_decrypt() -
         load_core_overrides,
         refusing_undecryptable_secrets,
     )
-    from maljan.core import settings_secrets as box
-    from maljan.core.settings_overrides import StoredValueRefused
+    from malspark.core import settings_secrets as box
+    from malspark.core.settings_overrides import StoredValueRefused
 
     rows = [_secret_row("core.llm.api_key"), _secret_row("api.cookie_secret")]
     scalars = MagicMock()
@@ -644,7 +646,7 @@ async def test_a_server_map_save_that_withdraws_a_tool_a_stored_definition_uses_
 @pytest.mark.asyncio
 async def test_a_job_is_refused_at_submit_when_a_core_secret_cannot_be_decrypted() -> None:
     from app.api.v1.jobs import _undecryptable_secrets
-    from maljan.core import settings_secrets as box
+    from malspark.core import settings_secrets as box
 
     scalars = MagicMock()
     scalars.all.return_value = [_secret_row("core.llm.api_key")]
@@ -663,8 +665,8 @@ async def test_a_job_is_refused_at_submit_when_a_core_secret_cannot_be_decrypted
 
 
 def test_a_purge_that_fails_partway_leaves_a_row_with_what_it_removed() -> None:
-    from maljan.memory.in_memory_store import InMemoryStore
-    from maljan.memory.long_term_memory import StoredCase
+    from malspark.memory.in_memory_store import InMemoryStore
+    from malspark.memory.long_term_memory import StoredCase
 
     class _Breaks(_ThreadNoting):
         def purge_low_quality(self, **kwargs: Any) -> int:
@@ -795,7 +797,7 @@ def _server_rows(bound_to: list[str]) -> list[Any]:
 @pytest.mark.asyncio
 async def test_a_server_token_the_job_never_uses_does_not_refuse_it() -> None:
     from app.api.v1.jobs import _undecryptable_secrets
-    from maljan.core import settings_secrets as box
+    from malspark.core import settings_secrets as box
 
     db = _db_with(_server_rows(["judge"]))
     with patch.object(box, "decrypt", side_effect=box.SecretsUnavailable("rotated")):
@@ -807,7 +809,7 @@ async def test_a_server_token_the_job_never_uses_does_not_refuse_it() -> None:
 @pytest.mark.asyncio
 async def test_an_orphan_token_alone_lets_the_job_through() -> None:
     from app.api.v1.jobs import _undecryptable_secrets
-    from maljan.core import settings_secrets as box
+    from malspark.core import settings_secrets as box
 
     rows = _server_rows([])
     db = _db_with([rows[0], rows[2]])
@@ -838,22 +840,22 @@ async def test_a_non_admin_is_not_told_the_setting_key() -> None:
 
 
 def test_the_reputation_servers_of_the_triage_pack_are_called_unless_it_is_off() -> None:
-    from maljan.agents.composition import servers_a_job_calls
-    from maljan.core.settings_overrides import build_settings
+    from malspark.agents.composition import servers_a_job_calls
+    from malspark.core.settings_overrides import build_settings
 
     lookups = [
         SimpleNamespace(server="rep", enabled=True),
         SimpleNamespace(server="x", enabled=False),
     ]
-    with patch("maljan.core.reputation.pack_lookups", return_value=lookups):
+    with patch("malspark.core.reputation.pack_lookups", return_value=lookups):
         assert "rep" in servers_a_job_calls(build_settings({}))
         assert "x" not in servers_a_job_calls(build_settings({}))
         assert "rep" not in servers_a_job_calls(build_settings({"triage.reputation": "off"}))
 
 
 def test_the_generic_static_provider_server_is_called_when_any_agent_reads_it() -> None:
-    from maljan.agents.composition import servers_a_job_calls
-    from maljan.core.settings_overrides import build_settings
+    from malspark.agents.composition import servers_a_job_calls
+    from malspark.core.settings_overrides import build_settings
 
     plain = build_settings({"static.generic.server": "gen"})
     assert "gen" not in servers_a_job_calls(plain)
@@ -865,7 +867,7 @@ def test_the_generic_static_provider_server_is_called_when_any_agent_reads_it() 
 
 def test_the_worker_mirrors_for_the_same_servers_the_check_counts() -> None:
     from app.worker.analysis_worker import servers_this_job_binds
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     config = build_settings({"static.generic.server": "gen", "static.provider": "generic_mcp"})
     container = SimpleNamespace(analyst_keys=lambda: [], config=config)
@@ -876,7 +878,7 @@ def test_the_worker_mirrors_for_the_same_servers_the_check_counts() -> None:
 @pytest.mark.asyncio
 async def test_a_profile_the_job_names_decides_which_servers_it_calls() -> None:
     from app.services import settings_service
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     seen: list[dict[str, Any]] = []
 
@@ -952,7 +954,7 @@ def test_an_agent_with_a_bad_reference_that_loses_another_server_is_refused_for_
 @pytest.mark.asyncio
 async def test_an_operator_pack_step_s_unbound_server_still_refuses_its_unreadable_token() -> None:
     from app.api.v1.jobs import _undecryptable_secrets
-    from maljan.core import settings_secrets as box
+    from malspark.core import settings_secrets as box
 
     servers = {"opsrv": {"enabled": True, "transport": "stdio", "command": "x", "agents": []}}
     steps = [{"id": "mine", "tool": "mytool", "server": "opsrv"}]
@@ -970,7 +972,7 @@ async def test_an_operator_pack_step_s_unbound_server_still_refuses_its_unreadab
 @pytest.mark.asyncio
 async def test_the_capa_server_s_unreadable_env_refuses_though_no_agent_binds_it() -> None:
     from app.api.v1.jobs import _undecryptable_secrets
-    from maljan.core import settings_secrets as box
+    from malspark.core import settings_secrets as box
 
     # ``analysis`` ships bound to no agent; the pack's capa step runs on its env.
     rows = [_secret_row("core.mcp.servers.analysis.env")]

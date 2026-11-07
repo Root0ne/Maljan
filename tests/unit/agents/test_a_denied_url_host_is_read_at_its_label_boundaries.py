@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents._indicator_denylists import on_a_denied_url_host
-from maljan.reporting.models import (
+from malspark.agents._indicator_denylists import on_a_denied_url_host
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkIOCs,
@@ -57,7 +57,7 @@ def test_a_host_that_only_ends_in_a_denied_name_is_not_denied(url: str) -> None:
 
 
 def test_a_recovered_url_on_a_lookalike_host_is_published_and_a_denied_one_says_why() -> None:
-    from maljan.reporting.renderers.stix_renderer import publish_answer
+    from malspark.reporting.renderers.stix_renderer import publish_answer
 
     recovered = "recovered by emulation (decoded strings), ev_0001"
     kept = publish_answer(
@@ -71,7 +71,7 @@ def test_a_recovered_url_on_a_lookalike_host_is_published_and_a_denied_one_says_
 
 
 def test_the_export_carries_a_strings_url_on_a_lookalike_host_as_the_rule_answers() -> None:
-    from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+    from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
 
     report = MalwareReport(
         identity=SampleIdentity(hashes=FileHashes(sha256="a" * 64)),

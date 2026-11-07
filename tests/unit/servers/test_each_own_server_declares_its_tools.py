@@ -1,7 +1,7 @@
 """Each of the platform's own tool servers declares its tools itself, and the client reads it.
 
 Every sidecar under ``services/`` lists each tool with MCP annotations and,
-under the tool's ``_meta``, its declaration (``maljan.tools.declared_facts``,
+under the tool's ``_meta``, its declaration (``malspark.tools.declared_facts``,
 ``cli_sidecar.reading_tool``). The client reads that for any server alike
 (``core.served_declarations``), under what a block puts in force.
 
@@ -32,9 +32,9 @@ from typing import Any
 
 import pytest
 
-from maljan.core.builtin_declarations import server_declaration
-from maljan.core.config import Settings
-from maljan.core.served_declarations import (
+from malspark.core.builtin_declarations import server_declaration
+from malspark.core.config import Settings
+from malspark.core.served_declarations import (
     FACTS_META_KEY,
     _set_fields,
     forget_served,
@@ -44,8 +44,8 @@ from maljan.core.served_declarations import (
     served_facts_of,
     served_tool_facts,
 )
-from maljan.core.tool_declarations import SourceRef, ToolDeclarations, ToolFacts, launch_identity
-from maljan.tools.declared_facts import NO_EFFECT, tool_declaration
+from malspark.core.tool_declarations import SourceRef, ToolDeclarations, ToolFacts, launch_identity
+from malspark.tools.declared_facts import NO_EFFECT, tool_declaration
 
 ROOT = Path(__file__).resolve().parents[3]
 SERVICES = ROOT / "services"
@@ -280,7 +280,7 @@ def test_a_shipped_tool_an_operator_removed_stays_removed_whatever_its_server_sa
 def test_a_listing_is_kept_until_the_next_one_and_rebuilds_the_held_declarations(
     clean_served: None,
 ) -> None:
-    from maljan.core.tool_declarations import declaration_version
+    from malspark.core.tool_declarations import declaration_version
 
     before = declaration_version()
     register_served("mcp:mine", {"t": ToolFacts(kind="strings")}, "L")
@@ -326,7 +326,7 @@ def test_a_changed_declaration_raises_the_generation_kept_declarations_hold_for(
     # generation: a deployment that kept an earlier one lists its servers again.
     import hashlib
 
-    from maljan.core.tool_declarations import SERVED_DECLARATIONS_GENERATION
+    from malspark.core.tool_declarations import SERVED_DECLARATIONS_GENERATION
 
     digest = hashlib.sha256(CAPTURED.read_bytes()).hexdigest()
     assert CAPTURE_AT_GENERATION.get(SERVED_DECLARATIONS_GENERATION) == digest, (

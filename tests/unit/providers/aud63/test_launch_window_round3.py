@@ -9,10 +9,10 @@ import os
 import threading
 import time
 
-from maljan.core.config import MCPServerConfig
-from maljan.core.settings_overrides import redact_url
-from maljan.providers import servers
-from maljan.providers.servers import ServerHandle
+from malspark.core.config import MCPServerConfig
+from malspark.core.settings_overrides import redact_url
+from malspark.providers import servers
+from malspark.providers.servers import ServerHandle
 
 
 def test_a_launcher_child_frees_the_window_though_its_argv_never_matches(monkeypatch):
@@ -38,7 +38,7 @@ def test_a_launcher_child_frees_the_window_though_its_argv_never_matches(monkeyp
 
 
 def test_a_blocking_open_on_the_agent_loop_thread_is_refused(monkeypatch):
-    from maljan.agents.base_agent import _get_agent_loop, run_on_agent_loop
+    from malspark.agents.base_agent import _get_agent_loop, run_on_agent_loop
 
     monkeypatch.setattr(
         ServerHandle,

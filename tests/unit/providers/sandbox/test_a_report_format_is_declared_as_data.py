@@ -18,8 +18,8 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from maljan.core.config import SandboxConfig, Settings
-from maljan.core.report_formats import (
+from malspark.core.config import SandboxConfig, Settings
+from malspark.core.report_formats import (
     BUILTIN_REPORT_FORMATS,
     FORMAT_NAME_MAX,
     ReportFormat,
@@ -28,9 +28,9 @@ from maljan.core.report_formats import (
     format_named,
     sniff,
 )
-from maljan.providers.errors import ProviderError
-from maljan.providers.sandbox.formats import sniff_format
-from maljan.providers.sandbox.upload import UploadSandboxProvider
+from malspark.providers.errors import ProviderError
+from malspark.providers.sandbox.formats import sniff_format
+from malspark.providers.sandbox.upload import UploadSandboxProvider
 from tests.unit.providers._cape_fixture import FIXTURE_PATH, first_cape_report
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -446,7 +446,7 @@ def test_a_recorded_format_no_longer_allowed_is_refused_in_words() -> None:
 
 
 def test_every_sandbox_provider_declares_the_attached_report_hand_over() -> None:
-    from maljan.providers.sandbox.mock import MockSandboxProvider
+    from malspark.providers.sandbox.mock import MockSandboxProvider
 
     mock = MockSandboxProvider.from_settings(Settings.model_validate({}))
     with pytest.raises(ProviderError, match="does not accept uploaded reports"):
@@ -454,7 +454,7 @@ def test_every_sandbox_provider_declares_the_attached_report_hand_over() -> None
 
 
 def test_the_formats_in_effect_record_a_redeclared_built_in_merged() -> None:
-    from maljan.core.report_formats import declarations_in_effect
+    from malspark.core.report_formats import declarations_in_effect
 
     declared = _declared(INVENTED, {"name": "cape2", "signature_scale": None})
     recorded = declarations_in_effect(declared)

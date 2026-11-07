@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.agents.judge_postprocess import enforce_bundle_integrity
-from maljan.core.truncation_ledger import TruncationLedger
+from malspark.agents.judge_postprocess import enforce_bundle_integrity
+from malspark.core.truncation_ledger import TruncationLedger
 
 _GOOD_PATTERN = "[file:hashes.'SHA-256' = '" + "a" * 64 + "']"
 
@@ -165,11 +165,11 @@ class TestWhatTheIndicatorCapOrphans:
 
     def test_the_renderer_carries_every_indicator_and_orphans_nothing(self) -> None:
         """The export has no total cap, so nothing is left for it to orphan."""
-        from maljan.core.truncation_ledger import TruncationLedger as Ledger
-        from maljan.reporting.builder import MalwareReportBuilder
-        from maljan.reporting.models import NetworkIOCs
-        from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
-        from maljan.schemas.stix_models import Bundle
+        from malspark.core.truncation_ledger import TruncationLedger as Ledger
+        from malspark.reporting.builder import MalwareReportBuilder
+        from malspark.reporting.models import NetworkIOCs
+        from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer
+        from malspark.schemas.stix_models import Bundle
 
         report = MalwareReportBuilder(
             file_hash="d" * 64,
@@ -194,7 +194,7 @@ class TestWhatTheIndicatorCapOrphans:
         # the judge's keep of a host row of the sample's tree publishes it. A
         # file name is a value the export mints no row of its own for, so the
         # indicators that reach the cap are the judge's.
-        from maljan.reporting.models import DynamicBehavior, JudgeIndicator
+        from malspark.reporting.models import DynamicBehavior, JudgeIndicator
 
         report.dynamic = DynamicBehavior(
             process_tree=[{"pid": 1, "name": "sample.exe"}],

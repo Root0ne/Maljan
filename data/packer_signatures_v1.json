@@ -1,5 +1,5 @@
 {
-  "schema": "maljan-packer-signatures/v1",
+  "schema": "malspark-packer-signatures/v1",
   "version": "1.0",
   "_note": "Packer and protector fingerprints, authored from public tool documentation and observable section layouts. Section names are the strongest evidence and strings the weakest — a string like 'UPX!' appears in every scanner's own signature table, including this file, so a string-only match never reaches the confidence a section-name match does.",
   "packers": [

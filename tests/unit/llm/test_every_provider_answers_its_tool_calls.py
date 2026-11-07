@@ -21,8 +21,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from pydantic import SecretStr
 
-from maljan.core.config import Settings
-from maljan.llm.tool_replies import (
+from malspark.core.config import Settings
+from malspark.llm.tool_replies import (
     NO_REPLY_RECORDED,
     NOT_RUN_REPLY,
     answered_anthropic_messages,
@@ -42,7 +42,7 @@ def _settings() -> Settings:
 
 
 def _openai(model: str = "m", **kwargs: Any) -> Any:
-    from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
+    from malspark.llm.openai_provider import OpenAIProvider, forget_standard_only
 
     forget_standard_only()
     return OpenAIProvider(_settings()).build_model(model, 0.0, max_tokens=64, **kwargs)
@@ -59,19 +59,19 @@ def _reasoning() -> Any:
 
 
 def _anthropic() -> Any:
-    from maljan.llm.anthropic_provider import AnthropicProvider
+    from malspark.llm.anthropic_provider import AnthropicProvider
 
     return AnthropicProvider(_settings()).build_model("m", 0.0, max_tokens=64)
 
 
 def _gemini() -> Any:
-    from maljan.llm.gemini_provider import GeminiProvider
+    from malspark.llm.gemini_provider import GeminiProvider
 
     return GeminiProvider(_settings()).build_model("gemini-example", 0.0)
 
 
 def _ollama() -> Any:
-    from maljan.llm.ollama_provider import OllamaProvider
+    from malspark.llm.ollama_provider import OllamaProvider
 
     return OllamaProvider(_settings()).build_model("m", 0.0)
 
@@ -635,7 +635,7 @@ def test_the_replies_on_the_responses_api_serializer() -> None:
 
 
 def test_the_completion_counts_what_it_did() -> None:
-    from maljan.llm.tool_replies import MOVED, NOT_RUN, STRANDED, WRITTEN, answered_tool_calls
+    from malspark.llm.tool_replies import MOVED, NOT_RUN, STRANDED, WRITTEN, answered_tool_calls
 
     record: list[tuple[str, str]] = []
     messages = [

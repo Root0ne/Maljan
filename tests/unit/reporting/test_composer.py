@@ -15,9 +15,9 @@ from unittest.mock import patch
 
 import pytest
 
-from maljan.pipeline.validation import FEEDBACK_PREAMBLE
-from maljan.reporting.composer import ReportComposer, _bundle_text, _has_content
-from maljan.reporting.models import (
+from malspark.pipeline.validation import FEEDBACK_PREAMBLE
+from malspark.reporting.composer import ReportComposer, _bundle_text, _has_content
+from malspark.reporting.models import (
     EncryptionScheme,
     FileHashes,
     MalwareReport,
@@ -26,7 +26,7 @@ from maljan.reporting.models import (
     SampleIdentity,
     StaticAnalysis,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _report(**over: object) -> MalwareReport:
@@ -75,7 +75,9 @@ def _compose(
     # repo's own .env points at a local llama-server, where it does not work,
     # so without this the suite would silently test the manual-parse fallback
     # instead and ``_FakeLLM.ainvoke`` would raise.
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=True):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=True
+    ):
         asyncio.run(comp.compose(report, isr))
     return llm
 
@@ -247,7 +249,7 @@ class TestHelpers:
 
     def test_bundle_text_includes_evidence(self) -> None:
         r = _report(static=StaticAnalysis())
-        from maljan.reporting.evidence_bundles import bundle_for
+        from malspark.reporting.evidence_bundles import bundle_for
 
         b = bundle_for("executive_summary", r)
         text = _bundle_text("executive_summary", b)
@@ -292,7 +294,7 @@ class TestFactsOutrankClaimsInThePrompt:
         assert text.index("BINARY FACTS") < text.index("ANALYST CLAIMS")
 
     def test_the_system_prompt_states_the_precedence(self) -> None:
-        from maljan.reporting.composer import _SYSTEM
+        from malspark.reporting.composer import _SYSTEM
 
         lowered = _SYSTEM.lower()
         assert "outrank" in lowered
@@ -302,7 +304,7 @@ class TestFactsOutrankClaimsInThePrompt:
         """Asked to name and refute the claim, the model wrote debate prose
         ("Claim 44 is refuted") that the style check then retried or left out
         (T-560)."""
-        from maljan.reporting.composer import _SYSTEM
+        from malspark.reporting.composer import _SYSTEM
 
         assert (
             "Either drop the claim, or, better, because a reader who was told the sample is "
@@ -370,12 +372,12 @@ class TestTheManualPathGetsOneTurnToFixItsShape:
     def _invoke(self, *answers: str) -> tuple[Any, _RawLLM]:
         from langchain_core.messages import HumanMessage
 
-        from maljan.reporting.composer import _IntroOut
+        from malspark.reporting.composer import _IntroOut
 
         llm = self._RawLLM(*answers)
         comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             result = asyncio.run(
                 comp._invoke([HumanMessage(content="write it")], _IntroOut, section="intro")
@@ -434,12 +436,12 @@ class TestASectionWithKeysItsSchemaDoesNotDeclare:
     def _invoke(self, *answers: str) -> tuple[Any, ReportComposer]:
         from langchain_core.messages import HumanMessage
 
-        from maljan.reporting.models import Conclusion
+        from malspark.reporting.models import Conclusion
 
         llm = TestTheManualPathGetsOneTurnToFixItsShape._RawLLM(*answers)
         comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             result = asyncio.run(
                 comp._invoke([HumanMessage(content="write it")], Conclusion, section="conclusion")
@@ -509,12 +511,12 @@ class TestTheNewSectionsAreCheckedAndKept:
     def _invoke(self, schema_name: str, validator: Any, *answers: str) -> tuple[Any, Any, Any]:
         from langchain_core.messages import HumanMessage
 
-        from maljan.reporting import composer as module
+        from malspark.reporting import composer as module
 
         llm = TestTheManualPathGetsOneTurnToFixItsShape._RawLLM(*answers)
         comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             result = asyncio.run(
                 comp._invoke(
@@ -527,7 +529,7 @@ class TestTheNewSectionsAreCheckedAndKept:
         return result, comp, llm
 
     def test_an_observed_step_without_a_sandbox_entry_is_asked_about(self) -> None:
-        from maljan.pipeline.validation import flow_voice_violations
+        from malspark.pipeline.validation import flow_voice_violations
 
         result, comp, llm = self._invoke(
             "_FlowOut",
@@ -543,7 +545,7 @@ class TestTheNewSectionsAreCheckedAndKept:
         assert comp.validation_tally.unresolved == []
 
     def test_a_step_that_keeps_its_mark_is_kept_and_recorded(self) -> None:
-        from maljan.pipeline.validation import flow_voice_violations
+        from malspark.pipeline.validation import flow_voice_violations
 
         result, comp, _llm = self._invoke(
             "_FlowOut",
@@ -560,7 +562,7 @@ class TestTheNewSectionsAreCheckedAndKept:
         assert comp.degradations == []
 
     def test_a_decrypted_value_that_cites_nothing_is_asked_about(self) -> None:
-        from maljan.pipeline.validation import configuration_citation_violations
+        from malspark.pipeline.validation import configuration_citation_violations
 
         uncited = json.dumps(
             {"items": [{"key": "RC4 key", "value": "74185", "how_obtained": "decrypted"}]}
@@ -582,7 +584,7 @@ class TestTheNewSectionsAreCheckedAndKept:
 
 class TestEachSectionIsShownAnExampleOfItsShape:
     def test_every_example_is_a_valid_answer_to_its_schema(self) -> None:
-        from maljan.reporting import composer as module
+        from malspark.reporting import composer as module
 
         schemas = {
             "prose": module._ProseOut,
@@ -604,7 +606,7 @@ class TestEachSectionIsShownAnExampleOfItsShape:
             schema.model_validate(answer)
 
     def test_the_prompt_carries_the_object_and_the_example(self) -> None:
-        from maljan.reporting import composer as module
+        from malspark.reporting import composer as module
 
         class _Recording:
             def __init__(self) -> None:
@@ -629,7 +631,7 @@ class TestEachSectionIsShownAnExampleOfItsShape:
             )
         }
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(
                 comp._author("execution_flow", _report(), isr, module._FlowOut, "List the steps.")
@@ -676,7 +678,7 @@ class TestTheModelDecidesTheLength:
     """No section's schema or prompt sets an upper size; the evidence decides."""
 
     def test_no_prose_field_has_an_upper_bound(self) -> None:
-        from maljan.reporting.composer import _IntroOut, _ProseOut
+        from malspark.reporting.composer import _IntroOut, _ProseOut
 
         for schema in (_ProseOut, _IntroOut):
             for field in schema.model_fields.values():
@@ -685,7 +687,7 @@ class TestTheModelDecidesTheLength:
     def test_no_instruction_asks_for_a_length(self) -> None:
         import re
 
-        from maljan.reporting.composer import _INSTRUCTIONS, _SYSTEM
+        from malspark.reporting.composer import _INSTRUCTIONS, _SYSTEM
 
         for text in (_SYSTEM, *_INSTRUCTIONS.values()):
             assert "concise" not in text.lower()
@@ -704,7 +706,7 @@ class TestAnObservedStepNeedsAnObservationOfTheSample:
     _TOOLS = ("sandbox_processes", "sandbox_network", "pcap_summary")
 
     def _report(self, *, attributed: bool) -> MalwareReport:
-        from maljan.reporting.models import EvidenceIndexRow, EvidenceSection, NetworkIP
+        from malspark.reporting.models import EvidenceIndexRow, EvidenceSection, NetworkIP
 
         return _report(
             evidence_index=[
@@ -750,7 +752,7 @@ class TestAnObservedStepNeedsAnObservationOfTheSample:
         llm = _FakeLLM({"_FlowOut": step})
         comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=True
         ):
             asyncio.run(comp.compose(report, None))
         return [
@@ -758,7 +760,7 @@ class TestAnObservedStepNeedsAnObservationOfTheSample:
         ]
 
     def test_an_unattributed_network_entry_is_no_observation(self) -> None:
-        from maljan.reporting.evidence_bundles import sandbox_entry_ids
+        from malspark.reporting.evidence_bundles import sandbox_entry_ids
 
         report = self._report(attributed=False)
 
@@ -767,7 +769,7 @@ class TestAnObservedStepNeedsAnObservationOfTheSample:
         assert "ev_0001" in row["message"]
 
     def test_an_attributed_network_entry_is_one(self) -> None:
-        from maljan.reporting.evidence_bundles import sandbox_entry_ids
+        from malspark.reporting.evidence_bundles import sandbox_entry_ids
 
         report = self._report(attributed=True)
 
@@ -778,8 +780,8 @@ class TestAnObservedStepNeedsAnObservationOfTheSample:
         assert self._unresolved(self._report(attributed=False), self._step("ev_0001")) == []
 
     def test_a_report_section_answer_about_the_network_is_a_network_entry(self) -> None:
-        from maljan.reporting.evidence_bundles import sandbox_entry_ids
-        from maljan.reporting.models import EvidenceIndexRow, EvidenceSection
+        from malspark.reporting.evidence_bundles import sandbox_entry_ids
+        from malspark.reporting.models import EvidenceIndexRow, EvidenceSection
 
         for attributed, expected in ((False, ["ev_0001"]), (True, ["ev_0001", "ev_0004"])):
             report = self._report(attributed=attributed)
@@ -801,8 +803,8 @@ class TestAnObservedStepNeedsAnObservationOfTheSample:
             assert ids == expected, attributed
 
     def test_a_report_section_answer_about_the_processes_keeps_its_meaning(self) -> None:
-        from maljan.reporting.evidence_bundles import sandbox_entry_ids
-        from maljan.reporting.models import EvidenceIndexRow, EvidenceSection
+        from malspark.reporting.evidence_bundles import sandbox_entry_ids
+        from malspark.reporting.models import EvidenceIndexRow, EvidenceSection
 
         report = self._report(attributed=False)
         report.evidence_index.append(

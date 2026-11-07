@@ -13,12 +13,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.pipeline.evidence_summary import summarise
-from maljan.pipeline.validation import corroboration as _corroboration
-from maljan.schemas.evidence import build_entry, format_entry_id
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.tools import knowledge
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.pipeline.evidence_summary import summarise
+from malspark.pipeline.validation import corroboration as _corroboration
+from malspark.schemas.evidence import build_entry, format_entry_id
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.tools import knowledge
 
 # The roots and the sources a row states beside its lists, tested apart
 # (``tests/unit/analysis/test_a_technique_on_one_source_or_on_artefacts_is_not_corroborated.py``).
@@ -169,8 +169,8 @@ class TestEverySurfaceCountsTheSameRows:
 
 def _appendix_text(run_summary: dict) -> str:
     """The report's run-summary appendix for a report carrying ``run_summary``."""
-    from maljan.reporting.models import MalwareReport
-    from maljan.reporting.renderers.markdown import MarkdownRenderer
+    from malspark.reporting.models import MalwareReport
+    from malspark.reporting.renderers.markdown import MarkdownRenderer
 
     report = MalwareReport.model_validate(
         {"identity": {"hashes": {"sha256": "0" * 64}}, "run_summary": run_summary}

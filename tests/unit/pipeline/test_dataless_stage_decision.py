@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from maljan.core.config import AgentDefinition, ToolRef
-from maljan.pipeline.data_needs import (
+from malspark.core.config import AgentDefinition, ToolRef
+from malspark.pipeline.data_needs import (
     CAPTURE,
     NETWORK,
     SAMPLE,
@@ -242,7 +242,7 @@ class TestTheReason:
 
 class TestStoredDataIsAskedWithoutLoadingIt:
     def test_the_loader_holds_what_it_would_load(self, tmp_path: Path) -> None:
-        from maljan.loaders.file_loader import FileDataLoader
+        from malspark.loaders.file_loader import FileDataLoader
 
         (tmp_path / "dynamic").mkdir()
         (tmp_path / "dynamic" / "abc123.json").write_text("{}", encoding="utf-8")
@@ -256,8 +256,8 @@ class TestStoredDataIsAskedWithoutLoadingIt:
         import threading
         from types import SimpleNamespace
 
-        from maljan.core.container import ServiceContainer
-        from maljan.loaders.file_loader import no_data_placeholder
+        from malspark.core.container import ServiceContainer
+        from malspark.loaders.file_loader import no_data_placeholder
 
         held = SimpleNamespace(
             _lock=threading.RLock(),

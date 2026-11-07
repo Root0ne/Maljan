@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from maljan.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
-from maljan.reporting.renderers import stix_renderer
+from malspark.reporting.models import EvidenceSection, FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting.renderers import stix_renderer
 
 
 def _report(text: str, rows: list[list[str]] | None = None) -> MalwareReport:

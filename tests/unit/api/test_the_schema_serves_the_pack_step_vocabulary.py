@@ -26,7 +26,7 @@ from pydantic import ValidationError
 from pydantic_core import to_jsonable_python
 
 from app.services import settings_service as svc
-from maljan.core.pack_steps import (
+from malspark.core.pack_steps import (
     _REPLACING_FIELDS,
     ARGUMENT_PLACEHOLDERS,
     PACK_RENDERERS,
@@ -34,8 +34,8 @@ from maljan.core.pack_steps import (
     default_steps,
     step_vocabulary,
 )
-from maljan.extractors.sample_identity import routed_formats
-from maljan.pipeline.conditions import pack_state_keys
+from malspark.extractors.sample_identity import routed_formats
+from malspark.pipeline.conditions import pack_state_keys
 
 ROOT = Path(__file__).resolve().parents[3]
 CASES = ROOT / "apps" / "web" / "src" / "test-fixtures" / "pack-step-placeholder-cases.json"

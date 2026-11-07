@@ -29,10 +29,10 @@ from app.deps import require_admin
 from app.services import credential_bootstrap
 from app.services.server_map import TOKEN_MASK, server_token_key
 from app.services.settings_service import SettingsService
-from maljan.core import settings_secrets as box
-from maljan.core import virustotal
-from maljan.core.config import MCPServerConfig
-from maljan.core.tool_declarations import CredentialBootstrap
+from malspark.core import settings_secrets as box
+from malspark.core import virustotal
+from malspark.core.config import MCPServerConfig
+from malspark.core.tool_declarations import CredentialBootstrap
 
 # Built at run time: never a literal that looks like a credential.
 VT_TOKEN = "vtai_" + "b" * 43
@@ -59,7 +59,7 @@ def _invented_server(**bootstrap: Any) -> dict[str, Any]:
             "body": {"client": "{family}", "scope": "read"},
             "token_json_path": "/grant/token",
             "token_prefix": "inv_",
-            "family": "maljan-test",
+            "family": "malspark-test",
             "facts": {"client_id": "/grant/client"},
             "note": "Issued per deployment.",
             **bootstrap,
@@ -119,7 +119,7 @@ def _post(stored: dict[str, Any], wire: _Wire, key: str, saved: dict[str, Any]) 
 
 class TestTheShippedDeclaration:
     def test_virustotal_s_registration_is_the_built_in_s_declaration(self) -> None:
-        from maljan.core.config import _builtin_servers
+        from malspark.core.config import _builtin_servers
 
         declared = _builtin_servers()[virustotal.SERVER_KEY].credential_bootstrap
         assert declared is not None
@@ -194,7 +194,7 @@ class TestAnInventedServer:
         assert response.status_code == 200, response.text
         (request,) = wire.requests
         assert str(request.url) == f"https://{INVENTED_HOST}/register"
-        assert json.loads(request.read()) == {"client": "maljan-test", "scope": "read"}
+        assert json.loads(request.read()) == {"client": "malspark-test", "scope": "read"}
         body = response.json()
         assert body["facts"] == {"client_id": "cl-7"}
         assert body["url"] == f"https://{INVENTED_HOST}/mcp"
@@ -221,7 +221,7 @@ class TestAnInventedServer:
         assert bootstrap_facts(configs) == {
             "invented": {
                 "label": "Invented intel",
-                "family": "maljan-test",
+                "family": "malspark-test",
                 "note": "Issued per deployment.",
             }
         }
@@ -365,7 +365,7 @@ def test_a_fact_is_audited_under_its_own_name_and_never_carries_the_token() -> N
 
 @pytest.mark.parametrize("block", ["static.ghidra", "static.r2", "sandbox.cape2.mcp"])
 def test_a_provider_block_refuses_a_bootstrap_no_route_performs(block: str) -> None:
-    from maljan.core.settings_overrides import build_settings
+    from malspark.core.settings_overrides import build_settings
 
     declared = _invented_server()["credential_bootstrap"]
     with pytest.raises(ValidationError, match="provider's own block takes none"):

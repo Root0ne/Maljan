@@ -1,0 +1,709 @@
+"""Turn any sandbox's JSON into a ``SandboxReport``, using settings alone.
+
+Every other sandbox this project speaks to has an adapter written against its
+documented shape. This one has no shape: the operator describes where each
+channel lives with an RFC 9535 JSONPath, and this module compiles those paths
+once and coerces whatever they select into the row shapes the consumers
+already read.
+
+Three rules make that safe to run against a report nobody has seen:
+
+* A row that lacks the field its consumer indexes on is dropped, not guessed
+  at, and the drop is counted — the preview endpoint shows those counts before
+  a job is ever submitted.
+* A channel with no path, or whose path failed on the report, goes into
+  ``SandboxReport.unavailable``. An empty
+  ``network.dns`` and a sandbox that publishes no DNS at all look identical in
+  a rendered report, and only one of them means the sample was quiet.
+* Every channel is read whole, as a built-in reader reads its lists: no row
+  count cuts it. A path is bounded only by the report's own size (the values
+  it holds): a path that names each value at most once never reaches it, and
+  one that does repeats values and is cut there, saying so
+  (``ChannelStats.truncated``, and a warning), never quietly.
+
+Three channels are not settings the operator can point anywhere:
+
+* ``apistats`` has no path of its own — it is tallied from ``calls`` as calls
+  are attached to their process, so it is populated exactly when ``calls``
+  is, and named unavailable exactly when ``calls`` is.
+* Anything else a sandbox publishes goes through ``mapping.channels``, an
+  operator-named ``<name> -> JSONPath`` map landing in
+  ``SandboxReport.channels``, or ``mapping.places``, a ``<place> -> JSONPath``
+  map onto the report's places with no channel of their own (the process
+  tree, the resolved API names, what the sandbox extracted, the dumps, the
+  memory regions, the IDS alerts). Those rows are carried close to the shape
+  the sandbox published them in, because this module has no consumer to
+  coerce them for.
+* ``generic_events`` and ``screenshots`` have no ``RestMappingConfig`` field
+  at all. No REST sandbox this mapping has been built against publishes
+  either through a documented API, so both are named unavailable
+  unconditionally — the same call Triage's own adapter makes for the same
+  two channels.
+"""
+
+from __future__ import annotations
+
+import math
+import re
+from dataclasses import dataclass, field
+from itertools import islice
+from typing import TYPE_CHECKING, Any
+
+from malspark.core.logger import logger
+from malspark.providers.errors import ProviderConfigurationError
+from malspark.schemas.sandbox_document import signature_pids
+from malspark.schemas.sandbox_report import section_id
+
+if TYPE_CHECKING:
+    from malspark.core.config import RestMappingConfig
+    from malspark.core.report_formats import SignatureScale
+    from malspark.schemas.sandbox_report import SandboxReport, SandboxSignatureRow
+
+CHANNELS: tuple[str, ...] = (
+    "processes",
+    "calls",
+    "signatures",
+    "dns",
+    "http",
+    "tcp",
+    "udp",
+    "hosts",
+    "domains",
+    "dropped_files",
+    "registry",
+)
+
+# What :func:`apply_mapping` can fill, in ``schemas.sandbox_report``'s list
+# field names: one list per mapped channel, the calls under their processes,
+# the API counts tallied from them, and the operator's own channels. No path
+# can reach the behaviour summary, the file writes, TLS, ICMP, the generic
+# events or the screenshots.
+REST_MAPPING_FILLS: frozenset[str] = frozenset(
+    {
+        "processes",
+        "processes.calls",
+        "apistats",
+        "signatures",
+        "network.dns",
+        "network.http",
+        "network.tcp",
+        "network.udp",
+        "network.hosts",
+        "network.domains",
+        "dropped_files",
+        "registry",
+        "channels",
+        # The open places, each where ``mapping.places`` names a path for it.
+        "process_tree",
+        "resolved_apis",
+        "extracted",
+        "procdumps",
+        "memory",
+        "ids_alerts",
+    }
+)
+
+# The field each channel's consumer indexes on. A row without it is not a
+# thinner row, it is a row the consumer will skip or crash on.
+_REQUIRED: dict[str, tuple[str, ...]] = {
+    "processes": ("pid",),
+    "calls": ("pid", "api"),
+    "signatures": ("name",),
+    "dns": ("request",),
+    "http": (),
+    "tcp": ("dst",),
+    "udp": ("dst",),
+    "dropped_files": ("name",),
+}
+
+# Channels whose rows are plain strings rather than mappings.
+_STRING_CHANNELS = frozenset({"hosts", "domains", "registry"})
+
+# A sha256 candidate that survives normalisation: lower-cased, 64 hex digits.
+# Anything else is not a hash this project can key CTI lookups on, so it is
+# dropped rather than carried through half-formed (a "0x"-prefixed value, an
+# md5, a truncated copy-paste).
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+# The fields each mapping-shaped channel carries into its consumer row.
+_FIELDS: dict[str, tuple[str, ...]] = {
+    "processes": ("pid", "ppid", "name", "command_line"),
+    "calls": ("pid", "api", "args", "timestamp"),
+    # ``pids``: the processes the hit was seen in, where the sandbox names them.
+    "signatures": ("name", "description", "severity", "ttps", "pids"),
+    "dns": ("request", "type", "answers"),
+    "tcp": ("dst", "dport"),
+    "udp": ("dst", "dport"),
+    "dropped_files": ("name", "sha256", "size"),
+    # http stays a passthrough channel (an arbitrary sandbox's own field names
+    # ride along unchanged, see ``_coerce``) but a rename must still be able
+    # to land a source field under the canonical name every extractor reads
+    # (``host``, ``uri``, ...) -- the same contract every other channel gives
+    # ``field_names`` (F12).
+    "http": ("host", "uri", "method", "status", "port", "encrypted", "user_agent"),
+}
+
+
+@dataclass(frozen=True)
+class ChannelStats:
+    """What one channel's path selected, and what survived coercion."""
+
+    matched: int = 0
+    kept: int = 0
+    dropped: int = 0
+    sample_rows: list[Any] = field(default_factory=list)
+    error: str = ""
+    truncated: bool = False
+
+
+@dataclass(frozen=True)
+class CompiledMapping:
+    config: RestMappingConfig
+    target_sha256: Any | None
+    paths: dict[str, Any]
+    # ``channels.<name>`` paths, compiled the same way as the fixed channels
+    # but named by the operator rather than by this module.
+    channel_paths: dict[str, Any] = field(default_factory=dict)
+    # ``places.<place>`` paths, onto the report's open places.
+    place_paths: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class MappingResult:
+    report: SandboxReport
+    stats: dict[str, ChannelStats]
+
+
+def _compile_one(expression: str, channel: str) -> Any:
+    import jsonpath_rfc9535
+
+    try:
+        return jsonpath_rfc9535.compile(expression)
+    except Exception as exc:  # noqa: BLE001 — the library raises its own error type
+        raise ProviderConfigurationError(
+            f"sandbox.rest.mapping.{channel}: {expression!r} is not a valid JSONPath ({exc})"
+        ) from exc
+
+
+def compile_mapping(cfg: RestMappingConfig) -> CompiledMapping:
+    """Compile every non-empty path once, naming the channel that fails.
+
+    Called by ``RestSandboxProvider.from_settings`` and by the preview
+    endpoint, so a typo is an error an operator sees at save or preview time
+    rather than a job that detonates a sample and then produces nothing.
+    """
+    paths = {
+        channel: _compile_one(getattr(cfg, channel), channel)
+        for channel in CHANNELS
+        if getattr(cfg, channel)
+    }
+    channel_paths = {
+        name: _compile_one(expression, f"channels.{name}")
+        for name, expression in cfg.channels.items()
+        if expression
+    }
+    place_paths = {
+        name: _compile_one(expression, f"places.{name}")
+        for name, expression in cfg.places.items()
+        if expression
+    }
+    target = _compile_one(cfg.target_sha256, "target_sha256") if cfg.target_sha256 else None
+    return CompiledMapping(
+        config=cfg,
+        target_sha256=target,
+        paths=paths,
+        channel_paths=channel_paths,
+        place_paths=place_paths,
+    )
+
+
+def _rename(channel: str, names: dict[str, str], row: dict[str, Any], want: str) -> Any:
+    """One consumer field out of ``row``, under this sandbox's own name for it."""
+    return row.get(names.get(f"{channel}.{want}", want))
+
+
+def _coerce(channel: str, names: dict[str, str], raw: Any) -> Any | None:
+    """One selected match as its consumer row, or None when it cannot be one."""
+    if channel in _STRING_CHANNELS:
+        text = raw if isinstance(raw, str) else raw.get("value") if isinstance(raw, dict) else None
+        return text if isinstance(text, str) and text else None
+    if not isinstance(raw, dict):
+        return None
+    row = {want: _rename(channel, names, raw, want) for want in _FIELDS.get(channel, ())}
+    if channel == "http":
+        # Passthrough first (every field the sandbox's own payload carries
+        # survives, whatever it calls them), then a configured rename
+        # overlays its canonical field -- a real value only, so an
+        # unconfigured or unmatched rename never blanks a field passthrough
+        # already supplied.
+        merged = dict(raw)
+        merged.update({k: v for k, v in row.items() if v is not None})
+        row = merged
+    for required in _REQUIRED.get(channel, ()):
+        if row.get(required) in (None, ""):
+            return None
+    return row
+
+
+def whole_number(value: Any) -> int | None:
+    """An integer a sandbox wrote as a number or as numeric text, else ``None``.
+
+    Text is read as Python reads an integer literal (``"16"``, ``"0x10"``,
+    ``"0o20"``), then as a decimal with leading zeros, then as a number with a
+    fraction, cut toward zero. A word (``"high"``) is no number: ``None``, and
+    the caller keeps the word.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if math.isfinite(value) else None
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    for base in (0, 10):
+        try:
+            return int(text, base)
+        except ValueError:
+            continue
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    return int(number) if math.isfinite(number) else None
+
+
+def _texts(value: Any) -> list[str]:
+    """A field that is one value or a list of them, as its non-empty texts.
+
+    A single string is one value, never its characters.
+    """
+    if isinstance(value, list):
+        return [str(item) for item in value if item not in (None, "")]
+    return [str(value)] if value not in (None, "") else []
+
+
+def rung_score(word: Any, scale: SignatureScale | None) -> int | None:
+    """The score of the rung ``word`` names on ``scale``, or ``None`` where none does.
+
+    Score ``n`` is the scale's ``n``-th rung, so a word naming a rung (case
+    and blanks aside) is that score, the first such rung where several share a
+    name. No scale, or a word no rung names, is ``None``: unknown, never 0.
+    """
+    if scale is None or not isinstance(word, str):
+        return None
+    wanted = word.strip().lower()
+    for score, rung in enumerate(scale.rungs, start=1):
+        if str(rung).strip().lower() == wanted:
+            return score
+    return None
+
+
+def _signature_row(row: dict[str, Any], scale: SignatureScale | None) -> SandboxSignatureRow:
+    """One signature row; a severity that is no number is kept as the sandbox wrote it.
+
+    The number is the severity; a word (``"high"``) is the score of the rung
+    it names on the scale the report is read on (:func:`rung_score`), else
+    ``None`` (unknown, never 0), and is kept in ``extra["severity"]`` either way.
+    """
+    from malspark.schemas.sandbox_report import SandboxSignatureRow
+
+    said = row.get("severity")
+    number = whole_number(said)
+    extra = {"severity": said} if number is None and said not in (None, "") else {}
+    severity = number if number is not None else (rung_score(said, scale) if extra else 0)
+    return SandboxSignatureRow(
+        name=str(row.get("name") or ""),
+        description=str(row.get("description") or ""),
+        severity=severity,
+        ttp_tags=_texts(row.get("ttps")),
+        # One process id or a list of them, each a whole number or not read.
+        pids=signature_pids(
+            {"pids": pids if isinstance(pids := row.get("pids"), list) else [pids]}
+        ),
+        extra=extra,
+    )
+
+
+def _normalize_sha256(value: Any) -> tuple[str, str]:
+    """A lower-cased 64-hex sha256, or an empty string and the reason it is not one."""
+    text = value.strip().lower() if isinstance(value, str) else ""
+    if _SHA256_RE.match(text):
+        return text, ""
+    return "", f"{value!r} is not a 64-character lowercase hex sha256"
+
+
+def _select_open_channels(
+    compiled: CompiledMapping,
+    payload: dict[str, Any],
+    sizes: dict[int, int],
+    *,
+    places: bool = False,
+) -> tuple[dict[str, list[Any]], dict[str, ChannelStats]]:
+    """Run the operator's own ``channels.<name>`` paths, or its ``places.<place>`` ones.
+
+    These have no consumer field to require and no row shape to coerce into:
+    the point of an open channel is that this module does not know what a
+    sandbox publishes there. A mapping is kept as it is, anything else is
+    wrapped so every row is still a mapping (a name the resolved API names
+    place holds is kept as the text it is). A channel or a place is read
+    whole, as a built-in reader reads its lists, bounded only by the report's
+    own size, in what it holds as well as in its rows: each match is kept by
+    reference, and a document writes each match out whole, so a descendant
+    path whose matches nest (``$..x`` where an ``x`` holds an ``x``) would
+    write the inner ones again inside the outer ones. The values the kept
+    matches hold, each match counted with everything nested in it, never
+    exceed the values the report holds: one reaching that is cut there and
+    says so (``truncated``, and a warning). A path whose matches do not nest
+    holds at most the report once and is never cut. Each match's size is
+    looked up in ``sizes``, one measure of the report taken before
+    (:func:`subtree_sizes`), so the bound costs time linear in the report.
+    """
+    rows: dict[str, list[Any]] = {}
+    stats: dict[str, ChannelStats] = {}
+    paths = compiled.place_paths if places else compiled.channel_paths
+    bound = sizes.get(id(payload), 1)
+    for name, path in paths.items():
+        label = f"places.{name}" if places else f"channels.{name}"
+        try:
+            values = (node.value for node in path.finditer(payload))
+            peeked = list(islice(values, bound + 1))
+        except Exception as exc:  # noqa: BLE001 — a path valid in isolation can still fail on data
+            stats[label] = ChannelStats(error=f"{type(exc).__name__}: {exc}")
+            continue
+        truncated = len(peeked) > bound
+        matches = peeked[:bound]
+        held = 0
+        for kept_count, match in enumerate(matches):
+            held += sizes.get(id(match), 1)
+            if held > bound:
+                matches, truncated = matches[:kept_count], True
+                break
+        if truncated:
+            logger.warning(
+                "rest mapping: a %s path matched more than the report holds (%d values); "
+                "its matches repeat or nest, and it was cut there.",
+                "place" if places else "channel",
+                bound,
+            )
+        converted = (_open_row(name if places else "", m) for m in matches)
+        kept = [row for row in converted if row is not None]
+        stats[label] = ChannelStats(
+            matched=len(matches),
+            kept=len(kept),
+            dropped=len(matches) - len(kept),
+            sample_rows=kept[:3],
+            truncated=truncated,
+        )
+        if kept:
+            rows[name] = kept
+    return rows, stats
+
+
+# The channel a top-level block no path names lands in: ``report.<block>``.
+UNNAMED_BLOCK_PREFIX = "report."
+
+# The top-level block a JSONPath starts in: ``$.name``, ``$['name']`` or
+# ``$["name"]``. A path that starts anywhere else (``$..x``, ``$[*]``, a
+# filter) may reach any block, so it names them all.
+_FIRST_BLOCK_RE = re.compile(r"""^\$(?:\.([A-Za-z_][\w-]*)|\[\s*(?:'([^']*)'|"([^"]*)")\s*\])""")
+
+
+def _named_blocks(cfg: RestMappingConfig) -> set[str] | None:
+    """The top-level blocks the mapping's paths start in, or ``None`` where one may start in any."""
+    paths = [getattr(cfg, channel) for channel in CHANNELS]
+    paths += [cfg.target_sha256, *cfg.channels.values(), *cfg.places.values()]
+    named: set[str] = set()
+    for path in paths:
+        text = str(path or "").strip()
+        if not text:
+            continue
+        found = _FIRST_BLOCK_RE.match(text)
+        if found is None:
+            return None
+        named.add(next(group for group in found.groups() if group is not None))
+    return named
+
+
+def unnamed_blocks(cfg: RestMappingConfig, payload: dict[str, Any]) -> dict[str, Any]:
+    """Each top-level block of ``payload`` no mapping path starts in, as a ``report.<block>``.
+
+    One pass over the payload's top-level keys; the blocks are kept whole and
+    carried by reference, never read or copied row by row. A block with no
+    value (empty text, an empty list or object, null) has nothing to read.
+    """
+    named = _named_blocks(cfg)
+    if named is None:
+        return {}
+    return {
+        f"{UNNAMED_BLOCK_PREFIX}{key}": value
+        for key, value in payload.items()
+        if key not in named and value not in (None, "", [], {})
+    }
+
+
+def subtree_sizes(payload: Any) -> dict[int, int]:
+    """How many values each container of ``payload`` holds, itself and all nested, by identity.
+
+    One post-order walk with a stack, each distinct container measured once,
+    so a report costs time and memory linear in its size, and a container
+    reached twice is counted once. A value that is no container holds one.
+    """
+    sizes: dict[int, int] = {}
+    stack: list[tuple[Any, bool]] = [(payload, False)]
+    while stack:
+        node, closing = stack.pop()
+        if not isinstance(node, dict | list):
+            continue
+        key = id(node)
+        children = node.values() if isinstance(node, dict) else node
+        if closing:
+            sizes[key] = 1 + sum(
+                sizes.get(id(child), 1) if isinstance(child, dict | list) else 1
+                for child in children
+            )
+            continue
+        if key in sizes:
+            continue
+        sizes[key] = 1  # open: a container reached again inside itself counts once
+        stack.append((node, True))
+        stack.extend((child, False) for child in children if isinstance(child, dict | list))
+    return sizes
+
+
+def node_count(payload: Any) -> int:
+    """How many values ``payload`` holds, itself and every one nested in it, counted once each.
+
+    Walked with a stack, never recursion, so a deeply nested report costs time
+    linear in its size and no call depth.
+    """
+    count = 0
+    stack: list[Any] = [payload]
+    while stack:
+        value = stack.pop()
+        count += 1
+        if isinstance(value, dict):
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+    return count
+
+
+def _open_row(place: str, match: Any) -> Any:
+    """One match of an open channel or place, as the row it lands as; ``None`` for no value."""
+    if match in (None, ""):
+        return None
+    if not place:
+        # An operator's channel: its rows are mappings, as on dev.
+        return match if isinstance(match, dict) else {"value": match}
+    if place == "resolved_apis" and isinstance(match, dict):
+        text = match.get("value")
+        return text if text not in (None, "") else None
+    # A place holds each match as the sandbox published it, by reference.
+    return match
+
+
+def _select(
+    compiled: CompiledMapping, channel: str, payload: dict[str, Any], bound: int
+) -> tuple[ChannelStats, list[Any]]:
+    """Run one channel's path and coerce what it selected.
+
+    The channel is read whole, as a built-in reader reads its lists: no row
+    count cuts it. ``bound`` is how many values the report holds; a path that
+    names each value at most once matches no more, so ``finditer`` is pulled
+    through ``islice(..., bound + 1)`` and a path that matches more repeats
+    values (a descendant segment over nested matches) and is cut there,
+    saying so (``truncated``, and a warning).
+
+    Returns ``(stats, kept_rows)`` rather than smuggling the rows onto the
+    frozen ``ChannelStats`` through ``object.__setattr__`` (F15): that hid a
+    second, undeclared field a stats-only rebuild (the calls/orphan case in
+    ``apply_mapping``) would silently drop, and mutating a frozen dataclass at
+    all only works by accident of it not truly being read-only in Python.
+    """
+    path = compiled.paths.get(channel)
+    if path is None:
+        return ChannelStats(), []
+    try:
+        values = (node.value for node in path.finditer(payload))
+        peeked = list(islice(values, bound + 1))
+    except Exception as exc:  # noqa: BLE001 — a path valid in isolation can still fail on data
+        return ChannelStats(error=f"{type(exc).__name__}: {exc}"), []
+    truncated = len(peeked) > bound
+    matches = peeked[:bound]
+    if truncated:
+        logger.warning(
+            "rest mapping: %s: the path matched more than the report holds (%d values); its "
+            "matches repeat, and it was cut there.",
+            channel,
+            bound,
+        )
+    names = compiled.config.field_names
+    kept: list[Any] = []
+    dropped = 0
+    for raw in matches:
+        row = _coerce(channel, names, raw)
+        if row is None:
+            dropped += 1
+        else:
+            kept.append(row)
+    stats = ChannelStats(
+        matched=len(matches),
+        kept=len(kept),
+        dropped=dropped,
+        sample_rows=kept[:3],
+        truncated=truncated,
+    )
+    return stats, kept
+
+
+def apply_mapping(
+    compiled: CompiledMapping,
+    payload: dict[str, Any],
+    *,
+    provider: str,
+    task_id: str,
+    signature_scale: SignatureScale | None = None,
+) -> MappingResult:
+    """Map one report payload, and say per channel what happened.
+
+    ``signature_scale`` is the scale the report is read on: a severity the
+    sandbox wrote as a rung's word is read as that rung's score.
+    """
+    from malspark.schemas.sandbox_report import (
+        SandboxNetwork,
+        SandboxProcess,
+        SandboxReport,
+        SandboxTarget,
+    )
+
+    # One measure of the report bounds every path (the values it holds, and
+    # per container what it holds where a path keeps matches by reference),
+    # taken only where a path needs it.
+    open_paths = bool(compiled.channel_paths or compiled.place_paths)
+    sizes = subtree_sizes(payload) if open_paths else {}
+    bound = sizes.get(id(payload), 1) if open_paths else 0
+    if not bound and compiled.paths:
+        bound = node_count(payload)
+    selected = {channel: _select(compiled, channel, payload, bound) for channel in CHANNELS}
+    stats: dict[str, ChannelStats] = {c: s for c, (s, _rows) in selected.items()}
+    rows: dict[str, list[Any]] = {c: list(r) for c, (_s, r) in selected.items()}
+    open_channels, open_stats = _select_open_channels(compiled, payload, sizes)
+    stats.update(open_stats)
+    # Every top-level block of the payload no path names, kept whole as a raw
+    # section the analyst reads: the model decides what it means, and no fact
+    # is drawn from it here. An operator's channel of the same name wins.
+    for name, block_rows in unnamed_blocks(compiled.config, payload).items():
+        open_channels.setdefault(name, block_rows)
+    open_places, place_stats = _select_open_channels(compiled, payload, sizes, places=True)
+    stats.update(place_stats)
+
+    processes = [
+        SandboxProcess(
+            pid=whole_number(r.get("pid")) or 0,
+            ppid=whole_number(r.get("ppid")) or 0,
+            name=str(r.get("name") or ""),
+            command_line=str(r.get("command_line") or ""),
+        )
+        for r in rows["processes"]
+    ]
+    by_pid = {p.pid: p for p in processes}
+    apistats: dict[str, dict[str, int]] = {}
+    orphaned = 0
+    for call in rows["calls"]:
+        pid = whole_number(call.get("pid")) or 0
+        process = by_pid.get(pid)
+        if process is None:
+            orphaned += 1
+            continue
+        process.calls.append(call)
+        api = str(call.get("api") or "")
+        apistats.setdefault(str(pid), {})
+        apistats[str(pid)][api] = apistats[str(pid)].get(api, 0) + 1
+    if orphaned:
+        stats["calls"] = ChannelStats(
+            matched=stats["calls"].matched,
+            kept=stats["calls"].kept - orphaned,
+            dropped=stats["calls"].dropped + orphaned,
+            sample_rows=stats["calls"].sample_rows,
+            truncated=stats["calls"].truncated,
+        )
+
+    signatures = [_signature_row(r, signature_scale) for r in rows["signatures"]]
+
+    network = SandboxNetwork(
+        dns=rows["dns"],
+        http=rows["http"],
+        tcp=rows["tcp"],
+        udp=rows["udp"],
+        # The consumers read ``hosts`` as rows; a sandbox that publishes bare
+        # addresses gets them wrapped rather than a second row shape.
+        hosts=[{"ip": h} for h in rows["hosts"]],
+        domains=rows["domains"],
+    )
+
+    sha256 = ""
+    if compiled.target_sha256 is not None:
+        found = [node.value for node in compiled.target_sha256.finditer(payload)]
+        if found:
+            sha256, reason = _normalize_sha256(found[0])
+            if reason:
+                # ``target.sha256`` stays empty rather than carry a value that
+                # cannot key a CTI lookup. The REST provider reads
+                # this same field into ``SandboxRun.sample_sha256`` — with it
+                # empty, that provider falls back to the sha256 of the file it
+                # itself submitted rather than trust an unmatched value.
+                stats["target_sha256"] = ChannelStats(matched=1, dropped=1, error=reason)
+
+    unavailable_set = {c for c in CHANNELS if c not in compiled.paths}
+    # ``generic_events``/``screenshots`` have no path of their own — this
+    # mapping can never produce them — and ``apistats`` is only ever derived
+    # from ``calls``, so it is unavailable exactly when ``calls`` is.
+    unavailable_set.update({"generic_events", "screenshots"})
+    # A path that failed on this report read nothing: whether the sandbox saw
+    # any is not known, which an empty list would deny. The same for a place.
+    unavailable_set.update(c for c in CHANNELS if stats[c].error)
+    unavailable_set.update(
+        name for name in compiled.place_paths if stats.get(f"places.{name}", ChannelStats()).error
+    )
+    if "calls" in unavailable_set:
+        unavailable_set.add("apistats")
+    # Named by the platform's own section ids, not the mapping's channel words.
+    unavailable = sorted({section_id(channel) for channel in unavailable_set})
+    for channel, stat in stats.items():
+        if stat.error:
+            logger.warning(
+                "rest mapping: channel %s failed on this report: %s", channel, stat.error
+            )
+        elif stat.dropped:
+            logger.info(
+                "rest mapping: channel %s kept %d of %d rows (%d dropped for missing fields).",
+                channel,
+                stat.kept,
+                stat.matched,
+                stat.dropped,
+            )
+
+    report = SandboxReport(
+        provider=provider,
+        source_format="generic",
+        task_id=task_id,
+        target=SandboxTarget(sha256=sha256),
+        processes=processes,
+        apistats=apistats,
+        signatures=signatures,
+        network=network,
+        dropped_files=rows["dropped_files"],
+        registry=rows["registry"],
+        channels=open_channels,
+        unavailable=unavailable,
+        raw=payload,
+        process_tree=open_places.get("process_tree", []),
+        resolved_apis=open_places.get("resolved_apis", []),
+        extracted=open_places.get("extracted", []),
+        procdumps=open_places.get("procdumps", []),
+        memory=open_places.get("memory", []),
+        ids_alerts=open_places.get("ids_alerts", []),
+    )
+    return MappingResult(report=report, stats=stats)

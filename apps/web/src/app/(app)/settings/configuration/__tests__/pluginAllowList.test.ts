@@ -31,7 +31,7 @@ function plugin(overrides: Partial<InstalledPlugin>): InstalledPlugin {
   return {
     name: "acme",
     entry: "static:acme",
-    distribution: "maljan-acme",
+    distribution: "malspark-acme",
     version: "1.2.3",
     allowed: false,
     state: "not_allowed",
@@ -47,7 +47,7 @@ const LISTING: PluginsListing = {
   kinds: [
     {
       kind: "llm",
-      group: "maljan.llm_providers",
+      group: "malspark.llm_providers",
       title: "LLM providers",
       plugins: [
         plugin({
@@ -63,7 +63,7 @@ const LISTING: PluginsListing = {
     },
     {
       kind: "static",
-      group: "maljan.static_providers",
+      group: "malspark.static_providers",
       title: "Static analysis providers",
       plugins: [
         plugin({ allowed: true, state: "allowed" }),
@@ -77,10 +77,10 @@ const LISTING: PluginsListing = {
       ],
       allowed_absent: [],
     },
-    { kind: "sandbox", group: "maljan.sandbox_providers", title: "Sandbox providers", plugins: [], allowed_absent: [] },
+    { kind: "sandbox", group: "malspark.sandbox_providers", title: "Sandbox providers", plugins: [], allowed_absent: [] },
     {
       kind: "memory",
-      group: "maljan.memory_backends",
+      group: "malspark.memory_backends",
       title: "Memory backends",
       plugins: [plugin({ name: "vectorhub", entry: "memory:vectorhub", allowed: true, state: "allowed", api_state: "loaded" })],
       allowed_absent: ["gone"],
@@ -185,8 +185,8 @@ describe("the editor", () => {
     for (const title of ["LLM providers", "Static analysis providers", "Sandbox providers", "Memory backends"]) {
       expect(html).toContain(title);
     }
-    expect(html).toContain("maljan.static_providers");
-    expect(html).toContain("maljan-acme");
+    expect(html).toContain("malspark.static_providers");
+    expect(html).toContain("malspark-acme");
     expect(html).toContain("1.2.3");
     expect(html).toContain("Failed in the API: ImportError: no client");
     expect(html).toContain("Loaded in the API");

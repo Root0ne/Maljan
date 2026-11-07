@@ -19,12 +19,12 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
 from langchain_core.messages import HumanMessage
 
-from maljan.analysis.run_summary import generation_lines
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
-from maljan.llm.context_window import WindowFact
-from maljan.llm.generation_rate import GenerationRates
-from maljan.reporting.composer import ReportComposer
+from malspark.analysis.run_summary import generation_lines
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
+from malspark.llm.context_window import WindowFact
+from malspark.llm.generation_rate import GenerationRates
+from malspark.reporting.composer import ReportComposer
 
 # A hosted model whose vendor declares its maximum output in the vendored table.
 HOSTED_MODEL = "deepseek-flash"
@@ -62,7 +62,7 @@ def _composer(
     registry.build_model_for_agent.return_value = FakeMessagesListChatModel(responses=[])
     container._llm_registry = registry  # type: ignore[assignment]
     fact = WindowFact(window, source, detail or f"llama.cpp /props reported {window:,} tokens")
-    with patch("maljan.llm.context_window.learn_window", return_value=fact):
+    with patch("malspark.llm.context_window.learn_window", return_value=fact):
         composer = container.get_report_composer()
     built = registry.build_model_for_agent.call_args.kwargs["max_tokens_for"]("openai")
     return composer, built
@@ -172,7 +172,7 @@ class TestNeverPastTheModelsMaximum:
         assert "held at the model's 16384-token context window" in composer.budget_note
 
     def test_a_million_token_window_leaves_the_rest_for_the_evidence(self) -> None:
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from malspark.llm.context_window import CHARS_PER_TOKEN
 
         composer, _built = _hosted()
 
@@ -190,7 +190,7 @@ class TestTheReportersModel:
         registry.build_model_for_agent.return_value = FakeMessagesListChatModel(responses=[])
         container._llm_registry = registry  # type: ignore[assignment]
         fact = WindowFact(MILLION, "probed", "the served model list reported 1,048,576")
-        with patch("maljan.llm.context_window.learn_window", return_value=fact):
+        with patch("malspark.llm.context_window.learn_window", return_value=fact):
             container.get_reporter_llm()
 
         assert registry.build_model_for_agent.call_args.kwargs["max_tokens"] == MILLION_QUARTER
@@ -211,7 +211,7 @@ class TestAnOperatorsOwnBudget:
         container._llm_registry = registry  # type: ignore[assignment]
 
         fact = WindowFact(16384, "probed", "the server's /props")
-        with patch("maljan.llm.context_window.learn_window", return_value=fact):
+        with patch("malspark.llm.context_window.learn_window", return_value=fact):
             composer = container.get_report_composer()
 
         expected = 900 if thinking_off else 900 + 8192
@@ -226,13 +226,13 @@ class TestTheToolAnswersShareTheWindow:
 
     def test_the_share_is_the_room_left_divided_evenly(self) -> None:
         composer, _built = _composer(16384)
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from malspark.llm.context_window import CHARS_PER_TOKEN
 
         room = (16384 - 4096) * CHARS_PER_TOKEN - 1000
         assert composer._item_chars(1000, 3) == room // 3
 
     def test_a_full_window_shows_no_answer_and_says_so(self) -> None:
-        from maljan.reporting.composer import NO_ROOM_FOR_THE_ANSWER, _bundle_text
+        from malspark.reporting.composer import NO_ROOM_FOR_THE_ANSWER, _bundle_text
 
         composer, _built = _composer(16384)
         chars = composer._item_chars(10**7, 2)
@@ -244,7 +244,7 @@ class TestTheToolAnswersShareTheWindow:
         assert NO_ROOM_FOR_THE_ANSWER in text
 
     def test_no_window_shows_each_answer_whole(self) -> None:
-        from maljan.reporting.composer import _bundle_text
+        from malspark.reporting.composer import _bundle_text
 
         composer = ReportComposer(llm=None, per_section_timeout=5)  # type: ignore[arg-type]
         chars = composer._item_chars(100, 1)
@@ -276,8 +276,8 @@ class TestTheClaimsShareTheWindow:
 
     @pytest.mark.parametrize("section", ["executive_summary", "introduction", "execution_flow"])
     def test_no_count_cuts_a_section_s_claims(self, section: str) -> None:
-        from maljan.reporting.evidence_bundles import bundle_for
-        from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+        from malspark.reporting.evidence_bundles import bundle_for
+        from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
 
         report = MalwareReport(identity=SampleIdentity(hashes=FileHashes(sha256="e" * 64)))
 
@@ -286,8 +286,8 @@ class TestTheClaimsShareTheWindow:
         assert len(bundle["claims"]) == 40
 
     def test_each_claim_is_shown_within_its_share_and_a_cut_says_so(self) -> None:
-        from maljan.reporting.composer import _bundle_text
-        from maljan.utils.marked_cut import CUT_MARK
+        from malspark.reporting.composer import _bundle_text
+        from malspark.utils.marked_cut import CUT_MARK
 
         claims = [{"claim": "x" * 200, "evidence_ref": "ev_0001"} for _ in range(25)]
 
@@ -299,15 +299,15 @@ class TestTheClaimsShareTheWindow:
         assert all(line.endswith(CUT_MARK + '"') and len(line) <= 64 for line in shown)
 
     def test_a_full_window_says_there_was_no_room_for_a_claim(self) -> None:
-        from maljan.reporting.composer import NO_ROOM_FOR_THE_ANSWER, _bundle_text
+        from malspark.reporting.composer import NO_ROOM_FOR_THE_ANSWER, _bundle_text
 
         bundle = {"claims": [{"claim": "x", "evidence_ref": ""}]}
 
         assert f"- {NO_ROOM_FOR_THE_ANSWER}" in _bundle_text("introduction", bundle, None, 0)
 
     def test_a_built_prompt_shows_every_claim_within_the_window(self) -> None:
-        from maljan.llm.context_window import CHARS_PER_TOKEN
-        from maljan.utils.marked_cut import CUT_MARK
+        from malspark.llm.context_window import CHARS_PER_TOKEN
+        from malspark.utils.marked_cut import CUT_MARK
 
         claim = "The sample writes example value {} under its settings key. " + "x" * 260
         isrs = {
@@ -330,7 +330,7 @@ class TestTheClaimsShareTheWindow:
         assert all(line.endswith(CUT_MARK + '"') for line in shown)
         # The system text shares the room with the human turn
         # (``ReportComposer._item_chars`` counts both).
-        from maljan.reporting.composer import _SYSTEM
+        from malspark.reporting.composer import _SYSTEM
 
         whole = len(_SYSTEM) + len(prompt)
         assert whole <= (4000 - 1000) * CHARS_PER_TOKEN
@@ -342,7 +342,7 @@ def _compose(isr_reports: dict[str, Any], report: Any = None, **composer: int) -
     import asyncio
     import json
 
-    from maljan.reporting.models import FileHashes, MalwareReport, SampleIdentity
+    from malspark.reporting.models import FileHashes, MalwareReport, SampleIdentity
 
     sent: dict[str, str] = {}
 
@@ -360,7 +360,9 @@ def _compose(isr_reports: dict[str, Any], report: Any = None, **composer: int) -
         identity=SampleIdentity(hashes=FileHashes(sha256="e" * 64)), verdict="Malware"
     )
     comp = ReportComposer(llm=_Capture(), per_section_timeout=5, **composer)  # type: ignore[arg-type]
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
+    ):
         asyncio.run(comp.compose(report, isr_reports=isr_reports))
     sent["_degradations"] = "\n".join(comp.degradations)
     return sent
@@ -370,8 +372,8 @@ class TestTheFactsEnterWhole:
     """No count cuts a section's facts; a section whose facts alone overflow says so."""
 
     def test_every_network_value_reaches_the_configuration_section(self) -> None:
-        from maljan.reporting.evidence_bundles import bundle_for
-        from maljan.reporting.models import (
+        from malspark.reporting.evidence_bundles import bundle_for
+        from malspark.reporting.models import (
             FileHashes,
             MalwareReport,
             NetworkDomain,
@@ -390,8 +392,8 @@ class TestTheFactsEnterWhole:
             assert facts["domains"] == hosts
 
     def test_a_long_command_line_is_shown_whole(self) -> None:
-        from maljan.reporting.evidence_bundles import _process_lines
-        from maljan.reporting.models import ProcessNode
+        from malspark.reporting.evidence_bundles import _process_lines
+        from malspark.reporting.models import ProcessNode
 
         command = "example.exe " + "-o value " * 60
         node = ProcessNode(pid=4, name="example.exe", command_line=command)
@@ -399,14 +401,14 @@ class TestTheFactsEnterWhole:
         assert _process_lines(node, 0) == [f"pid 4 example.exe: {command}"]
 
     def test_a_packer_match_without_a_confidence_states_none(self) -> None:
-        from maljan.reporting.evidence_bundles import _packer_line
+        from malspark.reporting.evidence_bundles import _packer_line
 
         assert _packer_line({"name": "ExamplePack", "method": "signature"}) == (
             "ExamplePack (signature)"
         )
 
     def test_facts_that_overflow_the_window_record_a_degradation(self) -> None:
-        from maljan.reporting.models import (
+        from malspark.reporting.models import (
             FileHashes,
             MalwareReport,
             NetworkDomain,
@@ -453,7 +455,7 @@ class TestAWindowTheBudgetFills:
         assert composer._call_bound([HumanMessage(content="x" * 30000)]) is None
 
     def test_a_gateway_declaring_its_window_as_its_output_keeps_room_for_the_prompt(self) -> None:
-        from maljan.llm import model_output_limits
+        from malspark.llm import model_output_limits
 
         model_output_limits.note_from_model_list(
             {"data": [{"id": "gateway-model", "max_completion_tokens": 131072}]},
@@ -469,7 +471,7 @@ class TestAWindowTheBudgetFills:
         finally:
             model_output_limits.forget_learned()
 
-        from maljan.llm.context_window import CHARS_PER_TOKEN
+        from malspark.llm.context_window import CHARS_PER_TOKEN
 
         assert composer.output_cap == 32768
         assert composer._room_chars() == (131072 - 32768) * CHARS_PER_TOKEN
@@ -490,7 +492,7 @@ class TestAWindowTheBudgetFills:
     def test_the_held_value_reaches_the_call(self) -> None:
         import asyncio
 
-        from maljan.reporting.composer import _IntroOut
+        from malspark.reporting.composer import _IntroOut
 
         sent: list[dict[str, Any]] = []
 
@@ -506,7 +508,7 @@ class TestAWindowTheBudgetFills:
             window_tokens=16384,
         )
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=True
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=True
         ):
             asyncio.run(
                 composer._invoke([HumanMessage(content="x" * 3000)], _IntroOut, section="intro")
@@ -517,7 +519,7 @@ class TestAWindowTheBudgetFills:
     def test_an_ollama_model_is_left_to_its_own_context(self) -> None:
         from langchain_ollama import ChatOllama
 
-        from maljan.llm.context_window import accepts_output_bound
+        from malspark.llm.context_window import accepts_output_bound
 
         assert not accepts_output_bound(ChatOllama(model="m"))
 

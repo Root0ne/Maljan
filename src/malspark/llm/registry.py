@@ -1,0 +1,540 @@
+"""LLM provider registry with auto-discovery via decorator.
+
+Usage:
+    @register_provider("openai")
+    class OpenAIProvider:
+        name = "openai"
+        def build_model(self, model, temperature, **kwargs): ...
+
+Heterogeneous Model Ensemble:
+    build_model_for_agent(agent_name) builds a model using the per-agent
+    AgentLLMConfig override when one is defined, otherwise falls back to
+    build_model("expert"). This allows each analysis agent to use a
+    different provider/model family, reducing echo chamber risk.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from langchain_core.language_models.chat_models import BaseChatModel
+
+from malspark.core.config import Settings
+from malspark.core.exceptions import LLMError
+from malspark.core.logger import logger
+from malspark.core.plugins import (
+    InstalledPlugin,
+    PluginRefused,
+    PluginRegistry,
+    describe,
+    reconcile,
+    registration_refusal,
+    unavailable_reason,
+    usable_list,
+)
+from malspark.core.settings_overrides import redact_url
+
+# The request timeout every provider's HTTP client is built with, unless the
+# caller names one. It has to outlast the longest agent loop budget (the
+# static analyst's per-chunk 1500 s plus its 30 s hard-cap grace, on a
+# cold-cache local 35B), because a request cut shorter than its loop truncates
+# an answer that was still decoding. A model on a fallback list is cut much
+# sooner, by its own turn deadline (``llm.fallback_turn_share``). It is the
+# timeout a request is sent with until its model's pace is measured; after
+# that each request is given the larger of this and the time its own output
+# cap takes at that pace (``generation_rate.with_sized_request_timeout``).
+# Every provider has one — the Ollama client used to have none at all.
+PROVIDER_REQUEST_TIMEOUT_SECONDS = 1800
+
+# Module-level registry dict: provider_name -> class
+_PROVIDER_REGISTRY: dict[str, type] = {}
+
+
+def register_provider(name: str):  # type: ignore[no-untyped-def]
+    """Decorator that registers an LLM provider class under the given name.
+
+    While a plugin loads, it may register only the provider its entry point
+    names, never a built-in one (``malspark.core.plugins``).
+    """
+
+    def decorator(cls: type) -> type:
+        refusal = registration_refusal(
+            "llm", name, cls, _PROVIDER_REGISTRY.get(name), lambda: BUILT_IN_PROVIDERS
+        )
+        if refusal:
+            raise PluginRefused(refusal)
+        if name in _PROVIDER_REGISTRY:
+            logger.warning(f"LLM provider '{name}' is being re-registered (overwriting).")
+        _PROVIDER_REGISTRY[name] = cls
+        from malspark.llm.provider_base import remember_facts
+
+        remember_facts(name, cls)
+        return cls
+
+    return decorator
+
+
+# The built-in adapters, each a module named ``malspark.llm.<name>_provider``
+# that registers the provider it is named after.
+_BUILTIN_MODULES: tuple[str, ...] = (
+    "malspark.llm.anthropic_provider",
+    "malspark.llm.gemini_provider",
+    "malspark.llm.ollama_provider",
+    "malspark.llm.openai_provider",
+)
+
+
+# The ids the built-in adapters register, each named after its module.
+BUILT_IN_PROVIDERS: frozenset[str] = frozenset(
+    module.rsplit(".", 1)[1].removesuffix("_provider") for module in _BUILTIN_MODULES
+)
+
+
+def _import_built_ins() -> None:
+    import importlib
+
+    for module in _BUILTIN_MODULES:
+        importlib.import_module(module)
+
+
+def discover_providers() -> None:
+    """Import all built-in provider modules to trigger @register_provider decorators.
+
+    No plugin is loaded here: a process loads the allowed plugins when it is
+    told to, with the list to load by (``load_plugins``).
+    """
+    _import_built_ins()
+
+
+def load_plugins(allowed: Any) -> None:
+    """Bring the LLM provider plugins in line with the allow-list ``allowed``.
+
+    The plugins of the ``malspark.llm_providers`` entry-point group it names
+    are loaded once each, and one it no longer names is withdrawn
+    (``malspark.core.plugins.load_allowed``).
+    """
+    reconcile(PLUGINS, usable_list(allowed))
+
+
+def _built_ins() -> frozenset[str]:
+    _import_built_ins()
+    return BUILT_IN_PROVIDERS
+
+
+def _registered() -> list[str]:
+    from malspark.llm.provider_base import provider_names
+
+    return provider_names()
+
+
+def _register_plugin(plugin: InstalledPlugin, loaded: object) -> None:
+    """Register the class an LLM plugin's entry point named, under the plugin's name."""
+    from malspark.llm.provider_base import LLMProvider
+
+    if not (isinstance(loaded, type) and issubclass(loaded, LLMProvider)):
+        raise PluginRefused(
+            f"its entry point names {describe(loaded)}, which is not a subclass of "
+            "malspark.llm.provider_base.LLMProvider"
+        )
+    if not callable(getattr(loaded, "build_model", None)):
+        raise PluginRefused(f"{describe(loaded)} has no build_model method")
+    declared = str(getattr(loaded, "name", "") or "")
+    if declared and declared != plugin.name:
+        raise PluginRefused(
+            f"{describe(loaded)} names itself {declared!r} and its entry point "
+            f"{plugin.name!r}; the two must be the same"
+        )
+    if not declared:
+        loaded.name = plugin.name
+    if _PROVIDER_REGISTRY.get(plugin.name) is not loaded:
+        register_provider(plugin.name)(loaded)
+
+
+def _withdraw_plugin(name: str) -> None:
+    from malspark.llm.provider_base import forget_facts
+
+    _PROVIDER_REGISTRY.pop(name, None)
+    forget_facts(name)
+
+
+PLUGINS = PluginRegistry(
+    kind="llm",
+    builtin=_built_ins,
+    registered=_registered,
+    register=_register_plugin,
+    withdraw=_withdraw_plugin,
+)
+
+
+def unknown_provider(name: object) -> str:
+    """Why ``name`` names no registered LLM provider, with the registered names."""
+    available = ", ".join(_PROVIDER_REGISTRY.keys()) or "(none)"
+    said = f"Unknown LLM provider: '{name}'. Available: {available}"
+    reason = unavailable_reason("llm", str(name or ""))
+    return f"{said}; {reason}" if reason else said
+
+
+def discover_provider(name: str) -> None:
+    """Import the one built-in module that registers ``name``, where there is one.
+
+    Asking about one shipped provider then loads that adapter's client library
+    alone, not every adapter's.
+    """
+    import importlib
+
+    module = f"malspark.llm.{name}_provider"
+    if module in _BUILTIN_MODULES:
+        importlib.import_module(module)
+
+
+class LLMProviderRegistry:
+    """Manages LLM provider discovery, instantiation, and model building."""
+
+    def __init__(self, config: Settings) -> None:
+        self._config = config
+        discover_providers()
+
+    def build_model(
+        self,
+        role: str = "expert",
+        temperature: float | None = None,
+        **kwargs: Any,
+    ) -> BaseChatModel:
+        """Build a ChatModel for the configured provider and role.
+
+        Args:
+            role: "expert" or "judge" - selects the model name.
+            temperature: Override temperature. Defaults to 0.1 for expert, 0.0 for judge.
+            **kwargs: Extra kwargs forwarded to the provider.
+
+        Returns:
+            A configured LangChain BaseChatModel instance.
+        """
+        provider_name = self._config.llm.provider
+        provider_cls = _PROVIDER_REGISTRY.get(provider_name)
+
+        if provider_cls is None:
+            raise LLMError(unknown_provider(provider_name))
+
+        # Select model name based on role
+        if role == "judge":
+            model_name = self._config.llm.judge_model
+            default_temp = 0.0
+        else:
+            model_name = self._config.llm.expert_model
+            default_temp = 0.1
+
+        temp = temperature if temperature is not None else default_temp
+
+        from malspark.llm.effort import effort_in_force
+
+        _, effort_said = effort_in_force(self._config, provider_name)
+        logger.info(
+            f"Building {provider_name}/{model_name} (role={role}, temp={temp}, "
+            f"effort={effort_said})"
+        )
+        _cap_for_provider(kwargs, provider_name)
+        provider = provider_cls(config=self._config)
+        built = provider.build_model(model=model_name, temperature=temp, **kwargs)
+        return self._with_window(built, provider_name, model_name, kwargs.get("base_url"))
+
+    def build_model_for_agent(
+        self,
+        agent_name: str,
+        *,
+        fallback_role: str = "expert",
+        **kwargs: Any,
+    ) -> BaseChatModel:
+        """Build a ChatModel for a specific named agent.
+
+        Looks up agent_name in LLMConfig.agents. When a per-agent
+        AgentLLMConfig override exists, it builds a model using that
+        agent's dedicated provider and model name — enabling heterogeneous
+        model ensemble (different model families per agent).
+
+        When no override is found, falls back to ``build_model`` with
+        ``fallback_role`` — "expert" for the analysts, which is what every
+        caller wanted before the judge started using this path too.
+
+        Args:
+            agent_name: The agent registry key (e.g. "static", "dynamic",
+                        "network"). Case-insensitive lookup.
+            fallback_role: Role passed to ``build_model`` when the agent has
+                        no override. An override naming a provider that is
+                        not registered raises ``LLMError``.
+            **kwargs:   Extra kwargs forwarded to the provider.
+
+        Returns:
+            A configured LangChain BaseChatModel instance.
+        """
+        from malspark.core.config import model_entry
+
+        # An entry holding only ceilings chooses no model: the agent's model is
+        # built as it is with no entry, and the job holds it to the ceiling.
+        agent_cfg = model_entry(self._config.llm.agents, agent_name.lower())
+
+        if agent_cfg is None:
+            # No per-agent override — fall back to global expert LLM
+            logger.debug(
+                "No per-agent LLM config for '%s', using the %s role's model.",
+                agent_name,
+                fallback_role,
+            )
+            return self.build_model(role=fallback_role, **kwargs)
+
+        # Per-agent override found
+        provider_cls = _PROVIDER_REGISTRY.get(agent_cfg.provider)
+        if provider_cls is None:
+            # Never the role's global model in its place: the agent would run a
+            # model nobody chose for it, which is what its entry exists to stop.
+            raise LLMError(
+                f"Agent '{agent_name}' names a provider that is not registered: "
+                f"{unknown_provider(agent_cfg.provider)}."
+            )
+
+        fallbacks = list(getattr(agent_cfg, "fallbacks", None) or [])
+        primary = self._build_choice(agent_name, agent_cfg, None, 0, **kwargs)
+        if not fallbacks:
+            return primary
+        from malspark.core.model_assignments import assignment_chain_for
+        from malspark.llm.fallback import FallbackChatModel, turn_share_seconds
+
+        # Each fallback is built now rather than on the turn that needs it:
+        # a fallback that cannot be built — an unknown provider, a missing
+        # key — is a configuration mistake, and the job should say so before
+        # it starts rather than on the one turn it was meant to rescue.
+        models: list[Any] = [primary]
+        for position, choice in enumerate(fallbacks, 1):
+            if choice.provider not in _PROVIDER_REGISTRY:
+                raise LLMError(
+                    f"Agent '{agent_name}' falls back to a provider that is not registered: "
+                    f"{unknown_provider(choice.provider)}."
+                )
+            models.append(
+                self._build_choice(
+                    agent_name, choice, agent_cfg.temperature, position, **dict(kwargs)
+                )
+            )
+        labels = [a.label for a in assignment_chain_for(self._config, agent_name.lower())]
+        logger.info("Agent '%s' falls back through: %s.", agent_name, " -> ".join(labels))
+        return FallbackChatModel(
+            models=models,
+            labels=labels,
+            agent=agent_name,
+            turn_deadline=turn_share_seconds(self._config, agent_name.lower()),
+        )
+
+    def _build_choice(
+        self,
+        agent_name: str,
+        choice: Any,
+        inherited_temperature: float | None,
+        position: int = 0,
+        **kwargs: Any,
+    ) -> BaseChatModel:
+        """One model of an agent's list, at its own endpoint and temperature.
+
+        ``position`` is its place in the list (0 the first model, 1 and on its
+        fallbacks), so an effort of its own is named by the field it was read
+        from.
+        """
+        provider_cls = _PROVIDER_REGISTRY[choice.provider]
+        if choice.temperature is not None:
+            temp = choice.temperature
+        elif inherited_temperature is not None:
+            temp = inherited_temperature
+        else:
+            temp = 0.1
+        agent_base_url = getattr(choice, "base_url", None)
+        # The model's own effort, else the provider's global one, which the
+        # provider reads itself: only an entry's own value is handed over, so
+        # a model with none is built exactly as it was before the field.
+        from malspark.llm.effort import effort_in_force, effort_setting_of
+
+        own_effort = getattr(choice, "effort", None) or None
+        own_setting = effort_setting_of(agent_name, position)
+        _, effort_said = effort_in_force(
+            self._config, str(choice.provider), own_effort, own_setting
+        )
+        logger.info(
+            "Building dedicated LLM for agent '%s': %s/%s (temp=%.2f, base_url=%s, effort=%s)",
+            agent_name,
+            choice.provider,
+            choice.model,
+            temp,
+            redact_url(str(agent_base_url)) if agent_base_url else "(global)",
+            effort_said,
+        )
+        from malspark.llm.provider_base import facts_of
+
+        if own_effort and not facts_of(choice.provider).effort_setting:
+            raise LLMError(
+                f"{own_setting} is {own_effort!r} on {choice.provider}/{choice.model}, "
+                "a provider that sends no reasoning effort."
+            )
+
+        _cap_for_provider(kwargs, str(choice.provider))
+        provider = provider_cls(config=self._config)
+        # Only forwarded when the agent actually overrides the endpoint: the
+        # providers resolve a missing kwarg to the global value themselves, and
+        # a None passed through would land in the model's own kwargs.
+        if agent_base_url:
+            kwargs["base_url"] = agent_base_url
+        if own_effort:
+            kwargs["effort"] = own_effort
+            kwargs["effort_setting"] = own_setting
+        built = provider.build_model(model=choice.model, temperature=temp, **kwargs)
+        return self._with_window(built, str(choice.provider), choice.model, agent_base_url)
+
+    def _with_window(
+        self, built: Any, provider: str, model: str, base_url: str | None
+    ) -> BaseChatModel:
+        """``built``, carrying the window its model serves where one is already known.
+
+        A call with no output cap is sized from the room that window leaves
+        after its prompt (``generation_rate._CallDeadline``). Only what is
+        known without a request: the window each agent's output cap was
+        derived from was learned before its model was built.
+        """
+        from malspark.core.model_assignments import endpoint_for
+        from malspark.llm.context_window import known_window, record_built_window
+
+        try:
+            endpoint = endpoint_for(self._config, provider, base_url)
+            record_built_window(
+                built, known_window(self._config, provider, endpoint, str(model or ""))
+            )
+        except Exception as exc:  # noqa: BLE001 — a window that cannot be read is not kept
+            logger.debug("No window kept for %s/%s (%s).", provider, model, exc)
+        return built  # type: ignore[no-any-return]
+
+
+def _cap_for_provider(kwargs: dict[str, Any], provider: str) -> None:
+    """Resolve a per-provider output cap in place.
+
+    ``max_tokens_for`` is a caller's cap that depends on which provider a model
+    of the list runs on — a model's reasoning counts against the cap on some
+    providers and not others — so each model of a list gets its own.
+    """
+    cap_for = kwargs.pop("max_tokens_for", None)
+    if callable(cap_for):
+        kwargs["max_tokens"] = int(cap_for(provider))
+
+
+def structured_output_supported(config: Any | None = None, llm: Any | None = None) -> bool:
+    """Whether ``with_structured_output`` is worth attempting against this endpoint.
+
+    A property of the endpoint, not of the caller, which is why it lives here
+    rather than in each of the places that ask. The provider answers for
+    itself (``LLMProvider.supports_structured_output`` and
+    ``model_declines_structured_output``): the configured provider when
+    ``config`` is given, else the provider that built ``llm``, read from its
+    ``_llm_type``. A local OpenAI-compatible server is not the vendor API: a
+    structured call against llama-server hung for the full request timeout
+    while the plain text path did the same job in minutes, so the OpenAI
+    adapter declines it for a model or a deployment with its own address.
+
+    Never raises, and refuses when it cannot tell: knowing nothing about the
+    endpoint is not a reason to gamble half an hour of a job on it.
+
+    **A fallback list** is asked model by model, each by what its own model
+    object says: any of them may answer a turn, so the list supports
+    structured output only when every one does, and a local server anywhere
+    in it takes the path a bare local server takes.
+    """
+    inner = getattr(llm, "models", None) if llm is not None else None
+    if isinstance(inner, list) and getattr(llm, "_llm_type", "") == "malspark-fallback":
+        return bool(inner) and all(structured_output_supported(None, model) for model in inner)
+    try:
+        from malspark.llm.provider_base import facts_of, provider_of_model, registered_facts
+
+        # A model object is the only place a per-agent endpoint survives, and
+        # the agent that owns it may run on another provider than the global
+        # one, so every provider is asked whether this model declines first.
+        if llm is not None and any(
+            one.model_declines_structured_output(llm) for one in registered_facts()
+        ):
+            return False
+        if config is not None:
+            return bool(facts_of(config.llm.provider).supports_structured_output(config))
+        if llm is not None:
+            built_by = provider_of_model(llm)
+            return built_by is not None and bool(built_by.supports_structured_output(None))
+        return False
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("structured-output capability check failed (%s); assuming no.", exc)
+        return False
+
+
+# Where a model object notes that it was said to take the text path, in its own
+# ``__dict__``: once per model, and a job's container builds its own.
+_TEXT_PATH_SAID = "_malspark_schema_text_path_said"
+
+
+def schema_tool_worth_offering(llm: Any) -> bool:
+    """Whether a structured call that offers ``read_evidence`` should offer its schema as a tool.
+
+    Not where the provider that built a model says it answers such a tool in
+    text (``LLMProvider.schema_tool_answered_as_text``) and asks for no
+    JSON-schema answer natively in its place: the call is then asked for its
+    JSON in text, the path every structured call already falls back to, and
+    each model says so once. A fallback list takes the text path only when
+    every one of its models would: a model later in the list that writes the
+    schema as text never takes the tool from one before it that calls it.
+    Never raises; a model nothing can be said of keeps the tool.
+    """
+    inner = getattr(llm, "models", None) if llm is not None else None
+    candidates = (
+        list(inner)
+        if isinstance(inner, list) and getattr(llm, "_llm_type", "") == "malspark-fallback"
+        else [llm]
+    )
+    try:
+        from malspark.llm.provider_base import provider_of_model
+
+        named: list[tuple[str, str]] = []
+        for model in candidates:
+            built_by = provider_of_model(model)
+            if (
+                built_by is None
+                or not built_by.schema_tool_answered_as_text(model)
+                or built_by.native_json_schema_output(model)
+            ):
+                return True
+            named.append(
+                (
+                    built_by.name,
+                    str(getattr(model, "model", None) or getattr(model, "model_name", "") or "?"),
+                )
+            )
+        held = getattr(llm, "__dict__", None)
+        if named and isinstance(held, dict) and not held.get(_TEXT_PATH_SAID):
+            held[_TEXT_PATH_SAID] = True
+            logger.info(
+                "%s writes a schema offered beside read_evidence as text (no tool choice is sent "
+                "while it thinks); structured answers are asked for as JSON text, with no schema "
+                "tool.",
+                ", ".join(f"{name} model {model}" for name, model in named),
+            )
+        return not named
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("schema-tool check failed (%s); the tool is offered.", exc)
+    return True
+
+
+def structured_output_supported_for_llm(llm: Any) -> bool:
+    """``structured_output_supported`` for callers that hold no config.
+
+    ``NarrativeAgent`` and ``ReportComposer`` are constructed with a model and
+    nothing else, but the answer depends on the configured endpoint, not on the
+    model object — sniffing ``_llm_type`` alone cannot tell a local
+    OpenAI-compatible server from api.openai.com. Reads the settings, and falls
+    back to what the model object can say if that is unavailable.
+    """
+    try:
+        from malspark.core.config import get_settings
+
+        return structured_output_supported(get_settings(), llm)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("structured-output settings lookup failed (%s); sniffing the model.", exc)
+        return structured_output_supported(None, llm)

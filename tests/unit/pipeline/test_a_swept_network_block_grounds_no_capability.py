@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.pipeline.validation import CapabilityGrounding, narrative_capability_violations
-from maljan.reporting.models import (
+from malspark.pipeline.validation import CapabilityGrounding, narrative_capability_violations
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkDomain,

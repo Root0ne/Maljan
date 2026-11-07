@@ -10,8 +10,8 @@ this gate exists to prevent. One list answers both now.
 
 import pytest
 
-from maljan.enrichment.orchestrator import _is_public_fqdn
-from maljan.extractors.network_extractor import host_is_public
+from malspark.enrichment.orchestrator import _is_public_fqdn
+from malspark.extractors.network_extractor import host_is_public
 
 
 @pytest.mark.parametrize(

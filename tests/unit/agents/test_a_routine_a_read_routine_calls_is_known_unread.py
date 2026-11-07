@@ -14,8 +14,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.agents.function_callees import call_edges, unread_callees
-from maljan.schemas.evidence import LedgerEntry
+from malspark.agents.function_callees import call_edges, unread_callees
+from malspark.schemas.evidence import LedgerEntry
 from tests.linear_cost import assert_scales
 
 BASE = 0x2470000
@@ -185,7 +185,7 @@ def test_a_name_in_a_comment_is_no_call() -> None:
 
 
 def test_a_comment_mark_inside_a_string_cuts_nothing_and_an_open_comment_runs_out() -> None:
-    from maljan.agents.function_callees import _without_comments
+    from malspark.agents.function_callees import _without_comments
 
     kept = 'p = "http://x/*y"; c = \'/\'; FUN_1(a); // gone\nq = "a\\"//b"; FUN_2(b);'
     assert _without_comments(kept) == (
@@ -198,7 +198,7 @@ def test_a_comment_mark_inside_a_string_cuts_nothing_and_an_open_comment_runs_ou
 
 
 def test_the_comment_scan_is_linear_on_hostile_listings() -> None:
-    from maljan.agents.function_callees import _without_comments
+    from malspark.agents.function_callees import _without_comments
 
     # Unclosed comment marks after a string each, and comment marks inside
     # strings: a backtracking reader is quadratic on both.

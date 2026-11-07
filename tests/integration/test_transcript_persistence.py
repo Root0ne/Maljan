@@ -29,7 +29,7 @@ from app.worker.analysis_worker import (
     _parse_event_ts,
     _transcript_row,
 )
-from maljan.pipeline.events import AGENT_MESSAGE, emit_agent_message
+from malspark.pipeline.events import AGENT_MESSAGE, emit_agent_message
 from tests.credential_shapes import prefixed_key
 
 
@@ -152,7 +152,7 @@ class TestTheRecorderRecordsWhatIsSent:
             speaker="static",
             role="analyst",
             text=f"the config held {secret}",
-            report="read from /home/operator/maljan/data/samples/ab12/evil.exe",
+            report="read from /home/operator/malspark/data/samples/ab12/evil.exe",
         )
 
         (message,) = recorded
@@ -342,7 +342,7 @@ class TestTheLedgerRowKeepsWhatTheEntryCarried:
         assert row.repeated_of is None
 
     def test_every_field_of_a_ledger_entry_has_somewhere_to_go(self) -> None:
-        from maljan.schemas.evidence import LedgerEntry
+        from malspark.schemas.evidence import LedgerEntry
 
         row = _evidence_row(LedgerEntry(id="ev_0001").model_dump(), job_id=uuid.uuid4())
         # ``id`` is the citation string, which the row calls ``entry_id``: the

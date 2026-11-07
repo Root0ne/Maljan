@@ -16,26 +16,26 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.base_agent import earlier_chunks_block
-from maljan.agents.evidence_recorder import (
+from malspark.agents.base_agent import earlier_chunks_block
+from malspark.agents.evidence_recorder import (
     EvidenceRecorder,
     RepeatGuard,
     record_tools,
     seeded_repeat_guard,
 )
-from maljan.agents.judge_agent import question_evidence
-from maljan.llm import context_window as cw
-from maljan.pipeline.nodes import evidence_summary
-from maljan.pipeline.run_state import _lines as run_state_lines
-from maljan.pipeline.validation import EntryTexts
-from maljan.reporting.models import (
+from malspark.agents.judge_agent import question_evidence
+from malspark.llm import context_window as cw
+from malspark.pipeline.nodes import evidence_summary
+from malspark.pipeline.run_state import _lines as run_state_lines
+from malspark.pipeline.validation import EntryTexts
+from malspark.reporting.models import (
     EvidenceIndexRow,
     FileHashes,
     MalwareReport,
     SampleIdentity,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import (
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import (
     EvidenceCounter,
     LedgerEntry,
     answers_held,
@@ -241,7 +241,7 @@ class TestADelegatedAnswer:
     def test_its_evidence_holds_what_the_tools_said_and_not_the_guard_s_answer(self) -> None:
         from unittest.mock import MagicMock, patch
 
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         class _Analyst(BaseAnalyst):
             def analyze(self, data: str) -> str:  # pragma: no cover - unused

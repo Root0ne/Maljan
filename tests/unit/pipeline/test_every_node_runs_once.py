@@ -23,9 +23,9 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.pipeline import builder as graph_builder
-from maljan.pipeline.topology import JUDGE_NODE, REPORT_NODE, REVISION_NODE
+from malspark.core.config import Settings
+from malspark.pipeline import builder as graph_builder
+from malspark.pipeline.topology import JUDGE_NODE, REPORT_NODE, REVISION_NODE
 
 ALL_TOOLS = (
     Path(__file__).resolve().parents[3] / "docs" / "examples" / "profiles" / "all-tools.json"
@@ -45,8 +45,8 @@ class _Container:
         self.parallel = parallel
 
     def active_profile(self) -> Any:
-        from maljan.agents.composition import active_profile
-        from maljan.pipeline.analyst_mode import AnalystMode, with_resolved_modes
+        from malspark.agents.composition import active_profile
+        from malspark.pipeline.analyst_mode import AnalystMode, with_resolved_modes
 
         profile = active_profile(self.config)
         if self.parallel is None:
@@ -103,7 +103,7 @@ def _run(
     monkeypatch.setattr(graph_builder, "ConsensusRouter", router)
 
     compiled = graph_builder.build_graph(_Container(settings, parallel))  # type: ignore[arg-type]
-    # Streamed in the modes ``MaljanApp`` runs the graph in, so the nodes of
+    # Streamed in the modes ``MalsparkApp`` runs the graph in, so the nodes of
     # each step are known: the updates that arrive between two ``values``.
     steps: list[list[str]] = [[]]
 
@@ -162,7 +162,7 @@ def _assert_once_each(runs: Counter, settings: Settings, parallel: bool | None =
     assert {name: count for name, count in runs.items() if count != 1} == {}
     # The report runs in a step of its own: the kept report of a failed run
     # merges only the report's own update into the state it was built from
-    # (``MaljanApp._stream_the_graph``), which is right only while nothing
+    # (``MalsparkApp._stream_the_graph``), which is right only while nothing
     # finishes beside it.
     if REPORT_NODE in runs:
         assert [step for step in runs.steps if REPORT_NODE in step] == [[REPORT_NODE]]

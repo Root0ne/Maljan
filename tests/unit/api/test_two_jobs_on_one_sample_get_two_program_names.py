@@ -19,7 +19,7 @@ class _Provider:
 
 
 def _spec():
-    from maljan.providers.base import MirrorSpec
+    from malspark.providers.base import MirrorSpec
 
     return MirrorSpec(work_subdir=".work", container_prefix="/data/samples")
 

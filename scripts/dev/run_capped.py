@@ -116,7 +116,7 @@ def default_cpu_quota() -> str:
 
 
 def default_unit() -> str:
-    return f"maljan-capped-{os.getpid()}-{int(time.time())}"
+    return f"malspark-capped-{os.getpid()}-{int(time.time())}"
 
 
 def build_command(
@@ -426,7 +426,7 @@ def _parse(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--unit",
         default=None,
-        help="scope name, not a loaded unit's (default maljan-capped-<pid>-<time>)",
+        help="scope name, not a loaded unit's (default malspark-capped-<pid>-<time>)",
     )
     parser.add_argument(
         "--floor",

@@ -17,7 +17,7 @@ import random
 import uuid
 from typing import Any
 
-from maljan.pipeline import events as ev
+from malspark.pipeline import events as ev
 from tests.credential_shapes import (
     jwt,
     lowercase_base64_blob,
@@ -195,7 +195,7 @@ class TestArgumentSummaries:
         assert summary.count("***") == 3
 
     def test_a_host_path_is_cut_to_the_file_it_names(self) -> None:
-        summary = ev.summarize_args({"path": "/home/operator/maljan/data/samples/ab12/evil.exe"})
+        summary = ev.summarize_args({"path": "/home/operator/malspark/data/samples/ab12/evil.exe"})
         assert summary == "path=evil.exe"
         assert "/home/operator" not in summary
 
@@ -306,10 +306,10 @@ class TestArgumentSummaries:
         assert summary == "value=***, note=***"
 
     def test_a_command_line_loses_every_host_path_it_names(self) -> None:
-        line = "/opt/maljan/bin/run.sh /home/op/data/samples/ab12/evil.exe --out /tmp/x/r.json"
+        line = "/opt/malspark/bin/run.sh /home/op/data/samples/ab12/evil.exe --out /tmp/x/r.json"
         summary = ev.summarize_args({"cmd": line})
         assert "/home/op" not in summary
-        assert "/opt/maljan" not in summary
+        assert "/opt/malspark" not in summary
         assert "/tmp/x" not in summary
         assert summary == "cmd=run.sh evil.exe --out r.json"
 
@@ -348,7 +348,9 @@ class TestArgumentSummaries:
         an ``--out=`` option, a colon-separated value and a compact JSON body
         carry the per-job directory and the install prefix out verbatim.
         """
-        assert ev.scrub("run.exe --out=/tmp/maljan/jobs/9f2c-uuid/r.json") == "run.exe --out=r.json"
+        assert (
+            ev.scrub("run.exe --out=/tmp/malspark/jobs/9f2c-uuid/r.json") == "run.exe --out=r.json"
+        )
         assert ev.scrub("key:/var/lib/x/y") == "key:y"
 
     def test_a_compact_json_body_loses_its_host_path(self) -> None:
@@ -479,7 +481,7 @@ class TestArgumentSummaries:
 
     def test_a_failure_says_what_would_fix_it_and_not_what_broke(self) -> None:
         summary = ev.summarize_result(
-            "FileNotFoundError: /home/operator/maljan/data/samples/ab12/evil.exe is missing",
+            "FileNotFoundError: /home/operator/malspark/data/samples/ab12/evil.exe is missing",
             ok=False,
             remediation="submit the sample again",
         )
@@ -518,7 +520,7 @@ class TestArgumentSummaries:
         assert ev.summarize_result(output) == output
 
     def test_a_failure_with_no_remediation_still_says_nothing_raw(self) -> None:
-        summary = ev.summarize_result("Traceback: /etc/maljan/secrets.env", ok=False)
+        summary = ev.summarize_result("Traceback: /etc/malspark/secrets.env", ok=False)
         assert summary == "the call failed"
 
 
@@ -535,7 +537,7 @@ class TestWordsJoinedBySeparators:
     def test_the_word_runs_a_report_carries_are_kept(self) -> None:
         for words in (
             "anti-debugging/environment",
-            "x_maljan_contributing_agents",
+            "x_malspark_contributing_agents",
             "all_tools_reverser_ghidra",
             "MALWARE_REVERSE_ENGINEER_ANALYST",
         ):
@@ -647,12 +649,12 @@ class TestAConfiguredSecretIsMaskedByValue:
 
     def test_a_value_is_masked_only_as_a_whole_word(self) -> None:
         """No letter, digit or underscore may touch it: the value inside a longer word stays."""
-        ev.remember_secret_values(["minioadmin", "maljan_dev"])
+        ev.remember_secret_values(["minioadmin", "malspark_dev"])
 
-        assert ev.scrub("minioadministrator and maljan_development") == (
-            "minioadministrator and maljan_development"
+        assert ev.scrub("minioadministrator and malspark_development") == (
+            "minioadministrator and malspark_development"
         )
-        assert ev.scrub("user minioadmin, db maljan_dev.") == "user ***, db ***."
+        assert ev.scrub("user minioadmin, db malspark_dev.") == "user ***, db ***."
         assert ev.scrub("(minioadmin)") == "(***)"
 
     def test_an_escape_sequence_is_a_boundary(self) -> None:
@@ -828,7 +830,7 @@ class TestTheKeyShapesARunOfWordCharactersMisses:
 
     def test_a_dotted_run_that_is_not_a_token_survives(self) -> None:
         for value in (
-            "maljan.pipeline.events",
+            "malspark.pipeline.events",
             "subdomain.exampledomain.technology",
             "application/x-msdownload",
         ):
@@ -924,7 +926,7 @@ class TestTheKeyShapesARunOfWordCharactersMisses:
     def test_a_host_path_is_still_cut_rather_than_replaced(self) -> None:
         """A reader needs the file name; a path with no dot in it is not a key."""
         assert ev.scrub("/home/operator/samples/ab12cd34ef56") == "ab12cd34ef56"
-        assert ev.scrub("/opt/maljan/data/samples/dropper") == "dropper"
+        assert ev.scrub("/opt/malspark/data/samples/dropper") == "dropper"
 
 
 class TestTheRunsThatEndedTooEarly:
@@ -952,7 +954,7 @@ class TestTheRunsThatEndedTooEarly:
         assert scrubbed == "http://host.example.com/…"
 
     def test_a_password_never_survives_the_authority(self) -> None:
-        said = _url_with_userinfo("operator", "hunter2;now", "db.internal:5432/maljan")
+        said = _url_with_userinfo("operator", "hunter2;now", "db.internal:5432/malspark")
 
         assert "hunter2" not in ev.scrub(said)
 
@@ -963,7 +965,7 @@ class TestTheRunsThatEndedTooEarly:
         assert ev.scrub("file:///home/op/samples/x.exe") == "file:///…"
 
     def test_a_path_with_a_punctuated_directory_keeps_no_tail(self) -> None:
-        for value in ("/home/operator/a;b/c/x.exe", "/srv/maljan,prod/data/x.exe"):
+        for value in ("/home/operator/a;b/c/x.exe", "/srv/malspark,prod/data/x.exe"):
             assert ev.scrub(value) == "x.exe", value
 
     def test_a_closing_tag_is_not_a_path(self) -> None:
@@ -1096,7 +1098,7 @@ class TestRoster:
         }
 
     def test_the_models_and_the_stored_documents_give_the_same_roster(self) -> None:
-        from maljan.core.config import _builtin_definitions, _builtin_profiles
+        from malspark.core.config import _builtin_definitions, _builtin_profiles
 
         profiles = _builtin_profiles()
         definitions = _builtin_definitions()
@@ -1115,7 +1117,7 @@ class TestRoster:
         stages, so nothing had put them on the roster and the console had no
         name for the first delegated message that arrived.
         """
-        from maljan.core.config import _builtin_definitions, _builtin_profiles
+        from malspark.core.config import _builtin_definitions, _builtin_profiles
 
         payload = ev.roster_payload(
             _builtin_profiles()["team_lead"], _builtin_definitions(), depth=2

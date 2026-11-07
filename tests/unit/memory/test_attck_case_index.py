@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 
-from maljan.memory.attck_case_index import (
+from malspark.memory.attck_case_index import (
     AttckCaseIndex,
     load_attck_case_index,
     reset_cache,

@@ -99,12 +99,12 @@ def test_sweep_skips_a_file_that_vanishes_between_listing_and_unlink(dirs, monke
 
 
 def test_an_orphaned_upload_staging_file_is_swept(dirs):
-    """The API stages an upload as ``maljan-upload-*`` there; a crash leaves it behind."""
-    staged = sf.temp_dir() / "maljan-upload-k2j3h4"
+    """The API stages an upload as ``malspark-upload-*`` there; a crash leaves it behind."""
+    staged = sf.temp_dir() / "malspark-upload-k2j3h4"
     staged.write_bytes(b"MZ live sample")
     other = sf.temp_dir() / "anything-else.bin"
     other.write_bytes(b"x")
-    fresh = sf.temp_dir() / "maljan-upload-fresh"
+    fresh = sf.temp_dir() / "malspark-upload-fresh"
     fresh.write_bytes(b"x")
     for path in (staged, other):
         os.utime(path, (time.time() - 90_000, time.time() - 90_000))
@@ -115,7 +115,7 @@ def test_an_orphaned_upload_staging_file_is_swept(dirs):
 def test_a_link_in_the_upload_directory_is_not_followed(dirs):
     target = dirs / "precious.bin"
     target.write_bytes(b"keep")
-    link = sf.temp_dir() / "maljan-upload-link"
+    link = sf.temp_dir() / "malspark-upload-link"
     link.symlink_to(target)
     os.utime(link, (time.time() - 90_000, time.time() - 90_000), follow_symlinks=False)
     sf.sweep()

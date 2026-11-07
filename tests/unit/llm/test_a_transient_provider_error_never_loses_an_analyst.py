@@ -8,7 +8,7 @@ the first byte ended the loop too. Only the judge, the mediator and the
 reporting layer asked again.
 
 Every model call is now asked again by the one policy those callers already
-used (``maljan.llm.transient``): a 5xx, a 529, a 429 (after its
+used (``malspark.llm.transient``): a 5xx, a 529, a 429 (after its
 ``Retry-After``), a dropped connection or an error event in the stream. A
 refusal is answered once. A retry repeats one model request, so no tool runs
 twice and no ledger entry is written twice, and each failed attempt is counted
@@ -39,14 +39,14 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from langchain_openai.chat_models.base import OpenAIAPIError, OpenAITimeoutError
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.core.config import Settings
-from maljan.core.exceptions import AnalystError
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.fallback import FallbackChatModel
-from maljan.llm.generation_rate import ModelCallDeadline
-from maljan.llm.transient import (
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.core.config import Settings
+from malspark.core.exceptions import AnalystError
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.fallback import FallbackChatModel
+from malspark.llm.generation_rate import ModelCallDeadline
+from malspark.llm.transient import (
     RETRIES_KEY,
     retry_on_connection_error,
     transient_failure,
@@ -113,7 +113,7 @@ def _no_real_backoff(monkeypatch: pytest.MonkeyPatch) -> list[float]:
         waits.append(seconds)
 
     monkeypatch.setattr(asyncio, "sleep", _record)
-    monkeypatch.setattr("maljan.llm.transient.time.sleep", waits.append)
+    monkeypatch.setattr("malspark.llm.transient.time.sleep", waits.append)
     return waits
 
 
@@ -189,7 +189,7 @@ def _window_full_as_500(wrapped: bool) -> Exception:
 
 class TestAFullWindowIsNotRetried:
     def test_a_full_window_answered_as_500_is_left_to_the_loop(self) -> None:
-        from maljan.llm.context_window import window_full_error
+        from malspark.llm.context_window import window_full_error
 
         for wrapped in (False, True):
             failure = _window_full_as_500(wrapped)
@@ -432,7 +432,7 @@ class TestTheRunSummaryCountsThem:
             usage_metadata=dict(USAGE),
             response_metadata={RETRIES_KEY: ["model call (m): HTTP 503 (attempt 1 of 3)"]},
         )
-        from maljan.core.token_ledger import record_response_usage
+        from malspark.core.token_ledger import record_response_usage
 
         record_response_usage(ledger, answer, agent="static", model="openai/m")
         builder = RunSummaryBuilder(0.0)
@@ -448,7 +448,7 @@ class TestTheRunSummaryCountsThem:
 
     def test_a_run_without_one_reads_as_it_always_did(self) -> None:
         ledger = TokenLedger()
-        from maljan.core.token_ledger import record_response_usage
+        from malspark.core.token_ledger import record_response_usage
 
         record_response_usage(
             ledger, AIMessage(content="ok", usage_metadata=dict(USAGE)), agent="static"
@@ -509,7 +509,7 @@ def _url(httpd: ThreadingHTTPServer) -> str:
 
 
 def _anthropic(httpd: ThreadingHTTPServer, **kwargs: Any) -> Any:
-    from maljan.llm.anthropic_provider import AnthropicProvider
+    from malspark.llm.anthropic_provider import AnthropicProvider
 
     settings = Settings(_env_file=None, llm={"anthropic": {"api_key": "test-value"}})
     return AnthropicProvider(settings).build_model(
@@ -518,7 +518,7 @@ def _anthropic(httpd: ThreadingHTTPServer, **kwargs: Any) -> Any:
 
 
 def _openai(httpd: ThreadingHTTPServer) -> Any:
-    from maljan.llm.openai_provider import OpenAIProvider
+    from malspark.llm.openai_provider import OpenAIProvider
 
     settings = Settings(
         _env_file=None,

@@ -14,13 +14,13 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 
-from maljan.agents.judge_agent import JudgeVerdict
-from maljan.pipeline.nodes import make_judge_node, run_quality_note
-from maljan.pipeline.validation import UNGROUNDED_TECHNIQUE_CODE, ungrounded_technique_note
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.schemas.isr_models import ClaimEvidence
-from maljan.schemas.stix_models import Bundle, TechniqueDecision, TechniqueReview
+from malspark.agents.judge_agent import JudgeVerdict
+from malspark.pipeline.nodes import make_judge_node, run_quality_note
+from malspark.pipeline.validation import UNGROUNDED_TECHNIQUE_CODE, ungrounded_technique_note
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.schemas.isr_models import ClaimEvidence
+from malspark.schemas.stix_models import Bundle, TechniqueDecision, TechniqueReview
 from tests.unit.pipeline.test_degraded_mode_at_the_judge_node import _Container
 from tests.unit.pipeline.test_degraded_mode_at_the_judge_node import _state as _corroborated_state
 from tests.unit.reporting.test_renderers_markdown import _build

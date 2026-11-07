@@ -19,9 +19,9 @@ import pytest
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 
-from maljan.core.config import Settings
-from maljan.core.token_ledger import turn_usage
-from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
+from malspark.core.config import Settings
+from malspark.core.token_ledger import turn_usage
+from malspark.llm.openai_provider import OpenAIProvider, forget_standard_only
 
 
 @pytest.fixture(autouse=True)

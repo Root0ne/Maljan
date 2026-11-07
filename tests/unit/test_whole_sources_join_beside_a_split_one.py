@@ -15,8 +15,8 @@ import time
 
 import pytest
 
-from maljan.core.config import ChunkingConfig
-from maljan.loaders.binary_chunker import (
+from malspark.core.config import ChunkingConfig
+from malspark.loaders.binary_chunker import (
     CHUNK_CHARS,
     SIZED_BY,
     SIZED_BY_ROOM,

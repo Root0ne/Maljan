@@ -24,9 +24,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from maljan.memory import semantic_attck_index as sai
-from maljan.memory.attck_loader import ATTCKTechnique
-from maljan.memory.semantic_attck_index import SemanticATTCKIndex
+from malspark.memory import semantic_attck_index as sai
+from malspark.memory.attck_loader import ATTCKTechnique
+from malspark.memory.semantic_attck_index import SemanticATTCKIndex
 
 
 def _tech(

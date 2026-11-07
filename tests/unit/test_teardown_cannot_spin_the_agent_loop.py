@@ -1,7 +1,7 @@
 """A cancelled MCP teardown must not leave the agent loop spinning (BUG 7).
 
 The live capture (`other/audit/2026-09-07-live-e2e/S6-worker-hang-pyspy.txt`)
-showed the thread `maljan-agent-loop` at 100 % CPU for 80 minutes inside
+showed the thread `malspark-agent-loop` at 100 % CPU for 80 minutes inside
 anyio's `CancelScope._deliver_cancellation`, with `_run_once` computing
 `timeout: 0` every iteration, while the worker's own thread was starved of the
 GIL and the job's heartbeat stopped. The chain:
@@ -146,8 +146,8 @@ class _LoopThread:
 
 def _handle_for(child: subprocess.Popen[bytes]) -> Any:
     """A handle that owns ``child`` the way an attached stdio server does."""
-    from maljan.core.config import MCPServerConfig
-    from maljan.providers.servers import ServerHandle
+    from malspark.core.config import MCPServerConfig
+    from malspark.providers.servers import ServerHandle
 
     handle = ServerHandle("network", MCPServerConfig(enabled=True, command=sys.executable))
     handle._child_pids = (child.pid,)
@@ -187,7 +187,7 @@ class TestACleanupThatOverrunsTakesTheChildRatherThanCancelling:
         sent SIGTERM, which this child ignores by construction, exactly as the
         network sidecar did while it was inside its capture library.
         """
-        from maljan.providers import servers
+        from malspark.providers import servers
 
         toolkit = _StdioLikeToolkit(deaf_child)
         handle = _handle_for(deaf_child)
@@ -215,7 +215,7 @@ class TestACleanupThatOverrunsTakesTheChildRatherThanCancelling:
         loop never sleeps. Measured on the loop's own thread clock rather than
         by wall time, so an unrelated busy machine cannot fake a pass.
         """
-        from maljan.providers import servers
+        from malspark.providers import servers
 
         toolkit = _StdioLikeToolkit(deaf_child)
         handle = _handle_for(deaf_child)
@@ -242,7 +242,7 @@ class TestACleanupThatOverrunsTakesTheChildRatherThanCancelling:
         the child gone the transport's own waits return and the stack unwinds
         normally, so there is nothing left to cancel.
         """
-        from maljan.providers import servers
+        from malspark.providers import servers
 
         toolkit = _StdioLikeToolkit(deaf_child)
         handle = _handle_for(deaf_child)
@@ -258,8 +258,8 @@ class TestACleanupThatOverrunsTakesTheChildRatherThanCancelling:
 
     def test_a_healthy_cleanup_is_untouched(self, loop_thread: _LoopThread) -> None:
         """Nothing is killed on the path that closes itself in time."""
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.servers import ServerHandle
 
         class _Prompt:
             def __init__(self) -> None:
@@ -285,7 +285,7 @@ class TestTheAgentLoopThreadNeverBlocksOnItself:
         one of the two ways `_retire_wedged_loop` describes a loop that "never
         returns to the loop". Refusing it names the caller instead.
         """
-        from maljan.agents.base_agent import _get_agent_loop, _run_coro_blocking
+        from malspark.agents.base_agent import _get_agent_loop, _run_coro_blocking
 
         async def _noop() -> str:
             return "ok"

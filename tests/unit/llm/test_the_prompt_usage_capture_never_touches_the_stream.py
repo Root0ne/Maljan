@@ -14,8 +14,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.llm import anthropic_provider
-from maljan.llm.generation_rate import PROMPT_USAGE_KEY
+from malspark.llm import anthropic_provider
+from malspark.llm.generation_rate import PROMPT_USAGE_KEY
 
 
 def _start_event() -> Any:

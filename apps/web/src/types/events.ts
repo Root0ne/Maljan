@@ -1,7 +1,7 @@
 /* ── Pipeline events ──────────────────────────────────────
  *
  * The wire format of the live conversation, mirroring
- * `src/maljan/pipeline/events.py` and the publisher in
+ * `src/malspark/pipeline/events.py` and the publisher in
  * `apps/api/app/worker/analysis_worker.py` field for field. Types only: the
  * view that draws them is M4's.
  *
@@ -20,7 +20,7 @@ export type WSEventType =
   /* One transcript line from a pipeline node — an analyst's findings, a
    * mediator's ruling, a revision, the judge's verdict. Carries a ``role``
    * discriminator rather than one event type per speaker, so a new
-   * participant needs no client change. See maljan/pipeline/events.py. */
+   * participant needs no client change. See malspark/pipeline/events.py. */
   | "agent_message"
   /* Part of what an agent is saying, before it has finished saying it. One
    * model turn's text as the loop produces it, not a token; published only
@@ -30,7 +30,7 @@ export type WSEventType =
   /* One stage of the team announcing itself, exactly once each: `started`
    * from its first node, `skipped` instead when its condition is false, and
    * `finished` from the one node that runs after everything in it is done.
-   * See maljan/pipeline/nodes.py. */
+   * See malspark/pipeline/nodes.py. */
   | "stage_started"
   | "stage_skipped"
   | "stage_finished"
@@ -48,11 +48,11 @@ export type WSEventType =
   | "judge_question"
   /* The budget meter: one agent's steps and seconds against its caps every
    * few steps and at the end of its loop, and the cap that ended a stage's
-   * work when a cap did. See maljan/pipeline/events.py. */
+   * work when a cap did. See malspark/pipeline/events.py. */
   | "budget_tick"
   | "stage_ended_at_cap"
   /* A tool server this job stopped calling for a while after a run of
-   * calls it did not answer. See maljan/providers/server_guard.py. */
+   * calls it did not answer. See malspark/providers/server_guard.py. */
   | "tool_server_rested"
   /* An agent's model list moved on to its next model because the one before
    * failed as a provider; once per switch, whether or not deltas stream. */
@@ -60,7 +60,7 @@ export type WSEventType =
   /* A tool loop cleared its oldest tool answers to evidence-id references:
    * agent, turn, how many answers, the request's characters before and
    * after, and why (`refused`, `window` or `tier`). See
-   * maljan/agents/tool_answer_clearing.py. */
+   * malspark/agents/tool_answer_clearing.py. */
   | "tool_answers_cleared"
   /* One model call's usage as the job's token ledger recorded it: agent,
    * model, call and the figures its provider reported. Committed to the

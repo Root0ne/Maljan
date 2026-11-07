@@ -28,7 +28,7 @@ def client() -> TestClient:
 
 
 def test_the_schema_carries_registry_ids_and_the_current_server_keys(client):
-    from maljan.providers.registry import sandbox_provider_ids, static_provider_ids
+    from malspark.providers.registry import sandbox_provider_ids, static_provider_ids
 
     with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
         response = client.get("/api/v1/settings/schema")
@@ -66,7 +66,7 @@ def test_the_schema_carries_registry_ids_and_the_current_server_keys(client):
 
 def test_the_memory_backend_choice_carries_each_backend_s_declared_label(client):
     """The console's memory status names the in-process backend from this answer."""
-    from maljan.memory import store_factory
+    from malspark.memory import store_factory
 
     with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
         response = client.get("/api/v1/settings/schema")
@@ -87,7 +87,7 @@ def test_the_server_map_leaf_carries_the_names_a_built_in_is_always_started_with
     list in TypeScript could drift from this one, and then the editor would
     offer a name as removable that the save silently restores.
     """
-    from maljan.core.config import REQUIRED_ENV_ALLOW
+    from malspark.core.config import REQUIRED_ENV_ALLOW
 
     with patch("app.api.v1.settings.SettingsService.load_overrides", AsyncMock(return_value={})):
         response = client.get("/api/v1/settings/schema")

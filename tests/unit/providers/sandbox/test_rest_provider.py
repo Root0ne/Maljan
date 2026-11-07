@@ -1,4 +1,4 @@
-"""A sandbox Maljan has never heard of, driven from settings."""
+"""A sandbox Malspark has never heard of, driven from settings."""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ import httpx
 import pytest
 from pydantic import SecretStr
 
-from maljan.core.config import RestMappingConfig, Settings
-from maljan.providers.errors import (
+from malspark.core.config import RestMappingConfig, Settings
+from malspark.providers.errors import (
     ArtefactFetchFailed,
     ProviderConfigurationError,
     ProviderError,
 )
-from maljan.providers.sandbox.rest import RestSandboxProvider
+from malspark.providers.sandbox.rest import RestSandboxProvider
 
 FIX = Path(__file__).resolve().parents[3] / "fixtures" / "sandbox"
 GOLDEN = Path(__file__).resolve().parents[3] / "fixtures" / "golden" / "rest_mapping"
@@ -220,7 +220,7 @@ def test_a_cape_shaped_body_goes_through_the_cape_reader_untouched():
     provider = _provider(lambda r: httpx.Response(200, json=body), cfg)
     run = provider.fetch("T-9")
     assert run.report.source_format == "cape2"
-    from maljan.schemas.sandbox_document import sandbox_document
+    from malspark.schemas.sandbox_document import sandbox_document
     from tests.unit.providers._document import as_published
 
     assert as_published(sandbox_document(run.report), body), (
@@ -238,7 +238,7 @@ def test_a_real_cape_fixture_goes_through_the_cape_reader_as_published():
     provider = _provider(lambda r: httpx.Response(200, json=body), cfg)
     run = provider.fetch("T-9")
     assert run.report.source_format == "cape2"
-    from maljan.schemas.sandbox_document import sandbox_document
+    from malspark.schemas.sandbox_document import sandbox_document
     from tests.unit.providers._document import as_published
 
     assert as_published(sandbox_document(run.report), body)
@@ -473,8 +473,8 @@ def test_a_bare_token_with_no_scheme_is_also_redacted():
 
 def test_a_triage_body_names_its_sandbox_as_the_declared_formats_do(monkeypatch):
     """A lineage sentence names the configured format's declared sandbox, an operator's too."""
-    from maljan.core.report_formats import ReportFormat
-    from maljan.schemas import sandbox_report
+    from malspark.core.report_formats import ReportFormat
+    from malspark.schemas import sandbox_report
 
     seen: dict[str, object] = {}
     reader = sandbox_report.triage_overview_to_sandbox_report

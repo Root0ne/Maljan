@@ -12,11 +12,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.agents.evidence_recorder import shortened_notice
-from maljan.agents.mcp_client import MCPLangChainToolkit
-from maljan.agents.output_shortening import BOOKKEEPING_KEY
-from maljan.core.truncation_ledger import TruncationLedger
-from maljan.providers import sandbox_tools
+from malspark.agents.evidence_recorder import shortened_notice
+from malspark.agents.mcp_client import MCPLangChainToolkit
+from malspark.agents.output_shortening import BOOKKEEPING_KEY
+from malspark.core.truncation_ledger import TruncationLedger
+from malspark.providers import sandbox_tools
 
 ROOM = 20_000
 

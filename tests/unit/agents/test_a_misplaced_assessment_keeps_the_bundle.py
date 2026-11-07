@@ -1,9 +1,9 @@
 """One item in the wrong place does not cost the judge its whole answer.
 
-The prompt asks for ``x_maljan_assessment`` beside ``objects``. A live run put
+The prompt asks for ``x_malspark_assessment`` beside ``objects``. A live run put
 it inside the list instead, and ``Bundle.model_validate`` answered with
 twenty-one errors — the first of them ``objects.24.Indicator.type Input should
-be 'indicator' [input_value='x_maljan_assessment']`` — so all twenty-five
+be 'indicator' [input_value='x_malspark_assessment']`` — so all twenty-five
 objects were thrown away for a verdict extracted from the answer's prose. It
 happened twice in that run and once in the next.
 
@@ -21,16 +21,16 @@ import json
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import VERDICT_FALLBACK_CODE, JudgeAgent
-from maljan.agents.judge_postprocess import (
+from malspark.agents.judge_agent import VERDICT_FALLBACK_CODE, JudgeAgent
+from malspark.agents.judge_postprocess import (
     ASSESSMENT_RELOCATED_CODE,
     UNKNOWN_OBJECT_CODE,
     lift_misplaced_extensions,
 )
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.stix_models import Bundle
 
 ASSESSMENT: dict[str, Any] = {
-    "type": "x_maljan_assessment",
+    "type": "x_malspark_assessment",
     "verdict": "Malware",
     "severity": {"rating": "High", "rationale": "it hollows a process"},
     "malware_category": "loader",
@@ -67,9 +67,9 @@ def _stix_objects() -> list[dict[str, Any]]:
                 "relationship_type": "uses",
                 "source_ref": MALWARE_ID,
                 "target_ref": pattern_id,
-                "x_maljan_confidence": 0.5,
-                "x_maljan_technique_id": tid,
-                "x_maljan_evidence_basis": "static",
+                "x_malspark_confidence": 0.5,
+                "x_malspark_technique_id": tid,
+                "x_malspark_evidence_basis": "static",
             }
         )
     objects.extend(
@@ -110,8 +110,8 @@ class TestTheLiftItself:
         found = lift_misplaced_extensions(data)
 
         assert [v.code for v in found] == [ASSESSMENT_RELOCATED_CODE]
-        assert found[0].path == "x_maljan_assessment"
-        assert data["x_maljan_assessment"] == ASSESSMENT
+        assert found[0].path == "x_malspark_assessment"
+        assert data["x_malspark_assessment"] == ASSESSMENT
         assert len(data["objects"]) == 24
 
     def test_the_bundle_then_validates_with_its_objects_intact(self) -> None:
@@ -121,21 +121,21 @@ class TestTheLiftItself:
         bundle = Bundle.model_validate(data)
 
         assert len(bundle.objects) == 24
-        assert bundle.x_maljan_assessment is not None
-        assert bundle.x_maljan_assessment.verdict == "Malware"
+        assert bundle.x_malspark_assessment is not None
+        assert bundle.x_malspark_assessment.verdict == "Malware"
 
     def test_a_top_level_block_wins_and_the_inner_one_is_set_aside(self) -> None:
         top = {"verdict": "Suspicious", "malware_category": "unknown"}
         data = {
             "type": "bundle",
             "objects": [*_stix_objects(), dict(ASSESSMENT)],
-            "x_maljan_assessment": top,
+            "x_malspark_assessment": top,
         }
 
         found = lift_misplaced_extensions(data)
 
         assert [v.code for v in found] == [UNKNOWN_OBJECT_CODE]
-        assert data["x_maljan_assessment"] == top
+        assert data["x_malspark_assessment"] == top
         assert len(data["objects"]) == 24
 
     def test_an_object_the_bundle_cannot_hold_is_set_aside_and_named(self) -> None:
@@ -166,7 +166,7 @@ class TestWhatTheRoundDoesWithIt:
         verdict = asyncio.run(judge.give_verdict(reports={"static": "it hollows"}, history=[]))
 
         assert len(verdict.bundle.objects) == 24
-        assert verdict.bundle.x_maljan_fallback_verdict is None
+        assert verdict.bundle.x_malspark_fallback_verdict is None
         assert VERDICT_FALLBACK_CODE not in [v.code for v in verdict.violations]
 
     def test_the_assessment_is_read_from_where_it_was_moved_to(self) -> None:
@@ -174,7 +174,7 @@ class TestWhatTheRoundDoesWithIt:
 
         verdict = asyncio.run(judge.give_verdict(reports={"static": "it hollows"}, history=[]))
 
-        assessment = verdict.bundle.x_maljan_assessment
+        assessment = verdict.bundle.x_malspark_assessment
         assert assessment is not None
         assert (assessment.verdict, assessment.confidence) == ("Malware", 0.8)
 
@@ -191,11 +191,11 @@ class TestWhatTheRoundDoesWithIt:
         judge = _judge(
             _answer(
                 [*_stix_objects(), {"type": "course-of-action", "id": "coa--1"}],
-                x_maljan_assessment={k: v for k, v in ASSESSMENT.items() if k != "type"},
+                x_malspark_assessment={k: v for k, v in ASSESSMENT.items() if k != "type"},
             ),
             _answer(
                 _stix_objects(),
-                x_maljan_assessment={k: v for k, v in ASSESSMENT.items() if k != "type"},
+                x_malspark_assessment={k: v for k, v in ASSESSMENT.items() if k != "type"},
             ),
         )
 

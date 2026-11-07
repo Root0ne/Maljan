@@ -16,16 +16,16 @@ from typing import Any
 
 import pytest
 
-from maljan.pipeline.run_state import index_sentence, render_run_state
-from maljan.pipeline.triage_pack import (
+from malspark.pipeline.run_state import index_sentence, render_run_state
+from malspark.pipeline.triage_pack import (
     INDEX_TOOL,
     PIPELINE,
     pack_unsaid,
     render_pack,
 )
-from maljan.schemas.evidence import build_entry, format_entry_id
-from maljan.tools.artefact_index import FUNCTION_LISTS_ABSENT, SELF
-from maljan.utils.written_forms import pack_escaped
+from malspark.schemas.evidence import build_entry, format_entry_id
+from malspark.tools.artefact_index import FUNCTION_LISTS_ABSENT, SELF
+from malspark.utils.written_forms import pack_escaped
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "ledger"
 

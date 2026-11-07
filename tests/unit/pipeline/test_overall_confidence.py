@@ -22,9 +22,9 @@ the analysts' confidence in their own claims.
 
 from __future__ import annotations
 
-from maljan.pipeline.nodes import _overall_confidence, mean_claim_confidence
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.judgement import JudgeAssessment, SeverityVerdict
+from malspark.pipeline.nodes import _overall_confidence, mean_claim_confidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.judgement import JudgeAssessment, SeverityVerdict
 
 
 def _isr(agent: str, *confidences: float) -> AgentISR:

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.core.config import MCPServerConfig, Settings, ToolRef
+from malspark.core.config import MCPServerConfig, Settings, ToolRef
 
 
 class _T:
@@ -23,7 +23,7 @@ class _T:
 
 
 def _container(monkeypatch, **servers):
-    from maljan.core.container import ServiceContainer
+    from malspark.core.container import ServiceContainer
 
     cfg = Settings(_env_file=None)
     for key, entry in servers.items():

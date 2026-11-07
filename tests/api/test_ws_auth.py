@@ -1,9 +1,9 @@
-"""The WebSocket access token travels only as the ``maljan.v1.<jwt>`` subprotocol.
+"""The WebSocket access token travels only as the ``malspark.v1.<jwt>`` subprotocol.
 
 A token in the ``?token=`` query string (or no token at all) is rejected:
 the server accepts the handshake and then immediately closes with 4401 — a
 token carried in the subprotocol list is accepted and the server echoes
-back the bare ``maljan.v1`` subprotocol.
+back the bare ``malspark.v1`` subprotocol.
 
 Why accept-then-close and not just close: closing a WebSocket *before*
 ``accept()`` is turned into an HTTP 403 handshake rejection by the ASGI
@@ -151,14 +151,14 @@ def test_missing_credential_accepts_before_closing_with_4401(
     "protocols, job_lookup, expected_reason, expected_code",
     [
         pytest.param(
-            ["maljan.v1", "maljan.v1.bad"],
+            ["malspark.v1", "malspark.v1.bad"],
             None,
             "invalid token",
             4401,
             id="invalid-token",
         ),
         pytest.param(
-            ["maljan.v1", "maljan.v1.good"],
+            ["malspark.v1", "malspark.v1.good"],
             "not_found",
             "does not exist",
             4404,
@@ -213,9 +213,9 @@ def test_subprotocol_token_is_accepted(client: TestClient, monkeypatch: pytest.M
     monkeypatch.setattr(ws_module.ConnectionManager, "_redis_listener", _no_listener)
 
     with client.websocket_connect(
-        f"/ws/analysis/{job_id}", subprotocols=["maljan.v1", "maljan.v1.good"]
+        f"/ws/analysis/{job_id}", subprotocols=["malspark.v1", "malspark.v1.good"]
     ) as ws:
-        assert ws.accepted_subprotocol == "maljan.v1"
+        assert ws.accepted_subprotocol == "malspark.v1"
 
 
 def test_a_resume_cursor_does_not_bypass_the_credential(client: TestClient) -> None:
@@ -249,7 +249,7 @@ def test_a_resume_cursor_does_not_bypass_the_ownership_check(
     job_id = str(uuid.uuid4())
     with pytest.raises(WebSocketDisconnect) as exc:
         with client.websocket_connect(
-            f"/ws/analysis/{job_id}?since=5", subprotocols=["maljan.v1", "maljan.v1.good"]
+            f"/ws/analysis/{job_id}?since=5", subprotocols=["malspark.v1", "malspark.v1.good"]
         ) as ws:
             ws.receive_text()
 
@@ -277,9 +277,9 @@ def test_an_owner_that_resumes_is_replayed_from_its_cursor(
 
     job_id = str(uuid.uuid4())
     with client.websocket_connect(
-        f"/ws/analysis/{job_id}?since=42", subprotocols=["maljan.v1", "maljan.v1.good"]
+        f"/ws/analysis/{job_id}?since=42", subprotocols=["malspark.v1", "malspark.v1.good"]
     ) as ws:
-        assert ws.accepted_subprotocol == "maljan.v1"
+        assert ws.accepted_subprotocol == "malspark.v1"
     assert replayed == [42]
 
 
@@ -302,7 +302,7 @@ def test_a_socket_with_no_cursor_is_not_replayed_to(
 
     job_id = str(uuid.uuid4())
     with client.websocket_connect(
-        f"/ws/analysis/{job_id}", subprotocols=["maljan.v1", "maljan.v1.good"]
+        f"/ws/analysis/{job_id}", subprotocols=["malspark.v1", "malspark.v1.good"]
     ):
         pass
     assert replayed == []
@@ -329,7 +329,7 @@ class TestADeactivatedAccountIsRefused:
         job_id = str(uuid.uuid4())
         with pytest.raises(WebSocketDisconnect) as exc:
             with client.websocket_connect(
-                f"/ws/analysis/{job_id}", subprotocols=["maljan.v1", "maljan.v1.good"]
+                f"/ws/analysis/{job_id}", subprotocols=["malspark.v1", "malspark.v1.good"]
             ) as ws:
                 ws.receive_text()
 
@@ -348,7 +348,7 @@ class TestADeactivatedAccountIsRefused:
         job_id = str(uuid.uuid4())
         with pytest.raises(WebSocketDisconnect) as exc:
             with client.websocket_connect(
-                f"/ws/analysis/{job_id}", subprotocols=["maljan.v1", "maljan.v1.good"]
+                f"/ws/analysis/{job_id}", subprotocols=["malspark.v1", "malspark.v1.good"]
             ) as ws:
                 ws.receive_text()
 
@@ -365,7 +365,7 @@ class TestADeactivatedAccountIsRefused:
         job_id = str(uuid.uuid4())
         with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(
-                f"/ws/analysis/{job_id}", subprotocols=["maljan.v1", "maljan.v1.good"]
+                f"/ws/analysis/{job_id}", subprotocols=["malspark.v1", "malspark.v1.good"]
             ) as ws:
                 ws.receive_text()
 
@@ -394,7 +394,7 @@ class TestADeactivatedAccountIsRefused:
         job_id = str(uuid.uuid4())
         with pytest.raises(WebSocketDisconnect) as exc:
             with client.websocket_connect(
-                f"/ws/analysis/{job_id}", subprotocols=["maljan.v1", "maljan.v1.good"]
+                f"/ws/analysis/{job_id}", subprotocols=["malspark.v1", "malspark.v1.good"]
             ) as ws:
                 ws.send_text("ping")
                 assert json.loads(ws.receive_text())["type"] == "pong"
@@ -422,7 +422,7 @@ class TestADeactivatedAccountIsRefused:
 
         job_id = str(uuid.uuid4())
         with client.websocket_connect(
-            f"/ws/analysis/{job_id}", subprotocols=["maljan.v1", "maljan.v1.good"]
+            f"/ws/analysis/{job_id}", subprotocols=["malspark.v1", "malspark.v1.good"]
         ) as ws:
             ws.send_text("ping")
             assert json.loads(ws.receive_text())["type"] == "pong"
@@ -465,7 +465,7 @@ class TestTheJobIdIsCanonical:
         canonical = str(uuid.uuid4())
         with client.websocket_connect(
             f"/ws/analysis/{canonical.upper()}?since=3",
-            subprotocols=["maljan.v1", "maljan.v1.good"],
+            subprotocols=["malspark.v1", "malspark.v1.good"],
         ):
             pass
 

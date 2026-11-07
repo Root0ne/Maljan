@@ -18,9 +18,9 @@ import pytest
 
 from app.services import settings_service as svc
 from app.services.server_map import validate_server_map
-from maljan.core import builtin_declarations
-from maljan.core import settings_overrides as so
-from maljan.core.tool_declarations import (
+from malspark.core import builtin_declarations
+from malspark.core import settings_overrides as so
+from malspark.core.tool_declarations import (
     holds_changes,
     merge_tool_facts,
     stored_in_force,
@@ -201,7 +201,7 @@ def test_a_change_a_later_release_makes_invalid_never_stops_the_settings(
 ) -> None:
     import logging
 
-    from maljan.core import tool_declarations
+    from malspark.core import tool_declarations
 
     blocks = builtin_declarations._SERVER_BLOCKS["virustotal"]["tool_facts"]
     blocks["shipped_later"] = {"kind": "strings", "rows": "/r/*"}
@@ -216,7 +216,7 @@ def test_a_change_a_later_release_makes_invalid_never_stops_the_settings(
     # declaration is in force; the rest of the settings is built.
     shipped_release("shipped_later", rows="")
     tool_declarations._WARNED.clear()
-    with caplog.at_level(logging.WARNING, logger="maljan"):
+    with caplog.at_level(logging.WARNING, logger="malspark"):
         held = _in_force(out)
         _in_force(out)
     assert held["shipped_later"].places == {} and held["shipped_later"].kind == "strings"
@@ -248,7 +248,7 @@ def test_a_provider_leaf_change_a_later_release_makes_invalid_is_left_out(
 
 
 def _unset() -> dict[str, Any]:
-    from maljan.core.tool_declarations import ToolFacts
+    from malspark.core.tool_declarations import ToolFacts
 
     return ToolFacts.model_construct().model_dump(mode="json")
 

@@ -17,8 +17,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from maljan.reporting.defang import defang
-from maljan.reporting.models import (
+from malspark.reporting.defang import defang
+from malspark.reporting.models import (
     CapabilityBullet,
     CapabilityCell,
     Conclusion,
@@ -30,10 +30,10 @@ from maljan.reporting.models import (
     TechnicalAnalysis,
     TechnicalSubsection,
 )
-from maljan.reporting.renderers.analyst import UNPUBLISHED_STATE, _with_unpublished_state
-from maljan.reporting.renderers.layout import ANALYST, BUNDLE
-from maljan.reporting.renderers.markdown import MarkdownRenderer
-from maljan.schemas.isr_models import judge_kept_note
+from malspark.reporting.renderers.analyst import UNPUBLISHED_STATE, _with_unpublished_state
+from malspark.reporting.renderers.layout import ANALYST, BUNDLE
+from malspark.reporting.renderers.markdown import MarkdownRenderer
+from malspark.schemas.isr_models import judge_kept_note
 
 UNPUBLISHED = "The beacon also reaches 192.0.2.7 on port 80."
 PROCESS = "The ledger holds no listing of 0x5030."

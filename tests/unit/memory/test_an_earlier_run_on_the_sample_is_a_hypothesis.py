@@ -20,14 +20,14 @@ from typing import Any
 
 import pytest
 
-from maljan.extractors.capability_matrix import (
+from malspark.extractors.capability_matrix import (
     EARLIER_RUN_UNSUPPORTED_NOTE,
     build_capability_matrix,
     earlier_run_techniques,
 )
-from maljan.memory import embeddings
-from maljan.memory.in_memory_store import InMemoryStore
-from maljan.memory.long_term_memory import (
+from malspark.memory import embeddings
+from malspark.memory.in_memory_store import InMemoryStore
+from malspark.memory.long_term_memory import (
     EARLIER_RUN_HEADING,
     NO_MEMORY,
     MemoryStoreDefaults,
@@ -40,11 +40,11 @@ from maljan.memory.long_term_memory import (
     recall,
     with_published_techniques,
 )
-from maljan.memory.qdrant_store import QdrantStore
-from maljan.schemas.evidence import build_entry, entry_ids_in, format_entry_id
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import EARLIER_RUN_PROPERTY, Bundle, EarlierRun
-from maljan.tools import knowledge
+from malspark.memory.qdrant_store import QdrantStore
+from malspark.schemas.evidence import build_entry, entry_ids_in, format_entry_id
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import EARLIER_RUN_PROPERTY, Bundle, EarlierRun
+from malspark.tools import knowledge
 
 SHA = "ab" * 32
 OTHER = "cd" * 32
@@ -202,8 +202,8 @@ class TestEveryAgentButTheReportWriterIsShownIt:
         return {"file_hash": SHA, "evidence_ledger": []}
 
     def _container(self, store: Any) -> Any:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer(Settings(_env_file=None), mock=True)
         container.get_memory_store = lambda: store  # type: ignore[method-assign]
@@ -212,7 +212,7 @@ class TestEveryAgentButTheReportWriterIsShownIt:
     def test_the_agents_get_it_after_the_pack_and_the_reporter_does_not(
         self, fallback: None
     ) -> None:
-        from maljan.pipeline.nodes import pack_text
+        from malspark.pipeline.nodes import pack_text
 
         store = InMemoryStore()
         store.store(_case())
@@ -222,7 +222,7 @@ class TestEveryAgentButTheReportWriterIsShownIt:
         assert pack_text(self._state(), container, for_reporter=True) == ""
 
     def test_without_an_earlier_case_the_pack_is_unchanged(self, fallback: None) -> None:
-        from maljan.pipeline.nodes import pack_text
+        from malspark.pipeline.nodes import pack_text
 
         store = InMemoryStore()
         store.store(_case(OTHER))
@@ -234,7 +234,7 @@ class TestEveryAgentButTheReportWriterIsShownIt:
     def test_the_pack_and_the_earlier_run_share_the_one_bound(
         self, fallback: None, monkeypatch: pytest.MonkeyPatch, bound: int, room: int | None
     ) -> None:
-        from maljan.pipeline import nodes
+        from malspark.pipeline import nodes
 
         store = InMemoryStore()
         store.store(_case())
@@ -484,7 +484,7 @@ class TestTheRecordTheBundleCarries:
         assert earlier_run_of(_Container(InMemoryStore()), SHA) is None
 
     def test_the_matrix_reads_the_record_off_the_dumped_bundle(self) -> None:
-        bundle = Bundle(x_maljan_earlier_run=EarlierRun(sample_id=SHA, techniques=["t1055"]))
+        bundle = Bundle(x_malspark_earlier_run=EarlierRun(sample_id=SHA, techniques=["t1055"]))
 
         assert earlier_run_techniques(bundle.model_dump()) == {"T1055"}
         assert earlier_run_techniques(Bundle().model_dump()) == set()
@@ -499,9 +499,9 @@ class TestTheJudgeNodeSetsTheRecordOnEveryBundle:
         import asyncio
         from unittest.mock import AsyncMock
 
-        from maljan.agents.judge_agent import JudgeVerdict
-        from maljan.pipeline.nodes import make_judge_node
-        from maljan.schemas.evidence import EvidenceCounter
+        from malspark.agents.judge_agent import JudgeVerdict
+        from malspark.pipeline.nodes import make_judge_node
+        from malspark.schemas.evidence import EvidenceCounter
         from tests.unit.pipeline.test_degraded_mode_at_the_judge_node import _Container, _state
 
         class _WithMemory(_Container):
@@ -517,7 +517,7 @@ class TestTheJudgeNodeSetsTheRecordOnEveryBundle:
         container = _WithMemory()
         judge = container.get_judge_agent(role="judge")
         # A record the model wrote into its own answer is never read as the platform's.
-        bundle = Bundle(objects=[], x_maljan_earlier_run=written)
+        bundle = Bundle(objects=[], x_malspark_earlier_run=written)
         judge.give_verdict = AsyncMock(
             return_value=JudgeVerdict(bundle=bundle, violations=[], retries=0, fed_back={})
         )

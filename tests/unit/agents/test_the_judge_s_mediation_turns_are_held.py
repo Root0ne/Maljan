@@ -22,13 +22,13 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.base_agent import model_held_per_turn
-from maljan.agents.judge_agent import JudgeAgent, judge_output_cap
-from maljan.core.cancellation import JobCancelled
-from maljan.core.config import Settings
-from maljan.core.spend import SpendMeter
-from maljan.core.token_ledger import TokenLedger
-from maljan.llm.generation_rate import model_name_of
+from malspark.agents.base_agent import model_held_per_turn
+from malspark.agents.judge_agent import JudgeAgent, judge_output_cap
+from malspark.core.cancellation import JobCancelled
+from malspark.core.config import Settings
+from malspark.core.spend import SpendMeter
+from malspark.core.token_ledger import TokenLedger
+from malspark.llm.generation_rate import model_name_of
 
 USAGE = {"input_tokens": 1_000, "output_tokens": 500, "total_tokens": 1_500}
 
@@ -83,8 +83,8 @@ def _run(model: _Judge, ledger: TokenLedger) -> tuple[JudgeAgent, str]:
     judge.token_ledger = ledger
     cfg = Settings(_env_file=None)
     with (
-        patch("maljan.agents.base_agent.get_settings", lambda: cfg),
-        patch("maljan.agents.judge_agent.get_settings", lambda: cfg),
+        patch("malspark.agents.base_agent.get_settings", lambda: cfg),
+        patch("malspark.agents.judge_agent.get_settings", lambda: cfg),
     ):
         answer = asyncio.run(judge.execute_tool_loop([("system", "s"), ("human", "mediate")]))
     return judge, answer
@@ -93,7 +93,7 @@ def _run(model: _Judge, ledger: TokenLedger) -> tuple[JudgeAgent, str]:
 def test_a_mediation_turn_whose_whole_cap_does_not_fit_is_sent_held() -> None:
     model = _Judge(caps=[])
     cfg = Settings(_env_file=None)
-    with patch("maljan.agents.judge_agent.get_settings", lambda: cfg):
+    with patch("malspark.agents.judge_agent.get_settings", lambda: cfg):
         cap = int(judge_output_cap().tokens)
     price = 10.0  # USD per million output tokens
     # What is left pays for half the whole cap, and far more than one answer.

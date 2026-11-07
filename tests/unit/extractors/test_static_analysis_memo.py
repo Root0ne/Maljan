@@ -20,7 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from maljan.extractors.pe_extractor import (
+from malspark.extractors.pe_extractor import (
     build_static_analysis,
     reset_static_analysis_cache,
 )
@@ -36,7 +36,7 @@ class TestTheMemoAvoidsRepeatedParsing:
         sample = tmp_path / "s.exe"
         sample.write_bytes(_STUB)
 
-        with patch("maljan.extractors.pe_extractor._build_static_analysis_uncached") as uncached:
+        with patch("malspark.extractors.pe_extractor._build_static_analysis_uncached") as uncached:
             uncached.return_value = None
             build_static_analysis(sample_path=str(sample))
             build_static_analysis(sample_path=str(sample))
@@ -58,7 +58,7 @@ class TestTheMemoAvoidsRepeatedParsing:
         sample.write_bytes(b"")
 
         with patch(
-            "maljan.extractors.pe_extractor._build_static_analysis_uncached",
+            "malspark.extractors.pe_extractor._build_static_analysis_uncached",
             return_value=None,
         ) as uncached:
             assert build_static_analysis(sample_path=str(sample)) is None
@@ -78,7 +78,7 @@ class TestTheKeyIsContentSensitive:
         sample.write_bytes(_STUB)
 
         with patch(
-            "maljan.extractors.pe_extractor._build_static_analysis_uncached",
+            "malspark.extractors.pe_extractor._build_static_analysis_uncached",
             return_value=None,
         ) as uncached:
             build_static_analysis(sample_path=str(sample))
@@ -95,7 +95,7 @@ class TestTheKeyIsContentSensitive:
         b.write_bytes(_STUB + b"\x01")
 
         with patch(
-            "maljan.extractors.pe_extractor._build_static_analysis_uncached",
+            "malspark.extractors.pe_extractor._build_static_analysis_uncached",
             return_value=None,
         ) as uncached:
             build_static_analysis(sample_path=str(a))
@@ -105,7 +105,7 @@ class TestTheKeyIsContentSensitive:
 
     def test_the_memo_is_bounded(self, tmp_path: Path) -> None:
         """An unbounded memo in a long-lived worker is a leak by another name."""
-        from maljan.extractors import pe_extractor
+        from malspark.extractors import pe_extractor
 
         for i in range(pe_extractor._MEMO_MAX_ENTRIES + 3):
             sample = tmp_path / f"s{i}.exe"

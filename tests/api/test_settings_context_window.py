@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from app.api.v1.settings import router
 from app.database import get_db
 from app.deps import require_admin
-from maljan.llm import context_window as cw
+from malspark.llm import context_window as cw
 
 
 @pytest.fixture

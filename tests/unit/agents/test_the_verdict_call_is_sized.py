@@ -17,9 +17,9 @@ from unittest.mock import patch
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.agents.judge_agent import JudgeAgent
-from maljan.core.truncation_ledger import TruncationLedger
-from maljan.llm.generation_rate import GenerationRates, model_name_of
+from malspark.agents.judge_agent import JudgeAgent
+from malspark.core.truncation_ledger import TruncationLedger
+from malspark.llm.generation_rate import GenerationRates, model_name_of
 
 BUNDLE = json.dumps(
     {
@@ -33,7 +33,7 @@ BUNDLE = json.dumps(
                 "is_family": False,
             }
         ],
-        "x_maljan_assessment": {
+        "x_malspark_assessment": {
             "verdict": "Malware",
             "severity": {"rating": "High", "rationale": "it does harm"},
             "malware_category": "loader",
@@ -57,7 +57,7 @@ def _verdict(judge: JudgeAgent) -> list[dict[str, Any]]:
     def _restart(model: Any, **kwargs: Any) -> None:
         seen.append(kwargs)
 
-    with patch("maljan.llm.fallback.restart_models", _restart):
+    with patch("malspark.llm.fallback.restart_models", _restart):
         asyncio.run(judge.give_verdict(reports={"static": "It loads a payload."}, history=[]))
     return seen
 

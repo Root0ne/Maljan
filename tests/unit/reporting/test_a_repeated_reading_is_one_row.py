@@ -10,19 +10,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.pipeline.validation import retry_drop_row, retry_drop_sentences
-from maljan.reporting.dedupe import distinct_processes
-from maljan.reporting.ledger_projection import dynamic_from_ledger
-from maljan.reporting.models import (
+from malspark.pipeline.validation import retry_drop_row, retry_drop_sentences
+from malspark.reporting.dedupe import distinct_processes
+from malspark.reporting.ledger_projection import dynamic_from_ledger
+from malspark.reporting.models import (
     EmulatedStrings,
     EvidenceIndexRow,
     ProcessNode,
     RecoveredValue,
     SandboxSignature,
 )
-from maljan.reporting.renderers.markdown import MarkdownRenderer, _reputation_line
-from maljan.reporting.renderers.stix_renderer import ExtendedSTIXRenderer, recovered_by_words
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.reporting.renderers.markdown import MarkdownRenderer, _reputation_line
+from malspark.reporting.renderers.stix_renderer import ExtendedSTIXRenderer, recovered_by_words
+from malspark.schemas.evidence import EvidenceCounter
 from tests.unit._ledger_helpers import entry
 from tests.unit.reporting._report_shapes import rich_report
 
@@ -308,7 +308,7 @@ class TestAHostileStoredTree:
         return min(took), peak, roots
 
     def test_ten_times_the_roots_costs_about_ten_times(self) -> None:
-        from maljan.reporting.dedupe import _descendants
+        from malspark.reporting.dedupe import _descendants
 
         small_time, small_peak, small = self._measure(1_000)
         large_time, large_peak, large = self._measure(10_000)

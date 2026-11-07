@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from maljan.agents import mcp_client
-from maljan.agents.mcp_client import MCPLangChainToolkit
+from malspark.agents import mcp_client
+from malspark.agents.mcp_client import MCPLangChainToolkit
 
 
 class _Session:
@@ -62,8 +62,8 @@ def test_an_answer_marked_as_an_error_is_raised_with_its_words() -> None:
 
 
 def test_a_block_that_runs_readings_opens_a_session_that_waits_for_them() -> None:
-    from maljan.core.config import Settings
-    from maljan.providers.servers import READING_SESSION_READ_TIMEOUT_SECONDS, ServerHandle
+    from malspark.core.config import Settings
+    from malspark.providers.servers import READING_SESSION_READ_TIMEOUT_SECONDS, ServerHandle
 
     servers = Settings(_env_file=None).mcp.servers
     analysis = ServerHandle("analysis", servers["analysis"])

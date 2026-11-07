@@ -258,8 +258,8 @@ export const MALWARE_REPORT: MalwareReport = {
   detection_signatures: [
     {
       kind: "yara",
-      name: "Maljan_AgentTesla_Injection",
-      body: 'rule Maljan_AgentTesla_Injection { strings: $a = "VirtualAllocEx" condition: $a }',
+      name: "Malspark_AgentTesla_Injection",
+      body: 'rule Malspark_AgentTesla_Injection { strings: $a = "VirtualAllocEx" condition: $a }',
       auto_generated: true,
       source_evidence: ["imports[0]"],
       compile_error: null,

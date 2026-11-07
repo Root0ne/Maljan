@@ -13,8 +13,8 @@ from pathlib import Path
 from app.services.enrichment_sources import credential_settings
 from app.services.settings_catalog_api import API_DEFAULTS, catalog_index
 from app.services.settings_probes import known_probe
-from maljan.enrichment.builtin_sources import builtin_source_entries
-from maljan.enrichment.declared import credential_settings_of, effective_sources
+from malspark.enrichment.builtin_sources import builtin_source_entries
+from malspark.enrichment.declared import credential_settings_of, effective_sources
 
 _ROOT = Path(__file__).resolve().parents[3]
 HOST = ".".join(["rep", "acme-labs", "net"])

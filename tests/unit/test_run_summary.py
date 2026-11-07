@@ -17,13 +17,13 @@ import time
 
 import pytest
 
-from maljan.analysis.run_summary import (
+from malspark.analysis.run_summary import (
     NegotiationMetrics,
     RunSummary,
     RunSummaryBuilder,
     _rolling_std,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -410,8 +410,8 @@ class TestSycophancyEventsAreThePlatformsFlags:
 
     @staticmethod
     def _mediation(finding: str, converged: list[dict] | None = None) -> object:
-        from maljan.core.config import MEDIATOR_AGENT_NAME
-        from maljan.pipeline.state import AgentArgument
+        from malspark.core.config import MEDIATOR_AGENT_NAME
+        from malspark.pipeline.state import AgentArgument
 
         return AgentArgument(
             agent_name=MEDIATOR_AGENT_NAME,
@@ -446,8 +446,8 @@ class TestSycophancyEventsAreThePlatformsFlags:
         assert self._events(history, detected=True) == 1
 
     def test_each_flagged_round_counts_whatever_flagged_it(self) -> None:
-        from maljan.core.config import MEDIATOR_AGENT_NAME
-        from maljan.pipeline.state import AgentArgument
+        from malspark.core.config import MEDIATOR_AGENT_NAME
+        from malspark.pipeline.state import AgentArgument
 
         def _round(flagged: bool | None) -> object:
             return AgentArgument(

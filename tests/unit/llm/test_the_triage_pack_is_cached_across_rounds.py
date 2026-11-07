@@ -20,16 +20,16 @@ from typing import Any
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from maljan.agents.technique_facts import STANDING_FACTS_CHARS
-from maljan.core.config import Settings
-from maljan.llm.anthropic_history import (
+from malspark.agents.technique_facts import STANDING_FACTS_CHARS
+from malspark.core.config import Settings
+from malspark.llm.anthropic_history import (
     MAX_BREAKPOINTS,
     Memory,
     _within_breakpoint_limit,
     prepared,
     standing_marker,
 )
-from maljan.llm.anthropic_provider import AnthropicProvider, cache_control
+from malspark.llm.anthropic_provider import AnthropicProvider, cache_control
 
 from .anthropic_wire import MODEL, Wire, install, message
 
@@ -322,8 +322,8 @@ class TestOnTheWire:
 
     def test_a_streamed_pack_write_is_charged_at_the_hour_s_price(self, monkeypatch: Any) -> None:
         """A stream's closing usage carries no split by lifetime; its opening event does."""
-        from maljan.core.spend import SpendMeter, table_prices
-        from maljan.core.token_ledger import turn_usage
+        from malspark.core.spend import SpendMeter, table_prices
+        from malspark.core.token_ledger import turn_usage
 
         written = 2_000
         usage = {
@@ -373,8 +373,8 @@ class TestOnTheWire:
     @staticmethod
     def _settled(monkeypatch: Any, usage: dict[str, Any], *, streaming: bool) -> float:
         """What the shipped settings' meter settles one answer reporting ``usage`` at."""
-        from maljan.core.spend import SpendMeter
-        from maljan.core.token_ledger import turn_usage
+        from malspark.core.spend import SpendMeter
+        from malspark.core.token_ledger import turn_usage
 
         wire = Wire(
             lambda _body: message([{"type": "text", "text": "ok"}], stop="end_turn", usage=usage)

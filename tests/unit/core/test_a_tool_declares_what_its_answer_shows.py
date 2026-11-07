@@ -21,9 +21,9 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import ValidationError
 
-from maljan.agents.tool_pinning import DECLARED_NAME_METADATA_KEY, SERVER_METADATA_KEY
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.core.tool_declarations import (
+from malspark.agents.tool_pinning import DECLARED_NAME_METADATA_KEY, SERVER_METADATA_KEY
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.core.tool_declarations import (
     DIGEST_OMITS_AT_DEFAULT,
     KIND_FREE_FIELDS,
     ToolDeclarations,
@@ -31,7 +31,7 @@ from maljan.core.tool_declarations import (
     declaration_digest,
     strict_declarations,
 )
-from maljan.core.undeclared_tools import (
+from malspark.core.undeclared_tools import (
     OWN_DESCRIPTION_METADATA_KEY,
     aggregate_note,
     answer_scope_note,
@@ -39,7 +39,7 @@ from maljan.core.undeclared_tools import (
     with_aggregate_notes,
     with_declared_notes,
 )
-from maljan.providers.servers import ServerHandle, ServerRegistry, settle_tool_notes
+from malspark.providers.servers import ServerHandle, ServerRegistry, settle_tool_notes
 
 
 def _tool(name: str, description: str = "", **metadata: Any) -> StructuredTool:
@@ -119,20 +119,23 @@ class TestTheDigests:
         # itself (T-418 PR1b), these fields with them. Ghidra's moved when its
         # block declared its data-label prefix (``data_label_prefixes``, T-426),
         # and when its tools came to be read from its listing under its
-        # block's statement (T-418 PR4).
+        # block's statement (T-418 PR4). The knowledge and network servers'
+        # moved when the environment names they require took the product's new
+        # name (T-576); with the previous names they are still b261c17f07e13ef9
+        # and 7211e6023885a063.
         settings = Settings(_env_file=None)
         for key in ("knowledge", "network"):
             object.__setattr__(settings.mcp.servers[key], "trusts_served_declaration", False)
         digests = ToolDeclarations.from_settings(settings).digests()
-        assert digests["mcp:knowledge"] == "b261c17f07e13ef9"
-        assert digests["mcp:network"] == "7211e6023885a063"
+        assert digests["mcp:knowledge"] == "30ce9bdcc7185ff8"
+        assert digests["mcp:network"] == "a0714e209e262efd"
         assert digests["provider:ghidra"] == "01e22fee1043d4c4"
         assert digests["sandbox"] == "c2bf77971e47dfa4"
 
 
 class TestTheBuiltInsDeclare:
     def test_the_answers_whose_limits_are_material(self) -> None:
-        from maljan.core.declared_reading import builtin_tools
+        from malspark.core.declared_reading import builtin_tools
 
         # As each server declares its tools (its own, kept from its listing).
         held = {
@@ -259,7 +262,7 @@ class TestTheNotesAreSettledOverTheWholeList:
 
     def test_a_provider_s_note_is_recomputed_over_what_the_agent_is_offered(self) -> None:
         settings = Settings(_env_file=None)
-        stamp = {"maljan_declared_source": "provider:ghidra"}
+        stamp = {"malspark_declared_source": "provider:ghidra"}
         tools = [_tool("batch_decompile", **stamp), _tool("decompile_function", **stamp)]
         offered = {"batch_decompile": "batch_decompile", "decompile_function": "decompile_function"}
         attached = with_aggregate_notes(
@@ -372,10 +375,10 @@ class TestTheCallSitesReadTheJobsSettings:
     def test_a_resolved_agent_s_provider_and_referenced_tools_carry_their_notes(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.agents import composition
-        from maljan.agents.composition import resolve_agent
-        from maljan.core.config import get_settings
-        from maljan.core.container import ServiceContainer
+        from malspark.agents import composition
+        from malspark.agents.composition import resolve_agent
+        from malspark.core.config import get_settings
+        from malspark.core.container import ServiceContainer
 
         assert get_settings().mcp.answer_scope_notes is False
         cfg = _job_settings(
@@ -406,8 +409,8 @@ class TestTheCallSitesReadTheJobsSettings:
     ) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.core.config import get_settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import get_settings
+        from malspark.core.container import ServiceContainer
 
         assert get_settings().mcp.answer_scope_notes is False
         container = ServiceContainer(config=_job_settings(["static"]), mock=True)

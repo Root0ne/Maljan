@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from maljan.reporting.evidence_bundles import _carved_line, _endpoint
-from maljan.reporting.models import NetworkIP
+from malspark.reporting.evidence_bundles import _carved_line, _endpoint
+from malspark.reporting.models import NetworkIP
 
 
 def test_an_address_with_no_port_is_the_bare_address() -> None:

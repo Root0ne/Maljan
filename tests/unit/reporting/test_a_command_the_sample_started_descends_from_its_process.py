@@ -12,15 +12,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     DynamicBehavior,
     FileHashes,
     MalwareReport,
     ProcessNode,
     SampleIdentity,
 )
-from maljan.reporting.renderers.layout import ANALYST, FULL
-from maljan.reporting.renderers.markdown import MarkdownRenderer, started_by_the_sample
+from malspark.reporting.renderers.layout import ANALYST, FULL
+from malspark.reporting.renderers.markdown import MarkdownRenderer, started_by_the_sample
 
 _SHA = "60" * 32
 

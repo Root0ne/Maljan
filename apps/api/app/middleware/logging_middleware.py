@@ -1,4 +1,4 @@
-"""Maljan API — Logging middleware for request/response tracking.
+"""Malspark API — Logging middleware for request/response tracking.
 
 Provides:
 - Automatic correlation ID generation and propagation

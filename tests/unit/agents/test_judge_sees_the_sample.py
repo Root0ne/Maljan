@@ -15,20 +15,20 @@ import asyncio
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     SAMPLE_IDENTITY_HEADER,
     JudgeAgent,
     sample_identity_block,
 )
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     UNSUPPORTED_BENIGN_CODE,
     sample_identity_values,
     unsupported_benign_violations,
     validate_verdict_bundle,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.judgement import JudgeAssessment, SeverityVerdict
-from maljan.schemas.stix_models import Bundle, Malware, Note
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.judgement import JudgeAssessment, SeverityVerdict
+from malspark.schemas.stix_models import Bundle, Malware, Note
 
 SAMPLE = {
     "sha256": "e" * 64,
@@ -98,7 +98,7 @@ class TestTheIdentityBlock:
 def _reputation_tool() -> Any:
     """A tool as the registry hands it over: stamped with its server."""
     return type(
-        "_Tool", (), {"name": "get_file_report", "metadata": {"maljan_server": "virustotal"}}
+        "_Tool", (), {"name": "get_file_report", "metadata": {"malspark_server": "virustotal"}}
     )()
 
 
@@ -118,7 +118,7 @@ class TestBothPromptsCarryIt:
             async def ainvoke(self, messages: Any) -> Any:
                 seen.append("\n".join(str(getattr(m, "content", m)) for m in messages))
                 return MagicMock(
-                    content='{"type": "bundle", "objects": [], "x_maljan_assessment": '
+                    content='{"type": "bundle", "objects": [], "x_malspark_assessment": '
                     '{"severity": {"rating": "Low", "rationale": "thin"}, "confidence": 0.2}}'
                 )
 
@@ -224,7 +224,7 @@ class TestBothPromptsCarryIt:
 
     def test_a_reference_that_did_not_attach_is_not_told_it_has_reputation_tools(self) -> None:
         """The server is referenced, but nothing attached: the prompt says what was."""
-        from maljan.agents.prompt_fragments import NO_TOOLS_STATEMENT
+        from malspark.agents.prompt_fragments import NO_TOOLS_STATEMENT
 
         seen: list[str] = []
         judge = self._judge(seen)
@@ -256,7 +256,7 @@ class TestBothPromptsCarryIt:
         assert NO_TOOLS_STATEMENT in seen[0]
 
     def test_the_debate_and_verdict_stages_both_build_it_from_the_state(self) -> None:
-        from maljan.pipeline.nodes import _sample_identity
+        from malspark.pipeline.nodes import _sample_identity
 
         identity = _sample_identity(
             {
@@ -281,7 +281,7 @@ class TestBothPromptsCarryIt:
         }
 
     def test_a_state_with_nothing_in_it_builds_nothing(self) -> None:
-        from maljan.pipeline.nodes import _sample_identity
+        from malspark.pipeline.nodes import _sample_identity
 
         assert _sample_identity({}) == {}
 
@@ -296,7 +296,7 @@ class TestTheSampleSOwnIdentityIsGrounded:
     """
 
     def _hash_indicator(self, digest: str) -> Bundle:
-        from maljan.schemas.stix_models import Indicator
+        from malspark.schemas.stix_models import Indicator
 
         return Bundle(
             objects=[
@@ -330,7 +330,7 @@ class TestTheSampleSOwnIdentityIsGrounded:
         """The file name is whatever the submitter typed. Matched by substring
         it would be a channel for getting any value past the check and into a
         STIX bundle that detection tooling consumes."""
-        from maljan.schemas.stix_models import Indicator
+        from malspark.schemas.stix_models import Indicator
 
         sample = {"sha256": "e" * 64, "file_name": "invoice_from_evil-c2.com_8.8.8.8.exe"}
         bundle = Bundle(
@@ -356,7 +356,7 @@ class TestTheSampleSOwnIdentityIsGrounded:
         assert [v.path for v in violations] == ["objects[0]", "objects[1]"]
 
     def test_a_slice_of_the_sha256_is_not_an_md5(self) -> None:
-        from maljan.schemas.stix_models import Indicator
+        from malspark.schemas.stix_models import Indicator
 
         bundle = Bundle(
             objects=[
@@ -378,7 +378,7 @@ class TestTheSampleSOwnIdentityIsGrounded:
 
     def test_an_extension_less_sample_name_is_grounded_as_a_file_name(self) -> None:
         """The one value the ruling names reaches the file-name branch too."""
-        from maljan.schemas.stix_models import Indicator
+        from malspark.schemas.stix_models import Indicator
 
         bundle = Bundle(
             objects=[
@@ -395,7 +395,7 @@ class TestTheSampleSOwnIdentityIsGrounded:
     def test_a_submitted_name_that_is_a_toolchain_artefact_is_still_refused(self) -> None:
         """The identity is one more place a value can be found, not a way past
         the denylists, which run before anything is looked up."""
-        from maljan.schemas.stix_models import Indicator
+        from malspark.schemas.stix_models import Indicator
 
         bundle = Bundle(
             objects=[
@@ -423,7 +423,7 @@ class TestTheSampleSOwnIdentityIsGrounded:
             '{"type": "bundle", "objects": [{"type": "indicator", '
             '"id": "indicator--0f1e2d3c-4b5a-4968-8776-655443332201", '
             f"\"pattern\": \"[file:hashes.'SHA-256' = '{'e' * 64}']\", "
-            '"pattern_type": "stix"}], "x_maljan_assessment": {"verdict": "Suspicious", '
+            '"pattern_type": "stix"}], "x_malspark_assessment": {"verdict": "Suspicious", '
             '"severity": {"rating": "Low", "rationale": "signed"}, '
             '"malware_category": "none"}}'
         )
@@ -465,7 +465,7 @@ class TestABenignVerdictWithNoAnalysisBehindIt:
             )
         return Bundle(
             objects=objects,
-            x_maljan_assessment=JudgeAssessment(
+            x_malspark_assessment=JudgeAssessment(
                 severity=SeverityVerdict(rating="Informational", rationale="nothing was found")
             ),
         )
@@ -516,7 +516,7 @@ class TestABenignVerdictWithNoAnalysisBehindIt:
             ]
         )
         # A bundle carrying an indicator-shaped object reads as Suspicious.
-        from maljan.schemas.stix_models import AttackPattern
+        from malspark.schemas.stix_models import AttackPattern
 
         bundle.objects.append(
             AttackPattern(id=f"attack-pattern--{'e' * 8}-0000-4000-8000-{'f' * 12}", name="T1027")

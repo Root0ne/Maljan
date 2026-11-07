@@ -27,18 +27,18 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.agents._indicator_denylists import MAX_TOTAL_INDICATORS
-from maljan.extractors.network_extractor import host_is_public, url_corroboration_reason
-from maljan.reporting.builder import MalwareReportBuilder
-from maljan.reporting.ledger_projection import network_from_ledger
-from maljan.reporting.models import MalwareReport, NetworkURL, StaticAnalysis, StringIOC
-from maljan.reporting.renderers.stix_renderer import (
+from malspark.agents._indicator_denylists import MAX_TOTAL_INDICATORS
+from malspark.extractors.network_extractor import host_is_public, url_corroboration_reason
+from malspark.reporting.builder import MalwareReportBuilder
+from malspark.reporting.ledger_projection import network_from_ledger
+from malspark.reporting.models import MalwareReport, NetworkURL, StaticAnalysis, StringIOC
+from malspark.reporting.renderers.stix_renderer import (
     UNPUBLISHABLE_ENDPOINT_CODE,
     ExtendedSTIXRenderer,
     _indicator_for_url,
 )
-from maljan.schemas.evidence import build_entry
-from maljan.schemas.stix_models import Bundle
+from malspark.schemas.evidence import build_entry
+from malspark.schemas.stix_models import Bundle
 
 # Four of the five the live bundle published: hosts nothing could ever answer
 # for, whoever wrote them down.
@@ -75,7 +75,7 @@ def _entry(seq: int, tool: str, payload: dict[str, Any]) -> Any:
 def _report(
     urls: list[NetworkURL], indicators: list[dict[str, Any]] | None = None
 ) -> MalwareReport:
-    from maljan.reporting.models import DynamicBehavior, NetworkIOCs
+    from malspark.reporting.models import DynamicBehavior, NetworkIOCs
 
     report = MalwareReportBuilder(
         file_hash="b" * 64,
@@ -237,7 +237,7 @@ class TestWhoKnowsTheEndpoint:
         assert url_corroboration_reason(PLAUSIBLE, "sandbox") == "sandbox"
 
     def test_the_indicator_shows_where_a_string_derived_one_came_from(self) -> None:
-        from maljan.reporting.models import NetworkDomain
+        from malspark.reporting.models import NetworkDomain
 
         url = NetworkURL(url="http://c2.example.org/gate.php", source="strings")
         report = _report([url])
@@ -464,8 +464,8 @@ class TestNothingCapsTheExport:
     @staticmethod
     def _named(report: MalwareReport, base: Bundle) -> MalwareReport:
         """``report`` with the judge's values, as the builder reads them off its bundle."""
-        from maljan.reporting.models import JudgeIndicator
-        from maljan.reporting.renderers.stix_renderer import exported_indicator_values
+        from malspark.reporting.models import JudgeIndicator
+        from malspark.reporting.renderers.stix_renderer import exported_indicator_values
 
         report.judge_indicators = [
             JudgeIndicator(kind=v.kind, value=v.value, algorithm=v.algorithm)
@@ -533,7 +533,7 @@ class TestNothingCapsTheExport:
 
     def test_a_compound_hash_pattern_is_read_as_a_hash(self) -> None:
         """The judge writes one: an imphash or a SHA-1 in the same expression."""
-        from maljan.reporting.renderers.stix_renderer import _BAND_JUDGE_HASH, _indicator_band
+        from malspark.reporting.renderers.stix_renderer import _BAND_JUDGE_HASH, _indicator_band
 
         compound = (
             "[file:extensions['pe'].pe_imphash = 'b15607f10222dbea' OR "
@@ -555,7 +555,7 @@ class TestWhatTheCapSpendsItsBudgetOn:
 
     @staticmethod
     def _crowded() -> tuple[MalwareReport, Bundle]:
-        from maljan.reporting.models import NetworkDomain, NetworkIOCs, NetworkIP
+        from malspark.reporting.models import NetworkDomain, NetworkIOCs, NetworkIP
 
         judged = {
             "objects": [

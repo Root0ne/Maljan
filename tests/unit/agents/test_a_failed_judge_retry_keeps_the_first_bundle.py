@@ -22,23 +22,23 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.agents import judge_agent as module
-from maljan.agents.judge_agent import (
+from malspark.agents import judge_agent as module
+from malspark.agents.judge_agent import (
     VERDICT_FALLBACK_CODE,
     VERDICT_RETRY_FAILED_CODE,
     VERDICT_TIMEOUT_CODE,
     JudgeAgent,
     JudgeVerdict,
 )
-from maljan.pipeline.outcome import INCONCLUSIVE_VERDICT, decide_from_bundle
-from maljan.pipeline.validation import Violation, retry_with_feedback
+from malspark.pipeline.outcome import INCONCLUSIVE_VERDICT, decide_from_bundle
+from malspark.pipeline.validation import Violation, retry_with_feedback
 
 # The audit probe's first answer: a whole bundle whose one indicator no
 # evidence grounds, so the judge is asked once about it.
 FIRST = {
     "type": "bundle",
     "id": "bundle--1",
-    "x_maljan_assessment": {
+    "x_malspark_assessment": {
         "verdict": "Malware",
         "confidence": 0.9,
         "severity": {"rating": "High", "rationale": "injects"},
@@ -95,12 +95,12 @@ def _codes(verdict: JudgeVerdict) -> list[str]:
 
 
 def _assert_first_kept(verdict: JudgeVerdict) -> None:
-    assessment = verdict.bundle.x_maljan_assessment
+    assessment = verdict.bundle.x_malspark_assessment
     assert assessment is not None
     assert assessment.verdict == "Malware"
     assert assessment.severity is not None and assessment.severity.rating == "High"
     assert assessment.malware_category == "loader"
-    assert verdict.bundle.x_maljan_fallback_verdict is None
+    assert verdict.bundle.x_malspark_fallback_verdict is None
     assert decide_from_bundle(verdict.bundle) == "Malware"
     assert _codes(verdict).count(VERDICT_RETRY_FAILED_CODE) == 1
     assert VERDICT_FALLBACK_CODE not in _codes(verdict)
@@ -167,8 +167,8 @@ class TestARetryThatStatedItsAssessmentIsKept:
     @staticmethod
     def _corrected() -> dict[str, Any]:
         fixed = json.loads(json.dumps(FIRST))
-        fixed["x_maljan_assessment"]["verdict"] = "Suspicious"
-        fixed["x_maljan_assessment"]["malware_category"] = None
+        fixed["x_malspark_assessment"]["verdict"] = "Suspicious"
+        fixed["x_malspark_assessment"]["malware_category"] = None
         fixed["objects"] = [o for o in fixed["objects"] if o["type"] == "malware"]
         return fixed
 
@@ -178,7 +178,7 @@ class TestARetryThatStatedItsAssessmentIsKept:
         verdict = await _verdict(JudgeAgent(_Llm(json.dumps(FIRST), cut)))  # type: ignore[arg-type]
 
         assert decide_from_bundle(verdict.bundle) == "Suspicious"
-        assessment = verdict.bundle.x_maljan_assessment
+        assessment = verdict.bundle.x_malspark_assessment
         assert assessment is not None and assessment.verdict == "Suspicious"
         assert VERDICT_RETRY_FAILED_CODE not in _codes(verdict)
         assert "verdict.unsupported_malware" not in _codes(verdict)
@@ -200,18 +200,18 @@ class TestAGoodRetryOrABadFirstAnswerIsUnchanged:
     async def test_a_retry_that_answered_a_bundle_is_kept(self) -> None:
         fixed = json.loads(json.dumps(FIRST))
         fixed["objects"] = [fixed["objects"][0]]
-        fixed["x_maljan_assessment"]["malware_category"] = "dropper"
+        fixed["x_malspark_assessment"]["malware_category"] = "dropper"
         verdict = await _verdict(JudgeAgent(_Llm(json.dumps(FIRST), json.dumps(fixed))))  # type: ignore[arg-type]
 
-        assert verdict.bundle.x_maljan_assessment is not None
-        assert verdict.bundle.x_maljan_assessment.malware_category == "dropper"
+        assert verdict.bundle.x_malspark_assessment is not None
+        assert verdict.bundle.x_malspark_assessment.malware_category == "dropper"
         assert VERDICT_RETRY_FAILED_CODE not in _codes(verdict)
 
     @pytest.mark.asyncio
     async def test_prose_twice_still_falls_back(self) -> None:
         verdict = await _verdict(JudgeAgent(_Llm("Verdict: Malware.", "Verdict: Malware.")))  # type: ignore[arg-type]
 
-        assert verdict.bundle.x_maljan_fallback_verdict is not None
+        assert verdict.bundle.x_malspark_fallback_verdict is not None
         assert VERDICT_FALLBACK_CODE in _codes(verdict)
         assert VERDICT_RETRY_FAILED_CODE not in _codes(verdict)
 

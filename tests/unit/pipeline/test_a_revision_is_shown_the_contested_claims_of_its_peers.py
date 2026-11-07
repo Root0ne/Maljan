@@ -32,8 +32,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.base_agent import _REVISION_ISR_FORMAT, revision_messages
-from maljan.pipeline.debate_facts import (
+from malspark.agents.base_agent import _REVISION_ISR_FORMAT, revision_messages
+from malspark.pipeline.debate_facts import (
     ContestedRef,
     ShownReport,
     claims_named_by_lines,
@@ -42,9 +42,9 @@ from maljan.pipeline.debate_facts import (
     peer_report_heading,
     peers_shown_record,
 )
-from maljan.pipeline.nodes import RevisionInput, make_revision_node
-from maljan.pipeline.state import AgentArgument
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.pipeline.nodes import RevisionInput, make_revision_node
+from malspark.pipeline.state import AgentArgument
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 NAMES = ["static", "all_tools_static_r2", "dynamic", "network"]
 
@@ -206,7 +206,7 @@ class TestTheExcerpt:
         )
 
     def test_an_excerpt_is_headed_as_one_and_says_what_it_quotes(self) -> None:
-        from maljan.pipeline.debate_facts import excerpt_statement
+        from malspark.pipeline.debate_facts import excerpt_statement
 
         assert peer_report_heading("static", ShownReport("x", (2,))) == "STATIC REPORT (excerpt):"
         assert peer_report_heading("static", "x") == "STATIC REPORT:"
@@ -559,7 +559,7 @@ class TestWhatElseNamesTheAnalyst:
         assert "QU1CK claim 9" not in shown
 
     def test_the_items_written_besides_the_claims_that_name_the_analyst_are_kept(self) -> None:
-        from maljan.agents.base_agent import WRITTEN_BESIDES_CLAIMS
+        from malspark.agents.base_agent import WRITTEN_BESIDES_CLAIMS
 
         reports = dict(REPORTS)
         reports["static"] = (
@@ -590,7 +590,7 @@ class TestWhatElseNamesTheAnalyst:
         assert shown.whole_chars == len(reports["static"])
 
     def test_an_item_restating_a_listed_dispute_is_shown_once(self) -> None:
-        from maljan.agents.base_agent import WRITTEN_BESIDES_CLAIMS
+        from malspark.agents.base_agent import WRITTEN_BESIDES_CLAIMS
 
         reports = dict(REPORTS)
         reports["static"] = (
@@ -628,7 +628,7 @@ def _container() -> tuple[Any, dict[str, Any]]:
     container.agent_role.side_effect = lambda n: n
     container.config.llm.parallel_analysts = False
     container.config.agents.definitions = {}
-    from maljan.core.input_meter import InputMeter
+    from malspark.core.input_meter import InputMeter
 
     container.input_meter = InputMeter()
     agents: dict[str, Any] = {}
@@ -666,7 +666,7 @@ def _revise(lines: list[str], revise: list[str], **state_kw: Any) -> tuple[Any, 
         **state_kw,
     }
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
+        mp.setattr("malspark.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data"))
         update = asyncio.run(make_revision_node(container)(state))
     return update, agents, container
 
@@ -724,7 +724,7 @@ class TestTheRound:
         assert peers["static"].whole_chars == len("static revised text")
 
     def test_a_run_state_marker_in_an_excerpt_is_written_out_and_the_claims_kept(self) -> None:
-        from maljan.pipeline.run_state import RUN_STATE_BEGIN
+        from malspark.pipeline.run_state import RUN_STATE_BEGIN
 
         marked = _isr("static", f"Reads {RUN_STATE_BEGIN} here.")
 
@@ -752,7 +752,7 @@ class TestTheRound:
         }
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(
-                "maljan.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data")
+                "malspark.pipeline.nodes._revision_input", lambda *a: RevisionInput(text="data")
             )
             update = asyncio.run(make_revision_node(container)(state))
 
@@ -767,8 +767,8 @@ class TestTheRecord:
         assert peers_shown_record({"dynamic": {}}) == {}
 
     def test_the_efficiency_inputs_carry_the_rows_and_say_them(self) -> None:
-        from maljan.analysis.efficiency import _input_lines, inputs_record
-        from maljan.core.input_meter import InputMeter
+        from malspark.analysis.efficiency import _input_lines, inputs_record
+        from malspark.core.input_meter import InputMeter
 
         meter = InputMeter()
         record = {"excerpted": 2, "whole": 1, "excerpt_chars": 300, "excerpted_whole_chars": 9000}
@@ -788,8 +788,8 @@ class TestTheRecord:
         ) in _input_lines(inputs)
 
     def test_a_meter_with_no_round_adds_no_part(self) -> None:
-        from maljan.analysis.efficiency import inputs_record
-        from maljan.core.input_meter import InputMeter
+        from malspark.analysis.efficiency import inputs_record
+        from malspark.core.input_meter import InputMeter
 
         container = MagicMock()
         container.input_meter = InputMeter()
@@ -806,8 +806,8 @@ class TestTheRecord:
 def test_every_built_in_revision_heads_the_excerpt(role: str) -> None:
     from unittest.mock import patch
 
-    from maljan.core.config import Settings
-    from maljan.core.container import ServiceContainer
+    from malspark.core.config import Settings
+    from malspark.core.container import ServiceContainer
 
     agent = ServiceContainer(Settings(_env_file=None), mock=True).get_agent(role)
     seen: list[str] = []

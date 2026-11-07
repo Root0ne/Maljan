@@ -55,8 +55,8 @@ from typing import Any
 
 from scripts.replay.stored import evidence_rows
 
-from maljan.core.builtin_declarations import OUTWARD_KINDS
-from maljan.core.declared_reading import kind_of
+from malspark.core.builtin_declarations import OUTWARD_KINDS
+from malspark.core.declared_reading import kind_of
 
 LEDGER_FILE, REPORT_FILE, TECHNIQUES_FILE = "evidence.json", "report.md", "mitre.json"
 BUNDLE_FILE = "evidence-bundle.json"

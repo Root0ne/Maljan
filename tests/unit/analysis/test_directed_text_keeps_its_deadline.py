@@ -18,8 +18,8 @@ import time
 import pytest
 from tests.linear_cost import cpu_seconds
 
-from maljan.analysis import directed_text
-from maljan.analysis.directed_text import Groups, scan_bytes_into, scan_text
+from malspark.analysis import directed_text
+from malspark.analysis.directed_text import Groups, scan_bytes_into, scan_text
 
 # Plain text with no phrase of any family in it.
 _PROSE = b"the quick brown fox jumps over the lazy dog while reading logs; "

@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import MCPServerConfig, Settings, shipped_server_keys
-from maljan.providers.server_guard import guard_from_settings, server_call_budget
+from malspark.core.config import MCPServerConfig, Settings, shipped_server_keys
+from malspark.providers.server_guard import guard_from_settings, server_call_budget
 
 
 def _with_a_renamed_copy(**over: Any) -> Settings:
@@ -91,7 +91,7 @@ class TestTheShippedMark:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The shipped sidecars' bare child environment is the mark's, not the key's."""
-        from maljan.providers.servers import ServerRegistry
+        from malspark.providers.servers import ServerRegistry
 
         monkeypatch.delenv("PYTHONIOENCODING", raising=False)
         seen: list[dict[str, str]] = []
@@ -106,7 +106,7 @@ class TestTheShippedMark:
             def get_tools(self) -> list[Any]:
                 return []
 
-        monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
+        monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
         registry = ServerRegistry(_with_a_renamed_copy())
         for name in ("analysis", "renamed_srv"):
             handle = registry.get(name)
@@ -120,7 +120,7 @@ class TestTheShippedMark:
     def test_a_stage_that_withholds_the_built_ins_withholds_every_shipped_server(self) -> None:
         from tests.unit.pipeline.test_stage_inputs import _settings
 
-        from maljan.agents.composition import _withheld_servers
+        from malspark.agents.composition import _withheld_servers
 
         settings = _settings(
             [
@@ -156,9 +156,9 @@ def _tool_names(
     """
     from langchain_core.tools import StructuredTool
 
-    from maljan.core import config as config_module
-    from maljan.core.config import ToolRef
-    from maljan.providers.servers import ServerRegistry
+    from malspark.core import config as config_module
+    from malspark.core.config import ToolRef
+    from malspark.providers.servers import ServerRegistry
 
     def _tool(name: str) -> Any:
         return StructuredTool.from_function(lambda: "ok", name=name, description=name)
@@ -174,7 +174,7 @@ def _tool_names(
         def get_tools(self) -> list[Any]:
             return [_tool(name) for name in self.names]
 
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _FakeToolkit)
     if seeds:
         shipped = config_module._builtin_servers
 
@@ -257,7 +257,7 @@ class TestAShippedServerKeepsTheNamesItHadBeforeItWasMarked:
     def test_virustotal_bound_to_a_role_keeps_its_names_over_an_operator_s_server(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core import virustotal
+        from malspark.core import virustotal
 
         lookup = virustotal.LOOKUP_TOOLS[0]
         offered = {virustotal.MCP_ENDPOINT: [lookup], "mine-srv": [lookup, "mine_only_q7"]}

@@ -24,9 +24,9 @@ from typing import Any
 import pytest
 from pydantic import SecretStr
 
-from maljan.core.config import GHIDRA_SAMPLE_OPEN
-from maljan.core.exceptions import SampleNotOpened
-from maljan.providers.static.ghidra.program import program_name_from_load
+from malspark.core.config import GHIDRA_SAMPLE_OPEN
+from malspark.core.exceptions import SampleNotOpened
+from malspark.providers.static.ghidra.program import program_name_from_load
 
 
 class TestALoadErrorIsNotASuccess:
@@ -73,7 +73,7 @@ class _Client:
 
 @pytest.fixture
 def analyst(monkeypatch: pytest.MonkeyPatch) -> Any:
-    from maljan.agents.static_analyst import StaticAnalyst
+    from malspark.agents.static_analyst import StaticAnalyst
 
     a = StaticAnalyst.__new__(StaticAnalyst)
     import logging
@@ -84,7 +84,7 @@ def analyst(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 def _patch_settings(monkeypatch: pytest.MonkeyPatch, analyst: Any) -> None:
     """The analyst's own provider: Ghidra over http, with the sink pre-pass on."""
-    from maljan.providers.static.ghidra import GhidraStaticProvider
+    from malspark.providers.static.ghidra import GhidraStaticProvider
 
     class _G:
         enabled = True
@@ -105,8 +105,8 @@ def _patch_settings(monkeypatch: pytest.MonkeyPatch, analyst: Any) -> None:
 
 def _shipped_provider(monkeypatch: pytest.MonkeyPatch, analyst: Any, provider_id: str) -> None:
     """The analyst's own provider: ``provider_id`` as it ships."""
-    from maljan.core.config import Settings
-    from maljan.providers.registry import static_provider_class
+    from malspark.core.config import Settings
+    from malspark.providers.registry import static_provider_class
 
     provider = static_provider_class(provider_id).from_settings(Settings())
     monkeypatch.setattr(analyst, "_provider", lambda: provider, raising=False)

@@ -26,15 +26,15 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis import evidence_roots
-from maljan.core import builtin_declarations as shipped
-from maljan.core import declared_reading, legacy_tool_facts
-from maljan.core.builtin_declarations import CONSUMER_KINDS
-from maljan.core.paths import resolve_data
-from maljan.core.tool_declarations import ToolFacts
-from maljan.pipeline import validation
-from maljan.reporting import legacy_tool_names as legacy
-from maljan.reporting import tool_kinds
+from malspark.analysis import evidence_roots
+from malspark.core import builtin_declarations as shipped
+from malspark.core import declared_reading, legacy_tool_facts
+from malspark.core.builtin_declarations import CONSUMER_KINDS
+from malspark.core.paths import resolve_data
+from malspark.core.tool_declarations import ToolFacts
+from malspark.pipeline import validation
+from malspark.reporting import legacy_tool_names as legacy
+from malspark.reporting import tool_kinds
 
 
 def _table_legacy_names(consumer: str) -> frozenset[str]:
@@ -152,7 +152,7 @@ def _reshaped(declaration: Callable[[str], dict[str, Any]]) -> Callable[[str], d
 
 def _serve_changed(change: Callable[..., Any]) -> None:
     """What the platform's own servers serve, changed as ``change`` changes the shipped tables."""
-    from maljan.core import served_declarations
+    from malspark.core import served_declarations
 
     for source, (launch, facts) in dict(served_declarations._SERVED).items():
         if change is _emptied:
@@ -284,7 +284,7 @@ def test_a_consumer_the_platform_does_not_name_is_refused() -> None:
 def test_a_stored_run_reads_produced_layers_by_the_argument_names_the_snapshot_declares(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from maljan.analysis import coverage
+    from malspark.analysis import coverage
 
     frozen = {
         str(name)

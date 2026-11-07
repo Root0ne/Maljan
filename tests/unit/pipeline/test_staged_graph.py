@@ -12,10 +12,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.core.config import Settings, StageDefinition
-from maljan.core.container import ServiceContainer
-from maljan.pipeline.builder import build_graph
-from maljan.pipeline.nodes import make_stage_agent_node, stage_context, stage_rollup
+from malspark.core.config import Settings, StageDefinition
+from malspark.core.container import ServiceContainer
+from malspark.pipeline.builder import build_graph
+from malspark.pipeline.nodes import make_stage_agent_node, stage_context, stage_rollup
 
 
 def _shape(container: ServiceContainer) -> dict[str, Any]:
@@ -308,7 +308,7 @@ class TestTheRunRecordsWhatEachStageDid:
     """
 
     def test_two_agents_of_one_stage_add_up_rather_than_overwrite(self) -> None:
-        from maljan.pipeline.state import _merge_stage_results
+        from malspark.pipeline.state import _merge_stage_results
 
         left = {
             "wide": {
@@ -342,7 +342,7 @@ class TestTheRunRecordsWhatEachStageDid:
         assert merged["technique_ids"] == ["T1055", "T1071"]
 
     def test_a_stage_that_ran_anywhere_counts_as_having_run(self) -> None:
-        from maljan.pipeline.state import _merge_stage_results
+        from malspark.pipeline.state import _merge_stage_results
 
         merged = _merge_stage_results(
             {"wide": {"ran": False, "reason": "no data for this agent"}},
@@ -351,7 +351,7 @@ class TestTheRunRecordsWhatEachStageDid:
         assert merged["wide"]["ran"] is True
 
     def test_a_stage_nothing_wrote_before_is_taken_as_it_arrives(self) -> None:
-        from maljan.pipeline.state import _merge_stage_results
+        from malspark.pipeline.state import _merge_stage_results
 
         merged = _merge_stage_results({}, {"deep": {"ran": True, "agents": ["x"]}})
         assert merged == {"deep": {"ran": True, "agents": ["x"]}}
@@ -399,7 +399,7 @@ class TestTheBuilderIsStillTheBackstop:
     def test_a_debate_feeding_two_nodes_will_not_build(self) -> None:
         import pytest
 
-        from maljan.core.config import ProfileDefinition
+        from malspark.core.config import ProfileDefinition
 
         stages = [
             {"key": "a", "kind": "analysis", "agents": ["static"]},

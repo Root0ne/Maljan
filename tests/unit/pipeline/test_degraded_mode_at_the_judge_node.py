@@ -13,14 +13,14 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
-from maljan.agents.judge_agent import JudgeVerdict
-from maljan.core.token_ledger import TokenLedger
-from maljan.core.truncation_ledger import TruncationLedger
-from maljan.pipeline.nodes import make_judge_node
-from maljan.providers.sample_open import UNCOVERED, withheld_unpinned
-from maljan.schemas.evidence import EvidenceCounter, build_entry, format_entry_id
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
-from maljan.schemas.stix_models import Bundle
+from malspark.agents.judge_agent import JudgeVerdict
+from malspark.core.token_ledger import TokenLedger
+from malspark.core.truncation_ledger import TruncationLedger
+from malspark.pipeline.nodes import make_judge_node
+from malspark.providers.sample_open import UNCOVERED, withheld_unpinned
+from malspark.schemas.evidence import EvidenceCounter, build_entry, format_entry_id
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.stix_models import Bundle
 from tests.stages import paper_profile
 from tests.unit.pipeline.test_evidence_ledger_channel import _JudgeContainer
 
@@ -119,7 +119,7 @@ class TestACapaFailureAlone:
 
 class TestTheJudgeRecordsItsOwnUncheckedIds:
     def test_an_unreadable_catalogue_is_a_not_run_check_at_the_judge_too(self, monkeypatch) -> None:
-        from maljan.pipeline import nodes
+        from malspark.pipeline import nodes
 
         class _NoCatalogue:
             @staticmethod
@@ -151,7 +151,7 @@ class TestACaptureNotFetchedDegradesTheRun:
         return asyncio.run(make_judge_node(container)(_state([])))
 
     def test_the_reason_reaches_the_run_and_its_summary(self) -> None:
-        from maljan.providers.errors import PACKET_CAPTURE, ArtefactFetchFailed
+        from malspark.providers.errors import PACKET_CAPTURE, ArtefactFetchFailed
 
         lost = ArtefactFetchFailed(PACKET_CAPTURE, "HTTP 502").record()
         update = self._update([lost])
@@ -262,8 +262,8 @@ class TestARunThatWentWithoutCapaAmongOperatorChoices:
     LISTED_TOOLS = ("create_folder", "run_ghidra_script", "run_script_inline")
 
     def _losses(self) -> list[str]:
-        from maljan.tools.capabilities import Unavailable
-        from maljan.tools.errors import MISSING_DEPENDENCY, REMEDIATIONS
+        from malspark.tools.capabilities import Unavailable
+        from malspark.tools.errors import MISSING_DEPENDENCY, REMEDIATIONS
 
         install = REMEDIATIONS[MISSING_DEPENDENCY]
         return [
@@ -284,9 +284,9 @@ class TestARunThatWentWithoutCapaAmongOperatorChoices:
         ]
 
     def _choices(self) -> list[str]:
-        from maljan.providers.sample_open import LISTED_SHARED_WITHHELD
-        from maljan.tools.capabilities import Unavailable
-        from maljan.tools.errors import NOT_CONFIGURED, REMEDIATIONS
+        from malspark.providers.sample_open import LISTED_SHARED_WITHHELD
+        from malspark.tools.capabilities import Unavailable
+        from malspark.tools.errors import NOT_CONFIGURED, REMEDIATIONS
 
         withheld = [withheld_unpinned(self.SHARED, t, UNCOVERED) for t in self.UNCOVERED_TOOLS]
         withheld += [
@@ -306,8 +306,8 @@ class TestARunThatWentWithoutCapaAmongOperatorChoices:
         return sorted(withheld) + unset
 
     def test_it_is_degraded_with_capa_in_the_banner_and_the_choices_apart(self) -> None:
-        from maljan.reporting.models import MalwareReport
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.reporting.models import MalwareReport
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
 
         pack, *server = self._losses()
         choices = self._choices()
@@ -481,7 +481,7 @@ class _RememberingContainer(_Container):
 
     def __init__(self, counter: EvidenceCounter, *, reporting: bool) -> None:
         super().__init__(counter)
-        from maljan.memory.in_memory_store import InMemoryStore
+        from malspark.memory.in_memory_store import InMemoryStore
 
         self._store = InMemoryStore()
         self.pending_memory_case: Any = None
@@ -565,8 +565,8 @@ class TestThePublishedGateDecides:
 
 
 def test_a_bundle_that_could_not_be_read_keeps_the_claimed_ids_and_says_so() -> None:
-    from maljan.memory.long_term_memory import StoredCase
-    from maljan.pipeline.nodes import case_for_the_judge_alone
+    from malspark.memory.long_term_memory import StoredCase
+    from malspark.pipeline.nodes import case_for_the_judge_alone
 
     claimed = StoredCase(
         sample_id="s", summary_text="t", technique_ids=["T1055", "T1027"], total_techniques=2
@@ -582,7 +582,7 @@ def test_a_profile_that_cannot_be_read_is_said(caplog: Any) -> None:
     import logging
     from unittest.mock import MagicMock
 
-    from maljan.pipeline.nodes import a_report_node_follows
+    from malspark.pipeline.nodes import a_report_node_follows
 
     container = MagicMock()
     container.config.reporting.enabled = True

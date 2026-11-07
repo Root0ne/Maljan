@@ -19,10 +19,10 @@ from unittest.mock import patch
 
 import pytest
 
-from maljan.analysis.run_summary import spend_lines
-from maljan.core.cancellation import JobCancelled
-from maljan.core.spend import LOOP_TURN_CALL, STAGE_CALL_KINDS, SpendCeilingStop, SpendMeter
-from maljan.llm.context_window import CHARS_PER_TOKEN
+from malspark.analysis.run_summary import spend_lines
+from malspark.core.cancellation import JobCancelled
+from malspark.core.spend import LOOP_TURN_CALL, STAGE_CALL_KINDS, SpendCeilingStop, SpendMeter
+from malspark.llm.context_window import CHARS_PER_TOKEN
 
 FLASH = "deepseek-flash"
 CAP = 393_216
@@ -278,7 +278,7 @@ class TestAWaitEnds:
         assert "refused_calls" not in (meter.snapshot() or {})
 
     def test_a_cancelled_job_records_where_its_waiting_call_stopped(self) -> None:
-        from maljan.core import cancellation
+        from malspark.core import cancellation
 
         meter, _first = TestParallelCalls()._two_turns()
         job = cancellation.Cancellation()
@@ -321,8 +321,8 @@ class TestAWaitEnds:
         assert meter.exhausted() is False
 
     def test_the_job_s_cancellation_closes_its_meter(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         container = ServiceContainer(
             Settings(_env_file=None, llm={"max_spend_usd_per_job": 2.0}), mock=True

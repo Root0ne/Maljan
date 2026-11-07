@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from maljan.reporting import detection_signatures as ds
-from maljan.reporting.models import CapabilityCell, FileHashes, MalwareReport, SampleIdentity
+from malspark.reporting import detection_signatures as ds
+from malspark.reporting.models import CapabilityCell, FileHashes, MalwareReport, SampleIdentity
 
 
 def _cell(tactic_name: str, technique: str, not_published: str = "") -> CapabilityCell:

@@ -14,7 +14,9 @@ its SHA-256 and size; every size is bounded by ``upload_max_bytes``
 (``--upload-max-bytes``, by default the setting's own default, since an
 offline verification reads no runtime settings). The signature, when the
 package carries one, is checked under the key the platform's settings derive
-(``SETTINGS_ENCRYPTION_KEY``, purpose label ``maljan-job-package-v1``); it
+(``SETTINGS_ENCRYPTION_KEY``, under the purpose label the signature names:
+``job_package.SIGNATURE_LABEL``, or ``PREVIOUS_SIGNATURE_LABEL`` for a package
+signed before the rename); it
 proves integrity only to holders of that key. When that key is held, an
 unsigned package is a failure unless ``--allow-unsigned`` is given. The
 stored run inside is written into a temporary directory and its ledger seal is
@@ -34,7 +36,7 @@ import json
 import sys
 from pathlib import Path
 
-from maljan.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
+from malspark.core.delivery_limits import SAMPLE_UPLOAD_MAX_BYTES
 
 EXIT = {"verified": 0, "broken": 1, "unsigned": 3, "seal_unverifiable": 4, "other_key": 5}
 

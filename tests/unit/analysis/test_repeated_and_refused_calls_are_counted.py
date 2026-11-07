@@ -16,9 +16,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from maljan.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
-from maljan.analysis.efficiency import calls_record, efficiency_lines, efficiency_record
-from maljan.schemas.evidence import LedgerEntry
+from malspark.agents.tool_answer_clearing import READ_EVIDENCE_TOOL
+from malspark.analysis.efficiency import calls_record, efficiency_lines, efficiency_record
+from malspark.schemas.evidence import LedgerEntry
 
 
 def _entry(seq: int, tool: str = "strings", agent: str = "static", **extra: object) -> LedgerEntry:
@@ -131,7 +131,7 @@ def test_the_line_names_who_made_each_call() -> None:
 
 def _field_reads(monkeypatch: pytest.MonkeyPatch, build: Callable[[], object]) -> int:
     """How many entry fields ``build`` reads: the record's unit of work, not a clock."""
-    import maljan.analysis.efficiency as efficiency
+    import malspark.analysis.efficiency as efficiency
 
     counted = [0]
     real = efficiency._field

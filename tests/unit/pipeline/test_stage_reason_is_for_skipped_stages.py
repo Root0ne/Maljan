@@ -15,8 +15,8 @@ import time
 from types import SimpleNamespace
 from typing import Any
 
-from maljan.pipeline.nodes import stage_record
-from maljan.pipeline.state import _merge_stage_results
+from malspark.pipeline.nodes import stage_record
+from malspark.pipeline.state import _merge_stage_results
 
 _STAGE = SimpleNamespace(key="analysis", kind="analysis", mode="parallel", agents=("static",))
 
@@ -89,7 +89,7 @@ class TestTheParallelStageMerges:
 
 class TestTheRollupRow:
     def test_it_carries_the_per_agent_reasons(self) -> None:
-        from maljan.pipeline.nodes import stage_rollup
+        from malspark.pipeline.nodes import stage_rollup
 
         class _Container:
             def active_profile(self) -> object:
@@ -112,7 +112,7 @@ class TestTheRollupRow:
         assert row["agent_reasons"] == {"dynamic": "no sandbox fixture for this sample"}
 
     def test_a_stage_with_nothing_to_explain_has_no_such_key(self) -> None:
-        from maljan.pipeline.nodes import stage_rollup
+        from malspark.pipeline.nodes import stage_rollup
 
         class _Container:
             def active_profile(self) -> object:
@@ -139,7 +139,7 @@ class TestAStageThatRanAndFailed:
         assert "agent_reasons" not in entry
 
     def test_the_debate_round_records_its_own_failure(self) -> None:
-        from maljan.pipeline.nodes import _debate_record
+        from malspark.pipeline.nodes import _debate_record
 
         debate = SimpleNamespace(key="debate", kind="debate", mode="sequential", agents=("judge",))
         record = _debate_record(debate, time.monotonic(), reason="mediation timed out")
@@ -148,7 +148,7 @@ class TestAStageThatRanAndFailed:
         assert record["stage_results"]["debate"]["reason"] == "mediation timed out"
 
     def test_a_round_that_went_fine_gives_no_reason(self) -> None:
-        from maljan.pipeline.nodes import _debate_record
+        from malspark.pipeline.nodes import _debate_record
 
         debate = SimpleNamespace(key="debate", kind="debate", mode="sequential", agents=("judge",))
         record = _debate_record(debate, time.monotonic())
@@ -156,7 +156,7 @@ class TestAStageThatRanAndFailed:
         assert record["stage_results"]["debate"]["reason"] == ""
 
     def test_the_rollup_carries_it(self) -> None:
-        from maljan.pipeline.nodes import _debate_record, stage_rollup
+        from malspark.pipeline.nodes import _debate_record, stage_rollup
 
         debate = SimpleNamespace(key="debate", kind="debate", mode="sequential", agents=("judge",))
 
@@ -178,7 +178,7 @@ class TestAStageThatRanAndFailed:
         """The silence is what hid the regression; a debug line would have shown it."""
         import logging
 
-        with caplog.at_level(logging.DEBUG, logger="maljan"):
+        with caplog.at_level(logging.DEBUG, logger="malspark"):
             entry = _entry(stage_record(_STAGE, ran=True, reason="no sandbox fixture"))
 
         assert entry["reason"] == ""

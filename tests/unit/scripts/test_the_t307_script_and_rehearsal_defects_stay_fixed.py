@@ -17,7 +17,7 @@ import pytest
 from scripts.rehearsal import inprocess, models, validate, wire
 from scripts.rehearsal.stub_model import StubServer, StubState
 
-from maljan.core import plugins
+from malspark.core import plugins
 from tests.unit.scripts.test_the_attck_fixture_script_never_retires_an_unfetched_domain import (
     _bundle,
     _deprecated,

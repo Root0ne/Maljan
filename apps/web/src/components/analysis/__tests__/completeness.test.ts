@@ -154,7 +154,7 @@ describe("every field the report carries has a place", () => {
 
   it("puts every field placed in the full export into the file it saves", async () => {
     saved.length = 0;
-    const item = reportExportGroups("r1", STORED.malware_report, "maljan-x")
+    const item = reportExportGroups("r1", STORED.malware_report, "malspark-x")
       .flatMap((g) => g.items)
       .find((i) => i.key === "report-json")!;
     await item.run();
@@ -170,7 +170,7 @@ describe("every field the report carries has a place", () => {
 
   it("builds the discussion timeline download from the negotiation log", () => {
     expect(REPORT_DTO_PLACES.negotiation_log).toContain("export:timeline");
-    const timeline = reportExportGroups("r1", STORED.malware_report, "maljan-x")
+    const timeline = reportExportGroups("r1", STORED.malware_report, "malspark-x")
       .flatMap((g) => g.items)
       .find((i) => i.key === "timeline");
     expect(timeline?.unavailable).toBeUndefined();

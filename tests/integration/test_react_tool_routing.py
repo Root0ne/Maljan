@@ -20,7 +20,7 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.base_agent import BaseAnalyst
+from malspark.agents.base_agent import BaseAnalyst
 
 # ---------------------------------------------------------------------------
 # Fixtures: mock tools

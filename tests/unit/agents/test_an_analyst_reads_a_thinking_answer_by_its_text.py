@@ -16,10 +16,10 @@ from unittest.mock import MagicMock, patch
 
 from langchain_core.messages import AIMessage
 
-from maljan.agents.base_agent import BaseAnalyst, answer_cut_at_cap
-from maljan.pipeline.validation import UNGROUNDED_TECHNIQUE_CODE
-from maljan.schemas.evidence import LedgerEntry
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.base_agent import BaseAnalyst, answer_cut_at_cap
+from malspark.pipeline.validation import UNGROUNDED_TECHNIQUE_CODE
+from malspark.schemas.evidence import LedgerEntry
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 _THINKING = {"type": "thinking", "thinking": "", "signature": "c2lnbmF0dXJl"}
 
@@ -41,7 +41,7 @@ class TestTheCutReadsTheText:
         assert answer_cut_at_cap(_cut([dict(_THINKING)]), 64) == (64, "")
 
     def test_its_question_says_the_answer_was_cut_while_reasoning(self) -> None:
-        from maljan.pipeline.validation import analyst_cut_violation
+        from malspark.pipeline.validation import analyst_cut_violation
 
         message = analyst_cut_violation(64, "").message
         assert "while you were still reasoning" in message
@@ -106,7 +106,7 @@ def _agent(reply: Any) -> tuple[Any, list[str]]:
 
 
 def _validate(agent: Any) -> AgentISR:
-    with patch("maljan.agents.base_agent.get_settings") as settings:
+    with patch("malspark.agents.base_agent.get_settings") as settings:
         settings.return_value.react_agent_timeout = 60
         settings.return_value.react_agent_timeout_overrides = {}
         return agent._validate_isr(_isr("speculative"), "the evidence the analyst read")

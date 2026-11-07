@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import json
 
-from maljan.pipeline.validation import EntryTexts, wrong_entry_citations
-from maljan.schemas.evidence import LedgerEntry
+from malspark.pipeline.validation import EntryTexts, wrong_entry_citations
+from malspark.schemas.evidence import LedgerEntry
 
 
 def _texts() -> EntryTexts:

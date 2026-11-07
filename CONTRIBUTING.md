@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for helping with Maljan. This page is the short version; the
+Thank you for helping with Malspark. This page is the short version; the
 development guide in [Development](https://malspark.com/docs/development/) has the
 details.
 

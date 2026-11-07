@@ -18,9 +18,9 @@ import time
 
 import pytest
 
-from maljan.agents.base_agent import strip_tool_call_scaffolding
-from maljan.agents.repeat_watch import ClaimRepeatReader
-from maljan.pipeline.validation import claims_repeated
+from malspark.agents.base_agent import strip_tool_call_scaffolding
+from malspark.agents.repeat_watch import ClaimRepeatReader
+from malspark.pipeline.validation import claims_repeated
 from tests.claim_block_counts import begun_and_distinct
 
 SENTENCES = [
@@ -382,7 +382,7 @@ def test_varied_repeats_count_as_the_check_counts_them(
 
 def test_the_automata_are_built_from_the_patterns_the_check_reads() -> None:
     """The heading patterns, as the automata in ``repeat_watch`` mirror them."""
-    from maljan.agents import claim_headings
+    from malspark.agents import claim_headings
 
     prefix = "[ \\t>*_#]*+(?:(?:[-+]|\\d++[.)])[ \\t]++)?[ \\t>*_#]*+"
     assert claim_headings.LINE_PREFIX == prefix

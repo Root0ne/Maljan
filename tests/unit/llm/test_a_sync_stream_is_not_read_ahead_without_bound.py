@@ -10,7 +10,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessageChunk, HumanMessage
 from langchain_core.outputs import ChatGenerationChunk
 
-from maljan.llm.generation_rate import with_sized_request_timeout
+from malspark.llm.generation_rate import with_sized_request_timeout
 
 # Pieces the runaway stream has available; far past any read-ahead.
 TOTAL = 5000

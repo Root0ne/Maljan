@@ -16,24 +16,24 @@ import ast
 from collections.abc import Iterator
 from pathlib import Path
 
-from maljan.tools.readers import READERS
+from malspark.tools.readers import READERS
 
 ROOT = Path(__file__).resolve().parents[2]
 
 # The worker's own code: the pipeline and what it calls in process.
 WORKER_CODE = (
-    "src/maljan/app.py",
-    "src/maljan/pipeline",
-    "src/maljan/agents",
-    "src/maljan/providers",
-    "src/maljan/reporting",
-    "src/maljan/analysis",
-    "src/maljan/core",
-    "src/maljan/parsers",
-    "src/maljan/loaders",
-    "src/maljan/memory",
-    "src/maljan/enrichment",
-    "src/maljan/extractors",
+    "src/malspark/app.py",
+    "src/malspark/pipeline",
+    "src/malspark/agents",
+    "src/malspark/providers",
+    "src/malspark/reporting",
+    "src/malspark/analysis",
+    "src/malspark/core",
+    "src/malspark/parsers",
+    "src/malspark/loaders",
+    "src/malspark/memory",
+    "src/malspark/enrichment",
+    "src/malspark/extractors",
     "apps/api/app/worker",
 )
 
@@ -56,57 +56,57 @@ ALLOWED = {
     ("apps/api/app/worker/sample_files.py", "private_copy"): TRANSFER,
     ("apps/api/app/worker/sample_files.py", "release_copy"): TRANSFER,
     ("apps/api/app/worker/sample_files.py", "_write_marker"): TRANSFER,
-    ("src/maljan/agents/sample_staging.py", "_open_regular"): TRANSFER,
-    ("src/maljan/agents/sample_staging.py", "stage_sample"): TRANSFER,
-    ("src/maljan/pipeline/artefacts.py", "ArtefactStore._local_copy"): TRANSFER,
-    ("src/maljan/pipeline/artefacts.py", "open_beneath"): TRANSFER,
-    ("src/maljan/loaders/cape2_client.py", "CAPEv2Client.submit"): TRANSFER,
-    ("src/maljan/loaders/cape2_client.py", "CAPEv2Client._write_capture"): TRANSFER,
-    ("src/maljan/providers/sandbox/limits.py", "stream_to_file_capped"): TRANSFER,
-    ("src/maljan/providers/sandbox/rest.py", "RestSandboxProvider.submit"): TRANSFER,
-    ("src/maljan/providers/sandbox/triage.py", "TriageSandboxProvider._post_sample"): TRANSFER,
-    ("src/maljan/providers/sandbox/triage.py", "TriageSandboxProvider._sha256_of"): HASH,
-    ("src/maljan/loaders/mock_sandbox_client.py", "MockSandboxClient._sha256"): HASH,
-    ("src/maljan/analysis/sample_integrity.py", "_file_digests"): HASH,
-    ("src/maljan/reporting/ledger_projection.py", "_hashes_of"): HASH,
-    ("src/maljan/app.py", "MaljanApp._infer_sample_platform"): HASH,
-    ("src/maljan/providers/sandbox/formats.py", "detect_sample_format"): HASH,
-    ("src/maljan/analysis/isolation.py", "environ_names"): NOT_THE_SAMPLE,
-    ("src/maljan/providers/servers.py", "_start_time"): NOT_THE_SAMPLE,
-    ("src/maljan/providers/servers.py", "ServerHandle._child_matches"): NOT_THE_SAMPLE,
-    ("src/maljan/loaders/pe_loader.py", "_detect_file_type"): NOT_REACHED,
-    ("src/maljan/loaders/pe_loader.py", "PELoader._get_strings"): NOT_REACHED,
-    ("src/maljan/loaders/pe_loader.py", "PELoader._load_pe"): NOT_REACHED,
+    ("src/malspark/agents/sample_staging.py", "_open_regular"): TRANSFER,
+    ("src/malspark/agents/sample_staging.py", "stage_sample"): TRANSFER,
+    ("src/malspark/pipeline/artefacts.py", "ArtefactStore._local_copy"): TRANSFER,
+    ("src/malspark/pipeline/artefacts.py", "open_beneath"): TRANSFER,
+    ("src/malspark/loaders/cape2_client.py", "CAPEv2Client.submit"): TRANSFER,
+    ("src/malspark/loaders/cape2_client.py", "CAPEv2Client._write_capture"): TRANSFER,
+    ("src/malspark/providers/sandbox/limits.py", "stream_to_file_capped"): TRANSFER,
+    ("src/malspark/providers/sandbox/rest.py", "RestSandboxProvider.submit"): TRANSFER,
+    ("src/malspark/providers/sandbox/triage.py", "TriageSandboxProvider._post_sample"): TRANSFER,
+    ("src/malspark/providers/sandbox/triage.py", "TriageSandboxProvider._sha256_of"): HASH,
+    ("src/malspark/loaders/mock_sandbox_client.py", "MockSandboxClient._sha256"): HASH,
+    ("src/malspark/analysis/sample_integrity.py", "_file_digests"): HASH,
+    ("src/malspark/reporting/ledger_projection.py", "_hashes_of"): HASH,
+    ("src/malspark/app.py", "MalsparkApp._infer_sample_platform"): HASH,
+    ("src/malspark/providers/sandbox/formats.py", "detect_sample_format"): HASH,
+    ("src/malspark/analysis/isolation.py", "environ_names"): NOT_THE_SAMPLE,
+    ("src/malspark/providers/servers.py", "_start_time"): NOT_THE_SAMPLE,
+    ("src/malspark/providers/servers.py", "ServerHandle._child_matches"): NOT_THE_SAMPLE,
+    ("src/malspark/loaders/pe_loader.py", "_detect_file_type"): NOT_REACHED,
+    ("src/malspark/loaders/pe_loader.py", "PELoader._get_strings"): NOT_REACHED,
+    ("src/malspark/loaders/pe_loader.py", "PELoader._load_pe"): NOT_REACHED,
     # Routing reads a fixed header or footer to name the format.
-    ("src/maljan/extractors/sample_identity.py", "_has_vhd_footer"): HASH,
-    ("src/maljan/extractors/sample_identity.py", "unparsed_container_reason"): HASH,
+    ("src/malspark/extractors/sample_identity.py", "_has_vhd_footer"): HASH,
+    ("src/malspark/extractors/sample_identity.py", "unparsed_container_reason"): HASH,
     # The identity, hash and toolchain readings' own parsers.
-    ("src/maljan/extractors/sample_identity.py", "_pe_compiler_fingerprint"): READING,
-    ("src/maljan/extractors/sample_identity.py", "_extract_signing"): READING,
-    ("src/maljan/extractors/sample_identity.py", "_safe_imphash"): READING,
+    ("src/malspark/extractors/sample_identity.py", "_pe_compiler_fingerprint"): READING,
+    ("src/malspark/extractors/sample_identity.py", "_extract_signing"): READING,
+    ("src/malspark/extractors/sample_identity.py", "_safe_imphash"): READING,
     # The network analyst's input slice parses the capture in the worker
     # (``parsers.network_parser`` over this reader), and the report's capa and
     # YARA fallback runs when the pack recorded neither.
-    ("src/maljan/analysis/capture_reader.py", "Capture.__init__"): LEFT,
-    ("src/maljan/providers/static/capa_yara.py", "CapaYaraStaticProvider._run_yara"): LEFT,
+    ("src/malspark/analysis/capture_reader.py", "Capture.__init__"): LEFT,
+    ("src/malspark/providers/static/capa_yara.py", "CapaYaraStaticProvider._run_yara"): LEFT,
     # The report's YARA draft checked against the sample.
-    ("src/maljan/reporting/detection_signatures.py", "_run_on_sample"): LEFT,
+    ("src/malspark/reporting/detection_signatures.py", "_run_on_sample"): LEFT,
     # A static provider's anti-analysis pass reads the image's sections in
     # the worker to place what the provider's scan found.
-    ("src/maljan/analysis/anti_analysis.py", "image_of"): LEFT,
-    ("src/maljan/providers/static/declared_prepass.py", "DeclaredScan.anti_analysis"): LEFT,
-    ("src/maljan/providers/static/ghidra/passes.py", "GhidraPasses.anti_analysis"): LEFT,
+    ("src/malspark/analysis/anti_analysis.py", "image_of"): LEFT,
+    ("src/malspark/providers/static/declared_prepass.py", "DeclaredScan.anti_analysis"): LEFT,
+    ("src/malspark/providers/static/ghidra/passes.py", "GhidraPasses.anti_analysis"): LEFT,
     # The family-feature hint (preprocessing.use_family_feature_rag, off as shipped).
-    ("src/maljan/pipeline/nodes.py", "_family_rag_candidates"): LEFT,
-    ("src/maljan/agents/static_analyst.py", "StaticAnalyst._compute_family_rag_hint"): LEFT,
-    ("src/maljan/extractors/pe_extractor.py", "_build_static_analysis_uncached"): LEFT,
-    ("src/maljan/extractors/pe_extractor.py", "_parse_pe"): LEFT,
+    ("src/malspark/pipeline/nodes.py", "_family_rag_candidates"): LEFT,
+    ("src/malspark/agents/static_analyst.py", "StaticAnalyst._compute_family_rag_hint"): LEFT,
+    ("src/malspark/extractors/pe_extractor.py", "_build_static_analysis_uncached"): LEFT,
+    ("src/malspark/extractors/pe_extractor.py", "_parse_pe"): LEFT,
 }
 
 # The read modes of ``open``.
 _READ_MODES = ("rb", "br", "r+b", "rb+")
 
-# The functions of ``maljan.tools`` that read a file, which only ``tools.readers``
+# The functions of ``malspark.tools`` that read a file, which only ``tools.readers``
 # calls for the pack and the analyst input.
 _READING_CALLS = {
     "identify": {"identify_file", "hashes", "signing_info"},
@@ -206,7 +206,7 @@ def test_the_worker_opens_bytes_only_where_the_register_says() -> None:
 
 
 def test_the_pack_and_the_analyst_input_read_the_sample_only_through_the_readers() -> None:
-    for name in ("src/maljan/pipeline/triage_pack.py", "src/maljan/pipeline/nodes.py"):
+    for name in ("src/malspark/pipeline/triage_pack.py", "src/malspark/pipeline/nodes.py"):
         tree = ast.parse((ROOT / name).read_text(encoding="utf-8"))
         direct = sorted(
             f"{name}:{node.lineno} {node.func.value.id}.{node.func.attr}"
@@ -226,7 +226,7 @@ def test_the_pack_and_the_analyst_input_read_the_sample_only_through_the_readers
 
 
 def test_every_reading_the_pack_names_is_a_reader() -> None:
-    tree = ast.parse((ROOT / "src/maljan/pipeline/triage_pack.py").read_text(encoding="utf-8"))
+    tree = ast.parse((ROOT / "src/malspark/pipeline/triage_pack.py").read_text(encoding="utf-8"))
     named = {
         node.args[0].value
         for node in ast.walk(tree)

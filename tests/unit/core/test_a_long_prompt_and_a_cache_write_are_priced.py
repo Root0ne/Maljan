@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.core.spend import SpendMeter, table_prices
-from maljan.core.token_ledger import TokenLedger, turn_usage
+from malspark.core.spend import SpendMeter, table_prices
+from malspark.core.token_ledger import TokenLedger, turn_usage
 
 HAIKU = "claude-haiku-5-5"
 MILLION = 1_000_000
@@ -100,7 +100,7 @@ class TestWhatACallCosts:
         assert meter.spent() == pytest.approx(2.0)
 
     def test_an_operator_s_tier_is_read_from_the_settings(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         settings = Settings(
             _env_file=None,
@@ -136,7 +136,7 @@ class TestBeforeACall:
         assert row.for_admission(200_000, hour_writes=True).input == 1.0
 
     def test_an_hour_s_write_is_admitted_only_where_one_is_asked_for(self) -> None:
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         hour = {"prompt_cache_ttl": "1h", "expert_model": HAIKU, "judge_model": HAIKU}
         asked = Settings(_env_file=None, llm={"provider": "anthropic", "anthropic": hour})
@@ -147,7 +147,7 @@ class TestBeforeACall:
 
     def test_an_hour_s_write_is_priced_only_on_the_provider_that_asks_for_it(self) -> None:
         """The Anthropic setting does not price another provider's models."""
-        from maljan.core.config import Settings
+        from malspark.core.config import Settings
 
         hour = {"prompt_cache_ttl": "1h"}
         elsewhere = Settings(_env_file=None, llm={"provider": "openai", "anthropic": hour})
@@ -214,7 +214,7 @@ class TestTheLedgerReadsAnthropicUsage:
         assert usage is not None and "cache_write_input_tokens" not in usage
 
     def test_the_run_summary_counts_them(self) -> None:
-        from maljan.analysis.run_summary import tokens_sentence
+        from malspark.analysis.run_summary import tokens_sentence
 
         ledger = TokenLedger()
         ledger.add(turn_usage(self._Answer({"cache_read": 300, "cache_creation": 120}, 440)))

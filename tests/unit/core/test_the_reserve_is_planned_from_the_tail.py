@@ -22,8 +22,8 @@ from datetime import UTC, datetime
 import pytest
 from langchain_core.messages import AIMessage
 
-from maljan.core.spend import LOOP_TURN_CALL, SpendCeilingStop, SpendMeter, validation_retry
-from maljan.llm.context_window import CHARS_PER_TOKEN
+from malspark.core.spend import LOOP_TURN_CALL, SpendCeilingStop, SpendMeter, validation_retry
+from malspark.llm.context_window import CHARS_PER_TOKEN
 
 FLASH = "deepseek-flash"
 CAP = 393_216

@@ -8,7 +8,7 @@ so they fall back to the small, committed fixture at
 ``tests/fixtures/sandbox/cape2_report.json`` when the real directory is
 missing or empty.
 
-Set the environment variable ``MALJAN_TEST_NO_CAPE_REPORTS=1`` to force the
+Set the environment variable ``MALSPARK_TEST_NO_CAPE_REPORTS=1`` to force the
 fallback path even on a machine that does have the real reports — useful for
 proving the fallback works without deleting anything.
 """
@@ -23,7 +23,7 @@ FIXTURE_PATH = ROOT / "tests" / "fixtures" / "sandbox" / "cape2_report.json"
 
 
 def no_real_reports_forced() -> bool:
-    return os.environ.get("MALJAN_TEST_NO_CAPE_REPORTS") == "1"
+    return os.environ.get("MALSPARK_TEST_NO_CAPE_REPORTS") == "1"
 
 
 def first_cape_report_path() -> Path:

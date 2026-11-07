@@ -15,12 +15,12 @@ from typing import Any
 
 import pytest
 
-from maljan.analysis import behaviour_code as bc
-from maljan.pipeline.triage_pack import PACK_SOURCE, PIPELINE, behaviour_inputs, render_pack
-from maljan.reporting.ledger_report import BEHAVIOUR_CODE_SECTION, build_sections
-from maljan.reporting.renderers.markdown import _evidence_rows
-from maljan.schemas.evidence import build_entry, format_entry_id
-from maljan.utils.written_forms import pack_escaped
+from malspark.analysis import behaviour_code as bc
+from malspark.pipeline.triage_pack import PACK_SOURCE, PIPELINE, behaviour_inputs, render_pack
+from malspark.reporting.ledger_report import BEHAVIOUR_CODE_SECTION, build_sections
+from malspark.reporting.renderers.markdown import _evidence_rows
+from malspark.schemas.evidence import build_entry, format_entry_id
+from malspark.utils.written_forms import pack_escaped
 
 MUTEX = "Global\\QxRun_7781"
 DOMAIN = "gate.observed-only.example"
@@ -349,8 +349,8 @@ class TestLinearTime:
 
 
 def _pack(tmp_path: Any, report: dict[str, Any] | None) -> Any:
-    from maljan.agents.evidence_recorder import EvidenceCounter, EvidenceRecorder
-    from maljan.pipeline.triage_pack import CapaSettings, PackInputs, _Pack
+    from malspark.agents.evidence_recorder import EvidenceCounter, EvidenceRecorder
+    from malspark.pipeline.triage_pack import CapaSettings, PackInputs, _Pack
 
     inputs = PackInputs(
         sample_path=str(tmp_path / "s"),
@@ -367,7 +367,7 @@ def _pack(tmp_path: Any, report: dict[str, Any] | None) -> Any:
 
 class TestThePackStep:
     def test_the_step_reads_the_pack_s_answers_and_is_the_last_step(self, tmp_path: Any) -> None:
-        from maljan.core.pack_steps import default_steps, shipped_step
+        from malspark.core.pack_steps import default_steps, shipped_step
 
         assert default_steps()[-1].id == bc.TOOL
         pack = _pack(tmp_path, _report())
@@ -386,7 +386,7 @@ class TestThePackStep:
         assert "in function 0x2000" in line
 
     def test_no_sandbox_report_records_nothing(self, tmp_path: Any) -> None:
-        from maljan.core.pack_steps import shipped_step
+        from malspark.core.pack_steps import shipped_step
 
         pack = _pack(tmp_path, None)
         pack._behaviour_code_links(shipped_step(bc.TOOL))

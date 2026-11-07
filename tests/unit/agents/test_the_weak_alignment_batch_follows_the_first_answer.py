@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from maljan.agents.base_agent import BaseAnalyst
-from maljan.core.config import get_settings
-from maljan.pipeline.validation import Violation
+from malspark.agents.base_agent import BaseAnalyst
+from malspark.core.config import get_settings
+from malspark.pipeline.validation import Violation
 
 FIRST = (
     "CLAIM: The sample injects into another process.\n"
@@ -55,8 +55,8 @@ def test_the_first_answer_kept_over_a_retry_is_checked_with_its_challenge() -> N
     settings = get_settings()
     with (
         patch.object(settings.validation, "weak_alignment", True),
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
-        patch("maljan.agents.base_agent.analyst_answer_checks", _checks),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.analyst_answer_checks", _checks),
     ):
         kept = analyst._validate_isr(first, "evidence text")
 
@@ -84,8 +84,8 @@ def test_the_challenge_reaches_the_model_once_when_the_setting_is_on() -> None:
     settings = get_settings()
     with (
         patch.object(settings.validation, "weak_alignment", True),
-        patch("maljan.agents.base_agent.validity_check_available", return_value=True),
-        patch("maljan.agents.base_agent.analyst_answer_checks", _checks),
+        patch("malspark.agents.base_agent.validity_check_available", return_value=True),
+        patch("malspark.agents.base_agent.analyst_answer_checks", _checks),
     ):
         analyst._validate_isr(first, "evidence text")
 

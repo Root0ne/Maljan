@@ -13,8 +13,8 @@ union, so a status an ISR invented must not reach it.
 
 from __future__ import annotations
 
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _isr(agent: str, *, claims: int = 0, status: str | None = None) -> AgentISR:

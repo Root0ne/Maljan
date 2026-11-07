@@ -23,7 +23,7 @@ from unittest.mock import patch
 
 import pytest
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     CITATION_WRONG_ENTRY_CODE,
     KEPT_WITH_A_FINDING,
     EntryTexts,
@@ -32,14 +32,14 @@ from maljan.pipeline.validation import (
     quoted_values,
     wrong_entry_citations,
 )
-from maljan.reporting.composer import ReportComposer, _bundle_text, _ProseOut
-from maljan.reporting.models import (
+from malspark.reporting.composer import ReportComposer, _bundle_text, _ProseOut
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     SampleIdentity,
     TTPMapping,
 )
-from maljan.schemas.evidence import LedgerEntry
+from malspark.schemas.evidence import LedgerEntry
 
 # Invented values of the shapes the benchmark report quoted: a marker string,
 # a command line with a quoted argument, and a Windows path.
@@ -375,7 +375,9 @@ def _invoke(*answers: str) -> tuple[Any, _RawLLM, ReportComposer]:
     comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
     comp._entries = _texts()
     comp._citable = ["ev_0004", "ev_0011", "ev_0012"]
-    with patch("maljan.reporting.composer.structured_output_supported_for_llm", return_value=False):
+    with patch(
+        "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
+    ):
         result = asyncio.run(
             comp._invoke([HumanMessage(content="write it")], _ProseOut, section="discovery")
         )
@@ -444,7 +446,7 @@ class TestWhatASectionIsShown:
         llm = _RawLLM(json.dumps({"text": "An example."}))
         comp = ReportComposer(llm=llm, per_section_timeout=5)  # type: ignore[arg-type]
         with patch(
-            "maljan.reporting.composer.structured_output_supported_for_llm", return_value=False
+            "malspark.reporting.composer.structured_output_supported_for_llm", return_value=False
         ):
             asyncio.run(comp.compose(report, facts_block="[ev_0001] pe: example"))
 

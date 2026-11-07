@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from maljan.providers.sandbox_tools import (
+from malspark.providers.sandbox_tools import (
     NETWORK_VIEW_KINDS,
     sandbox_api_calls,
     sandbox_dropped_files,
@@ -73,8 +73,8 @@ def test_a_full_network_section_names_nothing_absent() -> None:
 
 def _laid_out(*unavailable: str) -> dict[str, Any]:
     """A neutral document from a reader whose sandbox could not give ``unavailable``."""
-    from maljan.schemas.sandbox_document import sandbox_document
-    from maljan.schemas.sandbox_report import SandboxReport
+    from malspark.schemas.sandbox_document import sandbox_document
+    from malspark.schemas.sandbox_report import SandboxReport
 
     return sandbox_document(
         SandboxReport(provider="rest", source_format="rest", unavailable=list(unavailable))
@@ -153,8 +153,8 @@ def test_a_sandbox_without_call_logs_answers_api_calls_and_registry_absent() -> 
 
 def _read_by(provider: str, source_format: str, *unavailable: str) -> tuple[dict, tuple]:
     """A laid-out document and the ``normalised_by`` of the reader that made it."""
-    from maljan.schemas.sandbox_document import sandbox_document
-    from maljan.schemas.sandbox_report import SandboxReport, reader_of, section_id
+    from malspark.schemas.sandbox_document import sandbox_document
+    from malspark.schemas.sandbox_report import SandboxReport, reader_of, section_id
 
     report = SandboxReport(
         provider=provider,
@@ -177,8 +177,8 @@ def test_a_rest_mapping_never_fills_tls_icmp_or_the_summary() -> None:
 
 
 def test_triage_reads_absent_what_its_reader_never_fills() -> None:
-    from maljan.providers.sandbox.triage import TriageSandboxProvider
-    from maljan.schemas.sandbox_report import TRIAGE_NORMALISER_FILLS
+    from malspark.providers.sandbox.triage import TriageSandboxProvider
+    from malspark.schemas.sandbox_report import TRIAGE_NORMALISER_FILLS
 
     document, by = _read_by("triage", "triage", *TriageSandboxProvider.UNAVAILABLE)
     for view in (sandbox_mutexes, sandbox_registry_ops, sandbox_services_and_tasks):
@@ -195,9 +195,9 @@ def test_a_part_the_reader_fills_and_found_empty_stays_empty() -> None:
 
 def test_the_cape_reader_is_unaffected_by_its_declaration() -> None:
     """CAPE's reader fills every list field: naming it changes no answer."""
-    from maljan.providers.sandbox.readers import required_reader
-    from maljan.schemas.sandbox_document import sandbox_document
-    from maljan.schemas.sandbox_report import reader_of
+    from malspark.providers.sandbox.readers import required_reader
+    from malspark.schemas.sandbox_document import sandbox_document
+    from malspark.schemas.sandbox_report import reader_of
     from tests.unit.providers._cape_fixture import first_cape_report
 
     report = required_reader("cape2").read(first_cape_report(), provider="cape2", task_id="1")

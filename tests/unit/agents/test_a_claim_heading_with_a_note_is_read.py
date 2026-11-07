@@ -26,15 +26,15 @@ from typing import Any
 
 import pytest
 
-from maljan.agents.base_agent import read_claim_blocks
-from maljan.agents.claim_headings import (
+from malspark.agents.base_agent import read_claim_blocks
+from malspark.agents.claim_headings import (
     CLAIM_HEAD_RE,
     claim_blocks,
     count_claims_begun,
     heading_note,
     heading_sentence,
 )
-from maljan.agents.repeat_watch import ClaimRepeatReader
+from malspark.agents.repeat_watch import ClaimRepeatReader
 from tests.claim_block_counts import begun_and_distinct
 
 # An answer shaped like the reverser's revision: numbered claims, each with a
@@ -215,7 +215,7 @@ class TestTheNoteStaysOutOfWhatTheSentenceIsCheckedFor:
     def test_an_affirmative_claim_under_a_negative_note_is_no_absence(
         self, heading: str, sentence: str, technique: str
     ) -> None:
-        from maljan.pipeline.validation import absence_claim_violation
+        from malspark.pipeline.validation import absence_claim_violation
 
         text = (
             f"{heading}: {sentence}\nEVIDENCE: [ev_0004]\nCONFIDENCE: 0.8\nTECHNIQUE: {technique}"
@@ -330,7 +330,7 @@ class TestAnUnclosedNoteCostsALinearRead:
 
 class TestWhereTheNoteIsShown:
     def _claim(self, note: str | None) -> Any:
-        from maljan.schemas.isr_models import ClaimEvidence
+        from malspark.schemas.isr_models import ClaimEvidence
 
         return ClaimEvidence(
             claim="It reads a file.",
@@ -347,14 +347,14 @@ class TestWhereTheNoteIsShown:
         assert self._claim("[REVISED]").model_dump()["heading_note"] == "[REVISED]"
 
     def test_the_judge_s_listing_shows_it_beside_the_claim_number(self) -> None:
-        from maljan.schemas.isr_models import AgentISR
+        from malspark.schemas.isr_models import AgentISR
 
         isr = AgentISR(agent_id="a", domain="static", claims=[self._claim("[REVISED]")])
 
         assert "Claim 1 [REVISED]: It reads a file." in isr.to_text_summary()
 
     def test_the_claim_events_show_it_only_when_there_is_one(self) -> None:
-        from maljan.pipeline.events import claims_to_payload
+        from malspark.pipeline.events import claims_to_payload
 
         noted, plain = claims_to_payload([self._claim("[REVISED]"), self._claim(None)])
 

@@ -413,7 +413,7 @@ class _TreeRow:
 
 def _distinct_tree(rows: list[Any]) -> list[_TreeRow]:
     """Every process of the tree as the exporter folds it, one per identity, depth first."""
-    from maljan.reporting.dedupe import distinct_processes, process_identity
+    from malspark.reporting.dedupe import distinct_processes, process_identity
 
     found: dict[tuple[int, int, str, str], _TreeRow] = {}
     pending = list(reversed(distinct_processes([_TreeRow(r) for r in rows if isinstance(r, dict)])))
@@ -1172,7 +1172,7 @@ def _section_blocks(blocks: list[_Block], title: str) -> list[_Block]:
 def check_sections(
     found: Findings, surfaces: dict[str, Any], texts: dict[str, str], out: Report
 ) -> None:
-    from maljan.reporting.renderers.markdown import declares_code, holds_code
+    from malspark.reporting.renderers.markdown import declares_code, holds_code
 
     # The calls behind the report, with the kind each declared: a section
     # citing one that declares code holds code (markdown.py ``declares_code``).
@@ -1424,7 +1424,7 @@ def check_citations(found: Findings, surfaces: dict[str, Any], out: Report) -> N
     known = ledger if ledger is not None else index
     if "stix" in surfaces and known:
         for obj in _list(_bundle(surfaces["stix"]).get("objects")):
-            for ev in _list(_dict(obj).get("x_maljan_evidence_refs")):
+            for ev in _list(_dict(obj).get("x_malspark_evidence_refs")):
                 out.checked["citation"] += 1
                 if _text(ev) not in known:
                     out.defect(
@@ -1954,8 +1954,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--job", help="with --api: the job id")
     parser.add_argument(
         "--token-env",
-        default="MALJAN_TOKEN",
-        help="with --api: the environment variable holding the bearer token (default MALJAN_TOKEN)",
+        default="MALSPARK_TOKEN",
+        help=(
+            "with --api: the environment variable holding the bearer token (default MALSPARK_TOKEN)"
+        ),
     )
     parser.add_argument(
         "--web-fields", type=Path, default=WEB_FIELDS, help="the web console's field map"

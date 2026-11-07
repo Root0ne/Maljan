@@ -1,0 +1,574 @@
+"""CAPEv2Client — live CAPEv2 REST API sandbox backend.
+
+Part of the CAPEv2 sandbox integration.
+
+Submits samples to a running CAPEv2 instance, polls for completion, and
+fetches the full JSON report. The report structure is identical to the
+existing fixture JSON schema, so DynamicParser and NetworkParser require
+zero changes.
+
+Requirements:
+  - httpx: uv add httpx
+  - A running CAPEv2 instance reachable from this host.
+
+CAPEv2 API endpoints used:
+  POST /apiv2/tasks/create/file/        -- submit a sample file
+  GET  /apiv2/tasks/view/{id}/          -- check task status
+  GET  /apiv2/tasks/get/report/{id}/    -- fetch completed JSON report
+
+Authentication:
+  CAPEv2 uses token authentication. Set the API token via the
+  SANDBOX__CAPE2__API_TOKEN environment variable or pass it directly:
+    CAPEv2Client(base_url="http://cape2-host:8000", api_token="abc123")
+
+Error handling:
+  - HTTP errors raise SandboxError with the status code and response body.
+  - CAPE's own refusal envelope, ``{"error": true, "error_value": ...}`` sent
+    with HTTP 200 (report API disabled, a TLP RED task, no report), raises
+    SandboxError with the reason CAPE stated, on every endpoint read.
+  - A report is read whole, whatever its size: streamed to an unnamed
+    owner-only temporary file and parsed from there, never accumulated in
+    memory chunk by chunk. An error answer is read only as far as its message
+    quotes.
+  - Timeout raises SandboxTimeoutError.
+  - Missing httpx raises SandboxNotAvailableError at instantiation.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import time
+from pathlib import Path
+from typing import Any
+
+from malspark.core.logger import logger
+from malspark.loaders.sandbox_client import (
+    PERMANENT_SERVER_STATUSES,
+    SandboxError,
+    SandboxNotAvailableError,
+    SandboxTimeoutError,
+    SubmissionResult,
+)
+
+# How much of a response body an error message quotes.
+BODY_SHOWN = 200
+
+# The task states after which CAPE writes no report: its own failure states
+# (``lib/cuckoo/common/constants.py``: ``TASK_FAILED_ANALYSIS``,
+# ``TASK_FAILED_PROCESSING``, ``TASK_FAILED_REPORTING``, ``TASK_BANNED``) and
+# the two names an earlier instance answered with. Waiting on one of them only
+# burns the budget: the task will never reach ``reported``.
+FAILED_STATES: frozenset[str] = frozenset(
+    {"failed", "aborted", "failed_analysis", "failed_processing", "failed_reporting", "banned"}
+)
+
+
+class CAPEv2Client:
+    """Live CAPEv2 REST API sandbox client.
+
+    Usage:
+        client = CAPEv2Client(
+            base_url="http://cape2-host:8000",
+            api_token="your_api_token",
+        )
+        task_id = client.submit("/path/to/malware.exe")
+        status = client.wait_for_completion(task_id, timeout_seconds=600)
+        result = client.fetch_report(task_id)
+        logger.debug("Behavior data: %s", result.report.get("behavior"))
+
+    Args:
+        base_url:    CAPEv2 server URL (e.g. "http://localhost:8000").
+        api_token:   CAPEv2 REST API authentication token. May be empty
+                     for unauthenticated local instances.
+        timeout:     Default HTTP request timeout in seconds. Sized for the
+                     small JSON status/report calls.
+        upload_timeout: Deadline for the sample upload specifically, which is
+                     orders of magnitude larger than a status check. Never
+                     narrower than ``timeout`` — an operator who raised the
+                     global value meant it.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        api_token: Any = "",
+        timeout: int = 30,
+        upload_timeout: int = 300,
+    ) -> None:
+        try:
+            import httpx  # noqa: F401
+        except ImportError as exc:
+            raise SandboxNotAvailableError(
+                "httpx is required for CAPEv2Client. Install with: uv add httpx"
+            ) from exc
+
+        import httpx
+
+        if hasattr(api_token, "get_secret_value"):
+            token_value: str = api_token.get_secret_value()
+        else:
+            token_value = str(api_token or "")
+
+        self._base_url = base_url.rstrip("/")
+        self._timeout = timeout
+        # How a retried artefact fetch waits; a test hands in its own.
+        self._sleep = time.sleep
+        self._upload_timeout = max(int(upload_timeout), int(timeout))
+        self._headers: dict[str, str] = {}
+        if token_value:
+            self._headers["Authorization"] = f"Token {token_value}"
+
+        # Persistent HTTP client for connection reuse across polling cycles
+        self._http = httpx.Client(
+            base_url=self._base_url,
+            headers=self._headers,
+            timeout=self._timeout,
+        )
+
+    def submit(
+        self,
+        sample_path: str | Path,
+        *,
+        package: str | None = None,
+        platform: str | None = None,
+        machine: str | None = None,
+        tags: str | None = None,
+        options: str | None = None,
+        timeout: int | None = None,
+        extra_fields: dict[str, str] | None = None,
+    ) -> str:
+        """Submit a sample file to CAPEv2 and return the task ID.
+
+        POST /apiv2/tasks/create/file/
+
+        Every keyword is one of the form fields ``tasks/create/file`` accepts,
+        and each is sent only when it is set: an unset field is CAPE choosing
+        for itself, which is not the same request as an empty one.
+
+        Args:
+            sample_path: Local path to the sample binary.
+            package: CAPE analysis package, e.g. ``exe``, ``apk``, ``doc``.
+            platform: Guest platform to detonate on, e.g. ``windows``.
+            machine: A named guest, when the analysis needs that exact one.
+            tags: Comma-separated machine tags CAPE selects a guest by.
+            options: CAPE's own ``key=value,key=value`` option string.
+            timeout: Detonation budget in seconds, in the guest.
+            extra_fields: Any further form fields, sent verbatim.
+
+        Returns:
+            Task ID string.
+
+        Raises:
+            SandboxError: On HTTP or API error.
+        """
+        path = Path(sample_path)
+        if not path.exists():
+            raise SandboxError(f"Sample file not found: {path}")
+
+        form: dict[str, str] = {}
+        for name, value in (
+            ("package", package),
+            ("platform", platform),
+            ("machine", machine),
+            ("tags", tags),
+            ("options", options),
+            ("timeout", None if timeout is None else str(timeout)),
+        ):
+            if value:
+                form[name] = str(value)
+        for name, value in (extra_fields or {}).items():
+            if value:
+                form[str(name)] = str(value)
+
+        logger.info(
+            "CAPEv2Client: submitting '%s' to %s%s",
+            path.name,
+            self._base_url,
+            f" ({', '.join(f'{k}={v}' for k, v in sorted(form.items()))})" if form else "",
+        )
+        with open(path, "rb") as f:
+            try:
+                # Its own deadline. The client-wide ``timeout`` is sized for
+                # ``GET /apiv2/tasks/view/<id>/`` — a few hundred bytes of JSON
+                # — and a sample upload is orders of magnitude larger while
+                # competing with whatever the sandbox is already running. On
+                # 2026-08-07 that mismatch produced "Submission request failed:
+                # timed out" 35 s in, and the run silently lost its sandbox.
+                #
+                # Deliberately no retry, unlike ``wait_for_completion``: this
+                # POST is not idempotent, a request that timed out client-side
+                # may still have been accepted, and a blind retry would burn a
+                # second detonation slot on a one-VM instance.
+                response = self._http.post(
+                    "/apiv2/tasks/create/file/",
+                    data=form,
+                    files={"file": (path.name, f, "application/octet-stream")},
+                    timeout=self._upload_timeout,
+                )
+            except Exception as exc:
+                raise SandboxError(f"Submission request failed: {exc}") from exc
+
+        self._raise_for_status(response, "submit")
+        data = self._payload(response, "submit")
+
+        # Upstream CAPEv2 wraps the payload as
+        # ``{"error": false, "data": {"task_ids": [42]}, ...}``. Older
+        # versions returned flat ``{"task_id": 42}`` or ``{"task_ids": [...]}``;
+        # we accept either shape to stay compatible with both.
+        wrapped = data.get("data")
+        inner: dict[str, Any] = wrapped if isinstance(wrapped, dict) else {}
+        task_id = (
+            data.get("task_id")
+            or (data.get("task_ids") or [None])[0]
+            or inner.get("task_id")
+            or (inner.get("task_ids") or [None])[0]
+        )
+        if task_id is None:
+            raise SandboxError(f"Unexpected submit response: {data}")
+
+        logger.info("CAPEv2Client: task_id=%s assigned.", task_id)
+        return str(task_id)
+
+    def wait_for_completion(
+        self,
+        task_id: str,
+        timeout_seconds: int = 300,
+        poll_interval_seconds: int = 10,
+    ) -> str:
+        """Poll GET /apiv2/tasks/view/{task_id}/ until status is terminal.
+
+        Terminal statuses: "reported" and every state in ``FAILED_STATES``,
+        returned the moment the task reaches one. Anything else is waited on.
+
+        Args:
+            task_id:                Task ID from submit().
+            timeout_seconds:        Maximum wait time in seconds.
+            poll_interval_seconds:  Seconds between polls.
+
+        Returns:
+            Final task status string.
+
+        Raises:
+            SandboxTimeoutError: When timeout_seconds elapses.
+            SandboxError:        On a permanent API error (auth, unknown task),
+                                 CAPE's ``{"error": true}`` envelope included.
+        """
+        terminal = {"reported", *FAILED_STATES}
+        deadline = time.monotonic() + timeout_seconds
+
+        logger.info(
+            "CAPEv2Client: polling task %s (timeout=%ds, interval=%ds).",
+            task_id,
+            timeout_seconds,
+            poll_interval_seconds,
+        )
+
+        # A poll failure is not a task failure. This loop exists to wait out a
+        # busy sandbox, and the characteristic symptom of a busy CAPE — single
+        # VM here, detonations serialised — is a slow or refused API response.
+        # Re-raising on the first hiccup meant the retry loop died exactly when
+        # it was needed: on 2026-07-29 a 1200s wait ended after 127s with
+        # "Poll request failed: timed out", discarding ~18 minutes of budget
+        # and silently degrading the run to static-only. Transient errors are
+        # now absorbed and the deadline alone decides when to give up.
+        last_error: str | None = None
+        consecutive_errors = 0
+
+        while time.monotonic() < deadline:
+            transient: str | None = None
+            status = ""
+            try:
+                response = self._http.get(f"/apiv2/tasks/view/{task_id}/")
+                code = int(response.status_code)
+                if (code >= 500 and code not in PERMANENT_SERVER_STATUSES) or code == 429:
+                    # "Come back later" — a loaded CAPE, not a verdict.
+                    transient = f"HTTP {code}: {response.text[:120]}"
+                else:
+                    # Other 4xx are verdicts: a bad token or a deleted task
+                    # will still be bad in twenty minutes, so abort rather
+                    # than burn the budget; so are 501 and 505, a request the
+                    # server can never serve. Propagates past this handler.
+                    self._raise_for_status(response, "poll")
+                    # An unparsable or non-object body stays transient, as it
+                    # always was; a refusal CAPE states is a verdict.
+                    data = response.json()
+                    if not isinstance(data, dict):
+                        raise ValueError(f"a {type(data).__name__}, not a JSON object")
+                    self.raise_for_envelope(data, "poll")
+                    inner = data.get("data")
+                    status = str(
+                        (inner if isinstance(inner, dict) else {}).get("status", "unknown")
+                    )
+            except SandboxError:
+                raise
+            except Exception as exc:
+                # Transport-level: timeout, connection reset, unparsable body.
+                transient = f"{type(exc).__name__}: {exc}"
+
+            if transient is not None:
+                last_error = transient
+                consecutive_errors += 1
+                logger.warning(
+                    "CAPEv2Client: poll %d for task %s failed transiently (%s); retrying.",
+                    consecutive_errors,
+                    task_id,
+                    transient,
+                )
+                time.sleep(poll_interval_seconds)
+                continue
+
+            if consecutive_errors:
+                logger.info(
+                    "CAPEv2Client: task %s reachable again after %d failed poll(s).",
+                    task_id,
+                    consecutive_errors,
+                )
+                consecutive_errors = 0
+
+            logger.debug("CAPEv2Client: task %s status=%s.", task_id, status)
+
+            if status in terminal:
+                log = logger.warning if status in FAILED_STATES else logger.info
+                log("CAPEv2Client: task %s -> %s.", task_id, status)
+                return str(status)
+
+            time.sleep(poll_interval_seconds)
+
+        suffix = f" Last poll error: {last_error}" if last_error else ""
+        raise SandboxTimeoutError(
+            f"Task {task_id} did not complete within {timeout_seconds}s.{suffix}"
+        )
+
+    def fetch_report(self, task_id: str) -> SubmissionResult:
+        """Fetch the full JSON report for a completed task.
+
+        GET /apiv2/tasks/get/report/{task_id}/
+
+        Note: the upstream CAPEv2 route is ``/apiv2/tasks/get/report/<id>/``
+        (see ``external/CAPEv2/web/apiv2/urls.py``). Earlier versions of
+        this client used ``/apiv2/tasks/report/<id>/`` which always 404'd
+        against a real instance.
+
+        Args:
+            task_id: Task ID from submit().
+
+        Returns:
+            SubmissionResult with the report dict.
+
+        Raises:
+            SandboxError: When the report is unavailable, CAPE's
+                ``{"error": true}`` envelope included: a refused report is a
+                failed fetch with its reason, never a report of nothing.
+        """
+        logger.info("CAPEv2Client: fetching report for task %s.", task_id)
+        # Read whole, as it always was, but streamed to disk first: the
+        # download is never held in memory, and the parse reads the file.
+        try:
+            with self._http.stream("GET", f"/apiv2/tasks/get/report/{task_id}/") as response:
+                if response.status_code >= 400:
+                    # Only as much of the error body as the error quotes: an
+                    # error body is no more bounded than a report.
+                    said = self._head_of(response)
+                    response.close()
+                    raise SandboxError(
+                        f"CAPEv2 fetch_report failed (HTTP {response.status_code}): {said}"
+                    )
+                report: dict[str, Any] = self._spooled_payload(response, "fetch_report")
+        except SandboxError:
+            raise
+        except Exception as exc:
+            raise SandboxError(f"Report request failed: {exc}") from exc
+
+        # A real CAPEv2 report nests sample identity under target.file.* —
+        # target itself carries only "category" and "file" (empirically
+        # confirmed against all 97 reports under data/cape_reports/ on
+        # 2026-09-04: none has a flat target.sha256 or target.name, all 97
+        # have target.file.sha256 and target.file.name). Reading only the flat
+        # shape silently produced an empty sample_sha256/sample_name for every
+        # real report — a wrong sha256 here is a wrong sample identity, not a
+        # cosmetic gap. The flat read stays as a fallback for a report that
+        # genuinely carries it flat (e.g. the simplified fixtures under
+        # data/samples/dynamic/).
+        target = report.get("target", {})
+        file_block = target.get("file") if isinstance(target.get("file"), dict) else {}
+        return SubmissionResult(
+            task_id=task_id,
+            sample_sha256=file_block.get("sha256") or target.get("sha256", ""),
+            sample_name=file_block.get("name") or target.get("name", ""),
+            status="reported",
+            report=report,
+        )
+
+    def fetch_pcap(
+        self, task_id: str, dest_dir: str | Path, poll_interval_seconds: float = 10
+    ) -> str | None:
+        """Download the task's raw PCAP into ``dest_dir``; return the local path.
+
+        ``GET /apiv2/tasks/get/pcap/{task_id}/`` streams the libpcap capture of
+        the detonation's traffic. The network analyst's local PCAP MCP
+        (read_pcap_summary / extract_dns / extract_http) then deep-inspects it
+        for beaconing / tunnelling that the structured ``network`` block can't
+        express. Returns None when the task has no PCAP (404, or CAPE's own
+        refusal envelope). A transient failure (5xx, 429, a dropped transport)
+        is asked again, ``poll_interval_seconds`` apart and backed off as the
+        status poll is; one that lasts, any other error, or a payload too small
+        to be a capture raises ``ArtefactFetchFailed`` naming why — the analyst
+        then works from the structured IOCs alone, and the run says so.
+        """
+        from malspark.providers.errors import PACKET_CAPTURE
+        from malspark.providers.sandbox.triage import fetch_artefact, stop_if_cancelled
+
+        stop_if_cancelled(PACKET_CAPTURE)
+        dest = Path(dest_dir)
+        dest.mkdir(parents=True, exist_ok=True)
+        out = dest / f"cape_task_{task_id}.pcap"
+
+        def keep(resp: Any) -> bool:
+            # A refusal comes back as CAPE's JSON envelope with HTTP 200;
+            # written to disk it would pass the size floor as a capture.
+            if "json" in str(resp.headers.get("content-type") or "").lower():
+                logger.warning(
+                    "CAPEv2Client: no PCAP for task %s: %s",
+                    task_id,
+                    self._refusal_of(resp.read(), "fetch_pcap"),
+                )
+                return False
+            self._write_capture(resp, out)
+            return True
+
+        # Whatever is left of a failed or empty fetch is removed with the
+        # answer rather than waiting for a sweep (``fetch_artefact``).
+        path = fetch_artefact(
+            lambda: self._http.stream("GET", f"/apiv2/tasks/get/pcap/{task_id}/", timeout=120),
+            keep,
+            out,
+            artefact=PACKET_CAPTURE,
+            what=f"CAPEv2Client: task {task_id}",
+            sleep=self._sleep,
+            interval=float(poll_interval_seconds),
+            client=self._http,
+        )
+        if path is not None:
+            logger.info(
+                "CAPEv2Client: PCAP for task %s -> %s (%d bytes).",
+                task_id,
+                out,
+                out.stat().st_size,
+            )
+        return path
+
+    @staticmethod
+    def _write_capture(resp: Any, out: Path) -> None:
+        """Stream a capture to ``out``, owner-only from the first byte.
+
+        0o600 with ``O_NOFOLLOW``: a capture is the whole of a detonation's
+        traffic, and writing it at the process umask leaves it readable for as
+        long as the download takes. Streamed to disk, never held in memory; a
+        partial file is removed by the caller.
+        """
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW
+        with os.fdopen(os.open(out, flags, 0o600), "wb") as f:
+            for chunk in resp.iter_bytes(65536):
+                f.write(chunk)
+
+    def close(self) -> None:
+        """Close the underlying HTTP client connection pool."""
+        self._http.close()
+
+    def __enter__(self) -> CAPEv2Client:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _raise_for_status(response: Any, operation: str) -> None:
+        """Raise SandboxError for non-2xx responses."""
+        if response.status_code >= 400:
+            raise SandboxError(
+                f"CAPEv2 {operation} failed (HTTP {response.status_code}): "
+                f"{response.text[:BODY_SHOWN]}"
+            )
+
+    @classmethod
+    def _payload(cls, response: Any, operation: str) -> dict[str, Any]:
+        """The response's JSON object; SandboxError where CAPE refused or sent no object."""
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise SandboxError(f"CAPEv2 {operation} answered no JSON: {exc}") from exc
+        cls.raise_for_envelope(data, operation)
+        return data  # type: ignore[no-any-return]
+
+    @staticmethod
+    def _head_of(response: Any) -> str:
+        """The first ``BODY_SHOWN`` characters of a streamed body, the rest never read."""
+        head = bytearray()
+        for chunk in response.iter_bytes(BODY_SHOWN):
+            head.extend(chunk)
+            if len(head) >= BODY_SHOWN:
+                break
+        return bytes(head[:BODY_SHOWN]).decode("utf-8", errors="replace")
+
+    @classmethod
+    def _spooled_payload(cls, response: Any, operation: str) -> dict[str, Any]:
+        """A streamed JSON body, written to a temporary file and parsed from it.
+
+        The file is unnamed and owner-only (``tempfile.TemporaryFile``: created
+        0o600 with ``O_EXCL`` and ``O_NOFOLLOW``, gone when closed), so no
+        other process reads a report while it downloads and nothing is left
+        behind. No size limit applies: a report is read whole.
+        """
+        import tempfile
+
+        with tempfile.TemporaryFile() as spool:
+            for chunk in response.iter_bytes(65536):
+                spool.write(chunk)
+            spool.seek(0)
+            return cls._body_payload(spool.read(), operation)
+
+    @classmethod
+    def _body_payload(cls, body: bytes, operation: str) -> dict[str, Any]:
+        """``_payload`` for a body already read: its JSON object, else a SandboxError."""
+        from malspark.core.safe_json import loads
+
+        try:
+            # Read at any nesting depth (``core.safe_json``).
+            data = loads(body)
+        except ValueError as exc:
+            raise SandboxError(f"CAPEv2 {operation} answered no JSON: {exc}") from exc
+        cls.raise_for_envelope(data, operation)
+        return data  # type: ignore[no-any-return]
+
+    @classmethod
+    def _refusal_of(cls, body: bytes, operation: str) -> str:
+        """What a JSON body sent where bytes were asked for says, as one reason."""
+        try:
+            cls.raise_for_envelope(json.loads(body), operation)
+        except SandboxError as exc:
+            return str(exc)
+        except ValueError:
+            return f"CAPEv2 {operation} answered an unparsable JSON body"
+        return f"CAPEv2 {operation} answered a JSON body instead of the file"
+
+    @staticmethod
+    def raise_for_envelope(data: Any, operation: str) -> None:
+        """Raise SandboxError for CAPE's refusal envelope or a body that is no JSON object.
+
+        CAPE answers a refusal with HTTP 200 and ``{"error": true,
+        "error_value": "..."}``; the reason it states goes into the error.
+        """
+        if not isinstance(data, dict):
+            raise SandboxError(
+                f"CAPEv2 {operation} answered a {type(data).__name__}, not a JSON object"
+            )
+        if not data.get("error"):
+            return
+        stated = data.get("error_value") or data.get("message") or data.get("data")
+        reason = str(stated)[:BODY_SHOWN] if stated else "no reason stated"
+        raise SandboxError(f"CAPEv2 {operation} refused: {reason}")

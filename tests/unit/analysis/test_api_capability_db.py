@@ -26,12 +26,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from maljan.analysis.api_capability_db import (
+from malspark.analysis.api_capability_db import (
     load_api_attck_map,
     load_api_behaviour_db,
     reset_cache,
 )
-from maljan.core.paths import resolve_data
+from malspark.core.paths import resolve_data
 
 _BEHAVIOUR = str(resolve_data("data/api_behaviour_map_v1.json"))
 _ATTCK = str(resolve_data("data/api_attck_map_v1.json"))
@@ -121,7 +121,7 @@ class TestReadingPermissionsIsNotModifyingThem:
     """The asymmetry added on 2026-07-28, and the reason it is an asymmetry.
 
     A real sample — a signed security product — imported fourteen ACL/SID
-    functions and Maljan categorised none of them. Wiring them all in at one
+    functions and Malspark categorised none of them. Wiring them all in at one
     tier would have been the easy fix and the wrong one: ``GetFileSecurityW``
     is what every security-aware program calls, while ``SetFileSecurityW`` is
     someone rewriting a DACL. Filed apart on purpose, and this class is what
@@ -312,7 +312,7 @@ class TestAnAssociationCarriesWhatItWasMeasuredAt:
         assert rule.measured.corpora()["benign"]
 
     def test_an_association_that_was_not_measured_says_nothing_rather_than_zero(self) -> None:
-        from maljan.analysis.api_capability_db import _measured
+        from malspark.analysis.api_capability_db import _measured
 
         assert _measured(None) is None
         assert _measured({"seen_on_benign_percent": 0.4}) is None
@@ -345,7 +345,7 @@ class TestTheFloorIsReadStrictlyRatherThanCoerced:
         return row
 
     def test_a_floor_that_is_not_a_whole_number_of_names_drops_the_rule(self) -> None:
-        from maljan.analysis.api_capability_db import _parse_rule
+        from malspark.analysis.api_capability_db import _parse_rule
 
         assert _parse_rule(self._row()) is not None
         for bad in (0, -1, True, 1.4, "2", None):
@@ -355,13 +355,13 @@ class TestTheFloorIsReadStrictlyRatherThanCoerced:
         """JSON has one number type. A catalogue round-tripped through a
         serialiser that emits ``2.0`` would otherwise lose the rule, and the
         real guard here is structural rather than a matter of spelling."""
-        from maljan.analysis.api_capability_db import _parse_rule
+        from malspark.analysis.api_capability_db import _parse_rule
 
         rule = _parse_rule(self._row(min_apis=2.0))
         assert rule is not None and rule.min_apis == 2
 
     def test_one_name_is_a_floor_only_for_a_rule_that_names_one(self) -> None:
-        from maljan.analysis.api_capability_db import _parse_rule
+        from malspark.analysis.api_capability_db import _parse_rule
 
         assert _parse_rule(self._row(min_apis=1)) is None
         alone = _parse_rule(self._row(min_apis=1, apis=["IcmpSendEcho"]))

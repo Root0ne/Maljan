@@ -20,7 +20,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.services import settings_service as svc
-from maljan.core.tool_declarations import (
+from malspark.core.tool_declarations import (
     CHANGES_FORM,
     CHANGES_MARK,
     refused_names_message,
@@ -106,7 +106,7 @@ def test_a_patch_of_a_provider_leaf_with_a_refused_name_is_a_422_naming_the_leaf
     _refused_on_the_leaf(status, body, names, db)
 
 
-@pytest.mark.parametrize("fmt", ["maljan-settings/2", "maljan-settings/1"])
+@pytest.mark.parametrize("fmt", ["malspark-settings/2", "malspark-settings/1"])
 @pytest.mark.parametrize(("value", "names"), REFUSED)
 def test_an_import_of_a_provider_leaf_with_a_refused_name_is_a_422_naming_the_leaf(
     fmt: str, value: dict[str, Any], names: list[str]
@@ -168,7 +168,7 @@ def test_the_mark_always_wins_over_an_entry_under_its_key() -> None:
 
 def test_an_empty_refused_name_is_shown_visibly() -> None:
     assert repr("") in refused_names_message([""])
-    from maljan.core.tool_declarations import loggable_names
+    from malspark.core.tool_declarations import loggable_names
 
     assert loggable_names(["", "a"]) == '"", a'
 
@@ -177,7 +177,7 @@ def test_an_empty_refused_name_is_shown_visibly() -> None:
 # ``null`` entry, so the names of the map as sent are checked first, on the
 # server map as on a provider leaf.
 CUSTOM = "own_tools"
-SAVE_PATHS = ["patch", "maljan-settings/2", "maljan-settings/1"]
+SAVE_PATHS = ["patch", "malspark-settings/2", "malspark-settings/1"]
 
 
 def _full_entry(server: str, tool_facts: Any) -> dict[str, Any]:

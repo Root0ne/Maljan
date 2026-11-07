@@ -50,7 +50,7 @@ function processGroupTitle(group: ProcessGroup): string {
 /* D10: detect anti-emulation / anti-VM / anti-debug signatures so the empty
  * process-tree state can explain why the sandbox traced nothing. Mirrors the
  * regex used by the worker's degradation_reasons builder
- * (src/maljan/pipeline/nodes.py), so the banner copy and this hint stay in
+ * (src/malspark/pipeline/nodes.py), so the banner copy and this hint stay in
  * lockstep. */
 const ANTI_EMU_RE =
   /emulation|anti[\s_-]?vm|anti[\s_-]?debug|sandbox\s*detect|qemu|virtualbox|vmware|hyper[\s_-]?v/i;

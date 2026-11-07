@@ -4,7 +4,7 @@ It speaks the Anthropic Messages API (``POST /v1/messages``, the Models API's
 ``GET /v1/models/{id}``) and the OpenAI-compatible chat completions API
 (``POST /v1/chat/completions``, ``GET /v1/models``), streamed or whole, and
 answers every request from a script (``scripts.rehearsal.roles``) that reads
-the request's own role markers and tool list. Maljan reaches it only through
+the request's own role markers and tool list. Malspark reaches it only through
 its own settings: the OpenAI base URL, or the Anthropic base URL.
 
 Before a request is answered it is held to the rules the real API holds it to
@@ -70,7 +70,7 @@ def check_bind_host(host: str, allow_private: bool = False) -> str:
     """
     import ipaddress
 
-    from maljan.core.config import _is_docker_host, _is_loopback
+    from malspark.core.config import _is_docker_host, _is_loopback
 
     if host == "localhost" or (_is_loopback(host) and _is_ipv4(host)):
         return host

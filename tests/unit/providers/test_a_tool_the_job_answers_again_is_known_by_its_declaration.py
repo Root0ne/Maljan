@@ -24,15 +24,15 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.mcp_client import MCPLangChainToolkit
-from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
-from maljan.agents.tool_pinning import (
+from malspark.agents.mcp_client import MCPLangChainToolkit
+from malspark.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+from malspark.agents.tool_pinning import (
     SERVER_HINTS_METADATA_KEY,
     SERVER_METADATA_KEY,
     answers_again,
     answers_the_job_again,
 )
-from maljan.schemas.evidence import EvidenceCounter, ServerChanges
+from malspark.schemas.evidence import EvidenceCounter, ServerChanges
 
 BOTH = {"readOnlyHint": True, "idempotentHint": True}
 
@@ -135,19 +135,19 @@ class TestADeclarationMayOnlyVeto:
     def test_a_declaration_that_states_not_read_only_vetoes_both_hints(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.tool_declarations import ToolFacts
+        from malspark.core.tool_declarations import ToolFacts
 
         stated = ToolFacts.model_validate({"kind": "indicator_report", "read_only": False})
-        monkeypatch.setattr("maljan.agents.tool_pinning.declared_facts_of", lambda _t: stated)
+        monkeypatch.setattr("malspark.agents.tool_pinning.declared_facts_of", lambda _t: stated)
         assert not answers_the_job_again(_server_tool("undeclared-server", "lookup", BOTH))
 
     def test_a_declaration_silent_on_read_only_leaves_the_hints_to_decide(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from maljan.core.tool_declarations import ToolFacts
+        from malspark.core.tool_declarations import ToolFacts
 
         silent = ToolFacts.model_validate({"kind": "indicator_report"})
-        monkeypatch.setattr("maljan.agents.tool_pinning.declared_facts_of", lambda _t: silent)
+        monkeypatch.setattr("malspark.agents.tool_pinning.declared_facts_of", lambda _t: silent)
         assert answers_the_job_again(_server_tool("undeclared-server", "lookup", BOTH))
 
     @pytest.mark.parametrize(
@@ -170,25 +170,25 @@ class TestADeclarationMayOnlyVeto:
 
 class TestTheMovingKinds:
     def test_the_sandbox_status_kind_moves(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.core.tool_declarations import ToolFacts
+        from malspark.core.tool_declarations import ToolFacts
 
         status = ToolFacts.model_validate({"kind": "sandbox_status"})
-        monkeypatch.setattr("maljan.agents.tool_pinning.declared_facts_of", lambda _t: status)
+        monkeypatch.setattr("malspark.agents.tool_pinning.declared_facts_of", lambda _t: status)
         assert not answers_the_job_again(_server_tool("undeclared-server", "lookup", BOTH))
 
 
 class TestWhatAServerHandleSays:
     def _registry_handle(self, tools: list[Any]) -> Any:
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.servers import ServerHandle
 
         handle = ServerHandle("quietserver", MCPServerConfig())
         handle.tools = lambda: list(tools)  # type: ignore[method-assign]
         return handle
 
     def _merged(self, handle: Any) -> list[Any]:
-        from maljan.core.config import Settings
-        from maljan.providers.servers import ServerRegistry
+        from malspark.core.config import Settings
+        from malspark.providers.servers import ServerRegistry
 
         out: list[Any] = []
         ServerRegistry(Settings(_env_file=None)).merge_tools(
@@ -197,7 +197,7 @@ class TestWhatAServerHandleSays:
         return out
 
     def _tool(self, name: str, *, read_only: bool) -> Any:
-        from maljan.agents.tool_pinning import READ_ONLY_METADATA_KEY
+        from malspark.agents.tool_pinning import READ_ONLY_METADATA_KEY
 
         return StructuredTool.from_function(
             func=lambda: "",
@@ -209,20 +209,20 @@ class TestWhatAServerHandleSays:
         )
 
     def test_each_tool_carries_its_handle_s_token(self) -> None:
-        from maljan.agents.tool_pinning import server_handle_of
+        from malspark.agents.tool_pinning import server_handle_of
 
         handle = self._registry_handle([self._tool("a", read_only=True)])
         (tool,) = self._merged(handle)
         assert server_handle_of(tool) == f"quietserver#{id(handle)}"
 
     def test_a_server_whose_every_tool_is_read_only_is_quiet(self) -> None:
-        from maljan.agents.tool_pinning import server_changes_nothing
+        from malspark.agents.tool_pinning import server_changes_nothing
 
         tools = [self._tool("a", read_only=True), self._tool("b", read_only=True)]
         assert all(server_changes_nothing(t) for t in self._merged(self._registry_handle(tools)))
 
     def test_one_tool_that_may_change_it_makes_the_server_not_quiet(self) -> None:
-        from maljan.agents.tool_pinning import server_changes_nothing
+        from malspark.agents.tool_pinning import server_changes_nothing
 
         tools = [self._tool("a", read_only=True), self._tool("rename", read_only=False)]
         merged = self._merged(self._registry_handle(tools))
@@ -231,9 +231,9 @@ class TestWhatAServerHandleSays:
 
 class TestAProviderDrivenServer:
     def test_the_provider_s_handle_counts_its_attach_under_its_declared_source(self) -> None:
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.servers import ServerHandle
-        from maljan.providers.static.generic_mcp import GenericMCPStaticProvider
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.servers import ServerHandle
+        from malspark.providers.static.generic_mcp import GenericMCPStaticProvider
 
         provider = GenericMCPStaticProvider(ServerHandle("decomp", MCPServerConfig()))
         changes = ServerChanges()
@@ -247,8 +247,8 @@ class TestAProviderDrivenServer:
         assert before[0] != after[0] and before[1] != after[1]
 
     def test_the_container_gives_its_static_provider_the_job_s_count(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.core.container import ServiceContainer
+        from malspark.core.config import Settings
+        from malspark.core.container import ServiceContainer
 
         cfg = Settings(_env_file=None)
         cfg.static.provider = "generic_mcp"  # type: ignore[assignment]
@@ -259,8 +259,8 @@ class TestAProviderDrivenServer:
 
 class TestAnAttachIsAChange:
     def _handle(self, changes: ServerChanges | None) -> Any:
-        from maljan.core.config import MCPServerConfig
-        from maljan.providers.servers import ServerHandle
+        from malspark.core.config import MCPServerConfig
+        from malspark.providers.servers import ServerHandle
 
         handle = ServerHandle("reputation", MCPServerConfig())
         handle.server_changes = changes
@@ -299,8 +299,8 @@ class TestAnAttachIsAChange:
         self._handle(None)._finish_open_sync(SimpleNamespace(get_tools=lambda: []))
 
     def test_the_registry_gives_every_handle_and_replica_the_job_s_count(self) -> None:
-        from maljan.core.config import Settings
-        from maljan.providers.servers import ServerRegistry
+        from malspark.core.config import Settings
+        from malspark.providers.servers import ServerRegistry
 
         changes = EvidenceCounter().changes
         registry = ServerRegistry(Settings(_env_file=None), server_changes=changes)
@@ -315,7 +315,7 @@ class TestAnAttachIsAChange:
 
 class TestAProviderWalkIsAChange:
     def test_the_walk_is_counted_on_its_tools_source_as_it_starts_and_ends(self) -> None:
-        from maljan.agents.static_analyst import server_changed_by
+        from malspark.agents.static_analyst import server_changed_by
 
         counter = EvidenceCounter()
         agent = SimpleNamespace(evidence_counter=counter)
@@ -329,7 +329,7 @@ class TestAProviderWalkIsAChange:
         assert before != started != counter.changes.mark("provider:ghidra")
 
     def test_an_agent_with_no_counter_counts_nothing(self) -> None:
-        from maljan.agents.static_analyst import server_changed_by
+        from malspark.agents.static_analyst import server_changed_by
 
         agent = SimpleNamespace(evidence_counter=None)
         provider = SimpleNamespace(id="ghidra", declaration_source="")

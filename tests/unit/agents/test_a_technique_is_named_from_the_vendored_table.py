@@ -11,12 +11,12 @@ always built.
 
 from __future__ import annotations
 
-from maljan.agents.judge_agent import technique_question_head, technique_question_text
-from maljan.agents.judge_postprocess import postprocess_judge_bundle
-from maljan.extractors.capability_matrix import TechniqueQuestion
-from maljan.memory.attck_loader import technique_entry, technique_label
-from maljan.pipeline.evidence_summary import summarise
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.agents.judge_agent import technique_question_head, technique_question_text
+from malspark.agents.judge_postprocess import postprocess_judge_bundle
+from malspark.extractors.capability_matrix import TechniqueQuestion
+from malspark.memory.attck_loader import technique_entry, technique_label
+from malspark.pipeline.evidence_summary import summarise
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 
 
 def _name(tid: str) -> str:

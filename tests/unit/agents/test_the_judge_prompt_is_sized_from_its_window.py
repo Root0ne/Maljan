@@ -16,13 +16,13 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     PROMPT_SHORTENED_NOTICE,
     JudgeAgent,
     fit_prompt_parts,
     verdict_reports_text,
 )
-from maljan.utils.marked_cut import CUT_MARK
+from malspark.utils.marked_cut import CUT_MARK
 
 LONG_REPORT = "The loader decrypts its payload. " * 200 + "CONCLUSION: it injects into explorer."
 SUMMARY = "EVIDENCE SUMMARY\n" + "\n".join(f"T{1000 + i}: static (0.7)" for i in range(300))
@@ -52,7 +52,7 @@ def _judge(seen: list[str], window_tokens: int | None) -> JudgeAgent:
         async def ainvoke(self, messages: Any, **_: Any) -> Any:
             seen.append("\n".join(str(getattr(m, "content", m)) for m in messages))
             return MagicMock(
-                content='{"type": "bundle", "objects": [], "x_maljan_assessment": '
+                content='{"type": "bundle", "objects": [], "x_malspark_assessment": '
                 '{"severity": {"rating": "Low", "rationale": "thin"}, "confidence": 0.2}}'
             )
 
@@ -147,13 +147,13 @@ class TestACutMemoryBlockIsClosed:
     END = "\n=== END LONG-TERM MEMORY ==="
 
     def _cut(self, width: int) -> str:
-        from maljan.agents.judge_agent import closed_memory_cut
+        from malspark.agents.judge_agent import closed_memory_cut
 
         fitted, _notice = fit_prompt_parts({"long-term memory": self.BLOCK}, width)
         return closed_memory_cut(fitted["long-term memory"], self.BLOCK)
 
     def test_an_uncut_block_is_unchanged(self) -> None:
-        from maljan.agents.judge_agent import closed_memory_cut
+        from malspark.agents.judge_agent import closed_memory_cut
 
         assert closed_memory_cut(self.BLOCK, self.BLOCK) == self.BLOCK
 
@@ -161,20 +161,20 @@ class TestACutMemoryBlockIsClosed:
         assert self._cut(200).endswith('"' + CUT_MARK + self.END)
 
     def test_a_cut_after_a_closed_quote_adds_only_the_end_line(self) -> None:
-        from maljan.agents.judge_agent import closed_memory_cut
+        from malspark.agents.judge_agent import closed_memory_cut
 
         shown = self.BLOCK.split("\n  Behavioral")[0] + CUT_MARK
         assert closed_memory_cut(shown, self.BLOCK) == shown + self.END
 
     def test_an_escaped_quote_does_not_close_the_value(self) -> None:
-        from maljan.agents.judge_agent import closed_memory_cut
+        from malspark.agents.judge_agent import closed_memory_cut
 
         head = '=== LONG-TERM MEMORY: x ===\n  Behavioral summary: "says \\"hi'
         whole = head + 'more"\n'
         assert closed_memory_cut(head + CUT_MARK, whole) == head + '"' + CUT_MARK + self.END
 
     def test_a_lone_backslash_the_cut_left_is_not_left_escaping_the_quote(self) -> None:
-        from maljan.agents.judge_agent import closed_memory_cut
+        from malspark.agents.judge_agent import closed_memory_cut
 
         head = '=== LONG-TERM MEMORY: x ===\n  Behavioral summary: "abc'
         whole = head + 'def"\n'

@@ -9,7 +9,7 @@
  * module, and a sort asks for the rank, never the label.
  *
  * The rungs are the judge's five words (`SEVERITY_RATINGS` in
- * `src/maljan/schemas/judgement.py`). A word is read without regard to case,
+ * `src/malspark/schemas/judgement.py`). A word is read without regard to case,
  * because the rule-match rows spell them in lower case. A word that is not a
  * rung has no rank and sorts below Informational rather than being placed by
  * guess; its colour is Informational's, and its own word is still what is
@@ -130,7 +130,7 @@ export interface SignatureScale {
 }
 
 /** Where a run summary records the signature scale its sandbox provider
- *  declared (`SIGNATURE_SCALE_KEY` in `src/maljan/core/report_formats.py`). */
+ *  declared (`SIGNATURE_SCALE_KEY` in `src/malspark/core/report_formats.py`). */
 export const SIGNATURE_SCALE_KEY = "sandbox_signature_scale";
 
 /**

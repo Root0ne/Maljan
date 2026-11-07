@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.providers import sandbox_tools
+from malspark.providers import sandbox_tools
 
 REPORT: dict[str, Any] = {
     "target": {"sha256": "a" * 64, "name": "invoice.exe"},
@@ -400,7 +400,7 @@ class TestApiNameTables:
 
     @staticmethod
     def _exported() -> set[str]:
-        from maljan.tools.api_hashes import load_export_names
+        from malspark.tools.api_hashes import load_export_names
 
         names: set[str] = set()
         stack: list[Any] = [load_export_names()]
@@ -592,7 +592,7 @@ class TestNoReport:
             assert call() == {"error": "no sandbox report for this job", "tool": "sandbox"}
 
     def test_the_mock_s_stand_in_is_answered_as_no_sandbox_run(self) -> None:
-        from maljan.pipeline.sandbox_status import sandbox_status
+        from malspark.pipeline.sandbox_status import sandbox_status
 
         stand_in = {"synthetic": True, "behavior": {"processes": []}, "signatures": []}
         statement = sandbox_status(stand_in).statement
@@ -635,7 +635,7 @@ class TestToolSet:
         assert processes.invoke({})["error"] == "no sandbox report for this job"
 
     def test_a_normalised_report_model_is_rendered_to_the_shape_the_tools_read(self) -> None:
-        from maljan.schemas.sandbox_report import SandboxReport
+        from malspark.schemas.sandbox_report import SandboxReport
 
         report = SandboxReport(provider="triage", source_format="triage")
         tools = sandbox_tools.sandbox_tools(_Container(report))

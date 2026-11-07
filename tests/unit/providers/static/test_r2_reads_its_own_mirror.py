@@ -23,11 +23,11 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.agents.tool_pinning import pin_paths
-from maljan.loaders.binary_chunker import ChunkStrategy, TextChunk
-from maljan.pipeline.nodes import _augment_static_chunks_with_path
-from maljan.providers.static import r2
-from maljan.tools.errors import error_parts
+from malspark.agents.tool_pinning import pin_paths
+from malspark.loaders.binary_chunker import ChunkStrategy, TextChunk
+from malspark.pipeline.nodes import _augment_static_chunks_with_path
+from malspark.providers.static import r2
+from malspark.tools.errors import error_parts
 
 SHA = "ab" * 32
 MIRROR = f"/srv/samples/r2-work/{SHA}.exe"
@@ -49,7 +49,7 @@ def _open_tool(reply: Any, seen: list[str]) -> StructuredTool:
         description="Open a file",
         args_schema=_OpenArgs,
         infer_schema=False,
-        metadata={"maljan_server": "r2"},
+        metadata={"malspark_server": "r2"},
     )
 
 

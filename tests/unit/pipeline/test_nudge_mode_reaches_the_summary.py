@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import asyncio
 
-from maljan.analysis.run_summary import RunSummaryBuilder
-from maljan.pipeline.nodes import make_revision_node, make_stage_agent_node
-from maljan.schemas.evidence import EvidenceCounter
+from malspark.analysis.run_summary import RunSummaryBuilder
+from malspark.pipeline.nodes import make_revision_node, make_stage_agent_node
+from malspark.schemas.evidence import EvidenceCounter
 from tests.stages import ANALYSIS_STAGE
 from tests.unit.pipeline.test_evidence_ledger_channel import (
     _analysis_state,

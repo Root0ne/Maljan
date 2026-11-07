@@ -13,14 +13,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.pipeline.validation import (
+from malspark.pipeline.validation import (
     FLOW_VOICE_CODE,
     KEPT_WITH_A_FINDING,
     PERSISTENCE_NOT_OBSERVED_CODE,
     persistence_not_observed_violations,
 )
-from maljan.reporting.evidence_bundles import sandbox_saw_no_persistence
-from maljan.reporting.models import (
+from malspark.reporting.evidence_bundles import sandbox_saw_no_persistence
+from malspark.reporting.models import (
     DynamicBehavior,
     FileHashes,
     MalwareReport,

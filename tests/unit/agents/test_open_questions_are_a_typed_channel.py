@@ -1,6 +1,6 @@
 """What an analyst could not establish travels as typed records, never as an absence.
 
-An analyst may list open questions in its ``maljan-findings`` block: the
+An analyst may list open questions in its ``malspark-findings`` block: the
 question, why it stayed open, and what would answer it. They are read onto its
 ISR, kept through a chunk merge, a retry merge and a delegation, and shown in
 its summary to whoever reads it next. An ISR without one serialises and
@@ -15,8 +15,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from maljan.agents.findings_block import parse_findings_block
-from maljan.schemas.isr_models import (
+from malspark.agents.findings_block import parse_findings_block
+from malspark.schemas.isr_models import (
     OPEN_QUESTION_REASONS,
     AgentISR,
     ClaimEvidence,
@@ -30,7 +30,7 @@ CONFIDENCE: 0.8
 TECHNIQUE: T1055
 ---
 
-```maljan-findings
+```malspark-findings
 {"open_questions": [
   {"question": "Which process receives the injected code",
    "why_open": "needs_sandbox_run", "would_answer": "a sandbox run",
@@ -59,7 +59,7 @@ class TestTheBlockCarriesThem:
         ]
         assert block.open_questions[1].tool_kind == "decompile"
         assert block.dropped == 1
-        assert "maljan-findings" not in block.prose
+        assert "malspark-findings" not in block.prose
         assert bool(block)
 
     def test_a_block_cut_before_its_closing_fence_still_carries_them(self) -> None:
@@ -160,7 +160,7 @@ class _Stub:
 
     @staticmethod
     def make() -> object:
-        from maljan.agents.base_agent import BaseAnalyst
+        from malspark.agents.base_agent import BaseAnalyst
 
         class _Analyst(BaseAnalyst):
             def analyze(self, data: str) -> str:  # pragma: no cover - unused
@@ -180,14 +180,14 @@ class TestTheAnalystDrainsThem:
         isr = agent._drain_findings(AgentISR(agent_id="static", domain="static"))  # type: ignore[attr-defined]
         second = agent._drain_findings(AgentISR(agent_id="static", domain="static"))  # type: ignore[attr-defined]
 
-        assert "maljan-findings" not in prose
+        assert "malspark-findings" not in prose
         assert len(isr.open_questions) == 3
         assert second.open_questions == []
 
     def test_a_revision_keeps_the_questions_its_answer_wrote(self) -> None:
         from unittest.mock import MagicMock
 
-        from maljan.agents.static_analyst import StaticAnalyst
+        from malspark.agents.static_analyst import StaticAnalyst
 
         class _LLM:
             def invoke(self, *_a: object, **_k: object) -> object:
@@ -211,7 +211,7 @@ class TestTheAnalystDrainsThem:
 
 class TestMergesKeepThem:
     def test_a_chunk_merge_keeps_each_question_once(self) -> None:
-        from maljan.analysis.chunk_merger import merge_chunk_isrs
+        from malspark.analysis.chunk_merger import merge_chunk_isrs
 
         one = AgentISR(agent_id="static", domain="static", open_questions=[_question()])
         two = AgentISR(
@@ -228,8 +228,8 @@ class TestMergesKeepThem:
         ]
 
     def test_a_retry_merge_keeps_the_answer_s_and_adds_the_retry_s_new_ones(self) -> None:
-        from maljan.agents.base_agent import read_claim_blocks
-        from maljan.pipeline.retry_merge import merge_retry
+        from malspark.agents.base_agent import read_claim_blocks
+        from malspark.pipeline.retry_merge import merge_retry
 
         def _isr(text: str, questions: list[OpenQuestion]) -> AgentISR:
             read = read_claim_blocks(text)
@@ -261,7 +261,7 @@ class TestMergesKeepThem:
 
 class TestADelegationHandsThemToTheLead:
     def test_the_lead_s_buffer_gets_them_marked_with_the_specialist(self) -> None:
-        from maljan.agents.delegation import _hand_over_the_structured_channel
+        from malspark.agents.delegation import _hand_over_the_structured_channel
 
         caller = SimpleNamespace(name="lead", _findings_buffer=[], _artifacts_buffer=[])
         callee = SimpleNamespace(name="reverser")
@@ -272,7 +272,7 @@ class TestADelegationHandsThemToTheLead:
         assert [q.source for q in caller._open_questions_buffer] == ["reverser"]
 
     def test_the_lead_reads_them_in_the_answer(self) -> None:
-        from maljan.agents.delegation import _answer_text
+        from malspark.agents.delegation import _answer_text
 
         isr = AgentISR(
             agent_id="reverser",
@@ -286,7 +286,7 @@ class TestADelegationHandsThemToTheLead:
 
 class TestThePrompt:
     def test_the_findings_block_names_the_key_and_every_reason(self) -> None:
-        from maljan.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT
+        from malspark.agents.prompt_fragments import FINDINGS_BLOCK_FRAGMENT
 
         assert '"open_questions"' in FINDINGS_BLOCK_FRAGMENT
         assert "an unknown, not an absence" in FINDINGS_BLOCK_FRAGMENT

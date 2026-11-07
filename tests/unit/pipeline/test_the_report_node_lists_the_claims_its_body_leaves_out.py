@@ -12,9 +12,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.reporting.models import MalwareReport
-from maljan.reporting.renderers import MarkdownRenderer
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.reporting.models import MalwareReport
+from malspark.reporting.renderers import MarkdownRenderer
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.stages import paper_profile
 from tests.unit.pipeline.test_what_is_served_is_the_final_report import _state
 
@@ -40,7 +40,7 @@ def container() -> Any:
 
 @pytest.mark.asyncio
 async def test_a_claim_the_body_leaves_out_is_stored_counted_and_printed(container: Any) -> None:
-    from maljan.pipeline.nodes import make_report_node
+    from malspark.pipeline.nodes import make_report_node
 
     state = _state()
     state["isr_reports"] = {

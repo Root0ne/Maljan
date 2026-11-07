@@ -20,7 +20,7 @@ from app.services.agent_map import (  # noqa: E402
     effective_profiles,
     validate_agent_map,
 )
-from maljan.core.config import (
+from malspark.core.config import (
     ALWAYS_ENABLED_AGENTS,
     BUILTIN_AGENTS,
     BUILTIN_PROFILES,
@@ -706,7 +706,7 @@ def test_the_api_clears_the_derived_marker_when_the_stages_were_edited():
 
 
 def test_the_api_keeps_the_marker_on_a_team_nobody_has_touched():
-    from maljan.core.config import stages_from_analysts
+    from malspark.core.config import stages_from_analysts
 
     out = validate_agent_map(
         _flagged([s.model_dump(mode="json") for s in stages_from_analysts(["static"])]),
@@ -938,7 +938,7 @@ def test_a_lead_without_a_prompt_is_reported_on_its_prompt_field():
 
 @pytest.mark.parametrize("key", ALWAYS_ENABLED_AGENTS)
 def test_an_always_enabled_built_in_turned_off_is_refused(key):
-    from maljan.core.config import _builtin_definitions
+    from malspark.core.config import _builtin_definitions
 
     seed = _builtin_definitions()[key].model_dump(mode="json")
     with pytest.raises(AgentMapError) as exc:
@@ -972,7 +972,7 @@ def test_the_technique_line_turned_off_on_a_built_in_role_is_reported_on_its_fie
 
 
 def test_the_technique_line_turned_off_on_a_built_in_prompt_agent_says_to_clone_it():
-    from maljan.core.config import PROMPT_ROLES, _builtin_definitions
+    from malspark.core.config import PROMPT_ROLES, _builtin_definitions
 
     key = next(k for k, d in _builtin_definitions().items() if d.role in PROMPT_ROLES)
     seed = _builtin_definitions()[key].model_dump(mode="json")
@@ -1048,7 +1048,7 @@ class TestANewDefinitionNamesItsCategory:
 
     def test_the_catalog_serves_the_choices(self):
         from app.services.settings_catalog_api import resolved_catalog
-        from maljan.core.agent_category import AGENT_CATEGORIES
+        from malspark.core.agent_category import AGENT_CATEGORIES
 
         entries = {e.key: e for e in resolved_catalog(["analysis"])}
         assert entries[AGENT_DEFINITIONS_KEY].agent_category_choices == list(AGENT_CATEGORIES)

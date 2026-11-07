@@ -21,7 +21,7 @@ import pytest
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel
 
-from maljan.core.config import Settings
+from malspark.core.config import Settings
 
 ACME = "acmescan"
 WORKFLOW = (
@@ -75,9 +75,9 @@ def _settings() -> Settings:
 
 
 def _entry(settings: Settings, rows: int = 2) -> Any:
-    from maljan.core import declared_reading
-    from maljan.core.config import get_settings, install_settings
-    from maljan.schemas.evidence import build_entry
+    from malspark.core import declared_reading
+    from malspark.core.config import get_settings, install_settings
+    from malspark.schemas.evidence import build_entry
 
     previous = get_settings()
     install_settings(settings)
@@ -100,7 +100,7 @@ def _entry(settings: Settings, rows: int = 2) -> Any:
 
 class TestItsWorkflowText:
     def _attached(self, settings: Settings) -> list[Any]:
-        from maljan.providers.servers import ServerRegistry
+        from malspark.providers.servers import ServerRegistry
 
         registry = ServerRegistry(settings)
         handle = registry._handles[ACME]
@@ -111,9 +111,9 @@ class TestItsWorkflowText:
         return tools
 
     def test_it_reaches_the_agent_with_the_servers_tools(self) -> None:
-        from maljan.agents.prompt_fragments import format_fragment, tools_statement
-        from maljan.agents.static_analyst import assemble_static_prompt
-        from maljan.providers.static.null import NullStaticProvider
+        from malspark.agents.prompt_fragments import format_fragment, tools_statement
+        from malspark.agents.static_analyst import assemble_static_prompt
+        from malspark.providers.static.null import NullStaticProvider
 
         tools = self._attached(_settings())
         assert WORKFLOW in tools_statement(tools)
@@ -123,16 +123,16 @@ class TestItsWorkflowText:
         assert prompt.count(WORKFLOW) == 1
 
     def test_a_request_without_its_tools_shows_none_of_it(self) -> None:
-        from maljan.agents.prompt_fragments import tools_statement
+        from malspark.agents.prompt_fragments import tools_statement
 
         other = _tool("something_else").model_copy(
-            update={"metadata": {"maljan_server": "knowledge"}}
+            update={"metadata": {"malspark_server": "knowledge"}}
         )
         assert WORKFLOW not in tools_statement([other])
         assert WORKFLOW not in tools_statement([])
 
     def test_a_server_that_declares_none_adds_nothing(self) -> None:
-        from maljan.agents.prompt_fragments import server_fragments
+        from malspark.agents.prompt_fragments import server_fragments
 
         settings = _settings()
         settings.mcp.servers[ACME].prompt_fragment = ""
@@ -141,7 +141,7 @@ class TestItsWorkflowText:
 
 class TestItsCallBudget:
     def test_each_call_gets_the_budget_its_block_declares(self) -> None:
-        from maljan.providers.server_guard import guard_from_settings
+        from malspark.providers.server_guard import guard_from_settings
 
         settings = _settings()
         assert guard_from_settings(ACME, settings).call_timeout("match_rules") == 75.0
@@ -152,8 +152,8 @@ class TestItsCallBudget:
 
 class TestItsRuleHits:
     def test_a_stage_condition_reads_them_by_server_and_by_kind(self) -> None:
-        from maljan.pipeline.conditions import evaluate, validate_condition
-        from maljan.pipeline.nodes import stage_context
+        from malspark.pipeline.conditions import evaluate, validate_condition
+        from malspark.pipeline.nodes import stage_context
 
         entry = _entry(_settings())
         state = {"evidence_ledger": [entry.model_dump()], "triage_facts": {"capa_hits": 3}}
@@ -170,7 +170,7 @@ class TestItsRuleHits:
         assert "literal key" in problem
 
     def test_a_built_in_rule_answer_counts_the_same_way(self) -> None:
-        from maljan.pipeline.conditions import rule_match_hits
+        from malspark.pipeline.conditions import rule_match_hits
 
         row = {
             "id": "ev_0002",
@@ -184,7 +184,7 @@ class TestItsRuleHits:
         assert counted["signature_rules"] == 3 and counted["yara"] == 3
 
     def test_facts_stored_before_the_counts_read_their_two_fields(self) -> None:
-        from maljan.pipeline.conditions import TriageFacts
+        from malspark.pipeline.conditions import TriageFacts
 
         facts = TriageFacts.from_dict({"yara_hits": 2, "capa_hits": 1})
         assert facts.rule_hits == 3
@@ -193,7 +193,7 @@ class TestItsRuleHits:
     def test_the_count_is_linear_in_the_ledger(self) -> None:
         import time
 
-        from maljan.pipeline.conditions import rule_match_hits
+        from malspark.pipeline.conditions import rule_match_hits
 
         def rows(n: int) -> list[dict[str, Any]]:
             return [
@@ -222,9 +222,9 @@ class TestItsRuleHits:
 
 class TestItsSampleLookup:
     def test_a_run_that_asked_it_links_it_and_the_report_keeps_the_link(self) -> None:
-        from maljan.core import declared_reading
-        from maljan.core.config import get_settings, install_settings
-        from maljan.reporting.renderers.markdown import MarkdownRenderer
+        from malspark.core import declared_reading
+        from malspark.core.config import get_settings, install_settings
+        from malspark.reporting.renderers.markdown import MarkdownRenderer
         from tests.unit.reporting.test_builder import _build
 
         settings = _settings()
@@ -249,8 +249,8 @@ class TestItsSampleLookup:
             assert f"]({ref.url})" in markdown
 
     def test_a_run_that_never_asked_a_service_links_none(self) -> None:
-        from maljan.core.tool_declarations import ToolDeclarations
-        from maljan.reporting.references import declared_references
+        from malspark.core.tool_declarations import ToolDeclarations
+        from malspark.reporting.references import declared_references
 
         declared = ToolDeclarations.from_settings(_settings())
         hashes = SimpleNamespace(sha256=SHA256, md5=None, sha1=None)
@@ -259,8 +259,8 @@ class TestItsSampleLookup:
         assert declared_references(asked_other, hashes, declared=declared) == []
 
     def test_the_operators_own_lookups_are_linked_on_every_report(self) -> None:
-        from maljan.core.tool_declarations import ToolDeclarations
-        from maljan.reporting.references import declared_references
+        from malspark.core.tool_declarations import ToolDeclarations
+        from malspark.reporting.references import declared_references
 
         declared = ToolDeclarations.from_settings(_settings())
         hashes = SimpleNamespace(sha256=SHA256, md5="b" * 32, sha1=None)
@@ -284,9 +284,9 @@ class TestItsSampleLookup:
         ]
 
     def test_a_run_that_asked_virustotal_links_it_once(self) -> None:
-        from maljan.core.config import Settings as _Settings
-        from maljan.core.tool_declarations import ToolDeclarations
-        from maljan.reporting.references import declared_references
+        from malspark.core.config import Settings as _Settings
+        from malspark.core.tool_declarations import ToolDeclarations
+        from malspark.reporting.references import declared_references
 
         settings = _Settings()
         declared = ToolDeclarations.from_settings(settings)
@@ -300,7 +300,7 @@ class TestItsSampleLookup:
         assert [ref.url for ref in removed] == [f"https://www.virustotal.com/gui/file/{SHA256}"]
 
     def test_a_link_of_a_service_the_report_does_not_hold_is_defanged(self) -> None:
-        from maljan.reporting.renderers.markdown import _KEPT_LINKS, _defanged_text, _Kept
+        from malspark.reporting.renderers.markdown import _KEPT_LINKS, _defanged_text, _Kept
 
         token = _KEPT_LINKS.set(_Kept(frozenset({"https://intel.example/lookup/x"}), False))
         try:
@@ -317,14 +317,14 @@ class TestItsSampleLookup:
 class TestARunWithNoGhidra:
     @pytest.fixture
     def container(self) -> Any:
-        from maljan.core.container import ServiceContainer
+        from malspark.core.container import ServiceContainer
 
         settings = Settings(_env_file=None)
         settings.static.provider = "r2"
         return ServiceContainer(settings, mock=True)
 
     def test_no_prompt_names_ghidra(self, container: Any) -> None:
-        from maljan.agents.composition import builtin_prompt
+        from malspark.agents.composition import builtin_prompt
 
         prompts = [
             builtin_prompt(role, container, "r2", [], provider_expected=expected)
@@ -339,15 +339,15 @@ class TestARunWithNoGhidra:
 
 class TestTheGhidraPrompt:
     def _body(self, *servers: str) -> str:
-        from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
-        from maljan.agents.static_analyst import static_provider_parts
-        from maljan.providers.registry import get_static_provider
+        from malspark.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+        from malspark.agents.static_analyst import static_provider_parts
+        from malspark.providers.registry import get_static_provider
 
         settings = Settings(_env_file=None)
         settings.static.provider = "ghidra"
         tools = stamp_source([_tool("decompile_function")], PROVIDER_FAMILY)
         tools += [
-            _tool(f"{server}_tool").model_copy(update={"metadata": {"maljan_server": server}})
+            _tool(f"{server}_tool").model_copy(update={"metadata": {"malspark_server": server}})
             for server in servers
         ]
         body, _statement = static_provider_parts(get_static_provider(settings), tools)
@@ -365,24 +365,24 @@ class TestTheGhidraPrompt:
         assert "a crypto-constant tool, where one\n  is attached, gives" in body
 
     def test_an_attached_part_is_resolved_in_one_pass(self) -> None:
-        from maljan.agents.prompt_fragments import resolve_attached
+        from malspark.agents.prompt_fragments import resolve_attached
 
-        acme = _tool("t").model_copy(update={"metadata": {"maljan_server": "acme"}})
+        acme = _tool("t").model_copy(update={"metadata": {"malspark_server": "acme"}})
         text = "use {{attached:acme|`acme_tool`|a scan tool}} now"
         assert resolve_attached(text, [acme]) == "use `acme_tool` now"
         assert resolve_attached(text, []) == "use a scan tool now"
 
     def test_its_guidance_is_devs_byte_for_byte(self) -> None:
-        from maljan.core.builtin_declarations import GHIDRA_VERIFICATION_DISCIPLINE
-        from maljan.providers.base import CLAIM_CITATION, DISCIPLINE_HEADING
-        from maljan.providers.static.ghidra import GHIDRA_GUIDANCE
+        from malspark.core.builtin_declarations import GHIDRA_VERIFICATION_DISCIPLINE
+        from malspark.providers.base import CLAIM_CITATION, DISCIPLINE_HEADING
+        from malspark.providers.static.ghidra import GHIDRA_GUIDANCE
 
         assert GHIDRA_GUIDANCE == CLAIM_CITATION + "\n\n" + GHIDRA_VERIFICATION_DISCIPLINE
         assert GHIDRA_VERIFICATION_DISCIPLINE.startswith(DISCIPLINE_HEADING)
         assert hashlib.sha256(GHIDRA_GUIDANCE.encode()).hexdigest()[:16] == "97db82324dec815f"
 
     def test_the_shared_discipline_keeps_its_rules_in_generic_words(self) -> None:
-        from maljan.providers.base import VERIFICATION_DISCIPLINE
+        from malspark.providers.base import VERIFICATION_DISCIPLINE
 
         for rule in ("cap CONFIDENCE at 0.7", ">= 2 independent evidence loci", "not obfuscation"):
             assert rule in VERIFICATION_DISCIPLINE
@@ -393,9 +393,9 @@ class TestTheGhidraPrompt:
 class TestEveryStaticProviderCarriesTheDiscipline:
     @pytest.mark.parametrize("provider_id", ["ghidra", "r2", "generic_mcp", "none", "capa_yara"])
     def test_attached_absent_and_tool_free(self, provider_id: str) -> None:
-        from maljan.agents.static_analyst import static_provider_parts
-        from maljan.providers.base import DISCIPLINE_HEADING, VERIFICATION_DISCIPLINE
-        from maljan.providers.registry import get_static_provider
+        from malspark.agents.static_analyst import static_provider_parts
+        from malspark.providers.base import DISCIPLINE_HEADING, VERIFICATION_DISCIPLINE
+        from malspark.providers.registry import get_static_provider
 
         settings = Settings(_env_file=None)
         settings.static.provider = provider_id
@@ -407,8 +407,8 @@ class TestEveryStaticProviderCarriesTheDiscipline:
             assert (VERIFICATION_DISCIPLINE in body) == (provider_id != "ghidra")
 
     def test_a_provider_writing_its_own_fragment_still_gets_it(self) -> None:
-        from maljan.agents.static_analyst import static_provider_parts
-        from maljan.providers.base import VERIFICATION_DISCIPLINE
+        from malspark.agents.static_analyst import static_provider_parts
+        from malspark.providers.base import VERIFICATION_DISCIPLINE
 
         provider = SimpleNamespace(
             label="Acme",
@@ -421,7 +421,7 @@ class TestEveryStaticProviderCarriesTheDiscipline:
 
 class TestReviewFixes:
     def test_the_flows_line_names_the_annotations_the_flows_carry(self) -> None:
-        from maljan.agents.network_analyst import primary_evidence_line
+        from malspark.agents.network_analyst import primary_evidence_line
 
         full = primary_evidence_line(None, '{"asn": "AS1", "geo": "NL", "reputation": {}}')
         assert "annotated with ASN/country and reputation" in full
@@ -438,8 +438,8 @@ class TestReviewFixes:
         ],
     )
     def test_ghidras_string_tools_hold_strings_as_on_dev(self, tool: str, holds: bool) -> None:
-        from maljan.core.tool_declarations import ToolDeclarations
-        from maljan.core.undeclared_tools import is_strings_source
+        from malspark.core.tool_declarations import ToolDeclarations
+        from malspark.core.undeclared_tools import is_strings_source
 
         facts = ToolDeclarations.from_settings(Settings()).declaration_for(
             ("provider:ghidra", tool)
@@ -447,8 +447,8 @@ class TestReviewFixes:
         assert is_strings_source(facts, tool) is holds
 
     def test_a_whole_fragment_stored_on_dev_keeps_its_meaning(self) -> None:
-        from maljan.core.builtin_declarations import GHIDRA_WORKFLOW, R2_WORKFLOW
-        from maljan.providers.static import ghidra
+        from malspark.core.builtin_declarations import GHIDRA_WORKFLOW, R2_WORKFLOW
+        from malspark.providers.static import ghidra
 
         stored = Settings.model_validate(
             {
@@ -468,14 +468,14 @@ class TestReviewFixes:
         assert own.static.ghidra.prompt_fragment == "MY STEPS"
 
     def test_only_the_mapped_sections_are_read_from_the_unavailable_list(self) -> None:
-        from maljan.analysis.sandbox_sections import NO_UNAVAILABLE, Sections
+        from malspark.analysis.sandbox_sections import NO_UNAVAILABLE, Sections
 
         held = Sections({"behavior": {}, "unavailable": ["processes", "calls"]})
         assert held.sections["api_calls"].no == NO_UNAVAILABLE.format(name="api_calls")
         assert held.sections["processes"].no != NO_UNAVAILABLE.format(name="processes")
 
     def test_a_disabled_servers_auto_name_prefix_is_not_read(self) -> None:
-        from maljan.core.undeclared_tools import declared_auto_name_pattern
+        from malspark.core.undeclared_tools import declared_auto_name_pattern
 
         def settings(enabled: bool) -> Settings:
             return Settings.model_validate(
@@ -498,9 +498,9 @@ class TestReviewFixes:
 
 class TestReReviewFixes:
     def test_a_sandbox_workflow_resolves_its_attached_parts(self) -> None:
-        from maljan.agents.dynamic_analyst import sandbox_provider_parts
+        from malspark.agents.dynamic_analyst import sandbox_provider_parts
 
-        net = _tool("x").model_copy(update={"metadata": {"maljan_server": "network"}})
+        net = _tool("x").model_copy(update={"metadata": {"malspark_server": "network"}})
         fragment = "W {{attached:network|`extract_dns`|a DNS tool}}."
         attached, _ = sandbox_provider_parts(
             [net], provider_fragment=fragment, provider_expected=True
@@ -525,29 +525,29 @@ class TestReReviewFixes:
             )
 
     def test_a_reserved_family_never_reads_as_attached(self) -> None:
-        from maljan.agents.prompt_fragments import PROVIDER_FAMILY, resolve_attached, stamp_source
+        from malspark.agents.prompt_fragments import PROVIDER_FAMILY, resolve_attached, stamp_source
 
         tools = stamp_source([_tool("t")], PROVIDER_FAMILY)
         assert resolve_attached("{{attached:provider|P|Q}}", tools) == "Q"
 
     def test_every_shipped_fragment_reads_and_resolves(self) -> None:
-        from maljan.agents.prompt_fragments import resolve_attached
-        from maljan.core.tool_declarations import ToolDeclarations, check_fragment_template
+        from malspark.agents.prompt_fragments import resolve_attached
+        from malspark.core.tool_declarations import ToolDeclarations, check_fragment_template
 
         for source in ToolDeclarations.from_settings(Settings()).sources():
             check_fragment_template(source.prompt_fragment)
             assert "{{attached:" not in resolve_attached(source.prompt_fragment, [])
 
     def test_the_reserved_families_are_the_prompts_own(self) -> None:
-        from maljan.agents.delegation import TEAM_SERVER
-        from maljan.agents.prompt_fragments import PROVIDER_FAMILY, SANDBOX_FAMILY
-        from maljan.core.tool_declarations import RESERVED_FAMILIES
+        from malspark.agents.delegation import TEAM_SERVER
+        from malspark.agents.prompt_fragments import PROVIDER_FAMILY, SANDBOX_FAMILY
+        from malspark.core.tool_declarations import RESERVED_FAMILIES
 
         assert {PROVIDER_FAMILY, SANDBOX_FAMILY, TEAM_SERVER} <= RESERVED_FAMILIES
 
     def test_the_parsers_own_flow_text_names_its_annotations(self) -> None:
-        from maljan.agents.network_analyst import primary_evidence_line
-        from maljan.parsers.network_parser import NetworkParser
+        from malspark.agents.network_analyst import primary_evidence_line
+        from malspark.parsers.network_parser import NetworkParser
 
         text = NetworkParser().parse(
             {
@@ -560,7 +560,7 @@ class TestReReviewFixes:
         assert "annotated with ASN/country and reputation" in primary_evidence_line(None, text)
 
     def test_a_provider_one_agent_resolves_to_gives_its_prefixes(self) -> None:
-        from maljan.core.undeclared_tools import declared_auto_name_pattern
+        from malspark.core.undeclared_tools import declared_auto_name_pattern
 
         settings = Settings.model_validate(
             {
@@ -580,8 +580,8 @@ class TestReReviewFixes:
     ) -> None:
         import logging
 
-        from maljan.core import config
-        from maljan.providers.static import ghidra
+        from malspark.core import config
+        from malspark.providers.static import ghidra
 
         config._LEGACY_FRAGMENT_NOTED[0] = False
         stored = {"static": {"ghidra": {"prompt_fragment": ghidra.GHIDRA_LEAD + "SECRETISH"}}}

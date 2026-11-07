@@ -7,14 +7,14 @@ engines flag it" said nothing had flagged it, which the suspicious three had.
 
 from __future__ import annotations
 
-from maljan.reporting.models import (
+from malspark.reporting.models import (
     FileHashes,
     MalwareReport,
     NetworkDomain,
     NetworkIOCs,
     SampleIdentity,
 )
-from maljan.reporting.renderers.markdown import _reputations
+from malspark.reporting.renderers.markdown import _reputations
 
 
 def test_the_cell_names_malicious_and_writes_no_fraction() -> None:

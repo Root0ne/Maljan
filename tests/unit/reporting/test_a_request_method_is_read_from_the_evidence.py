@@ -12,8 +12,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.reporting.ledger_projection import network_from_ledger
-from maljan.schemas.evidence import build_entry
+from malspark.reporting.ledger_projection import network_from_ledger
+from malspark.schemas.evidence import build_entry
 
 POSTED = "http://beacon.example.com/gate"
 READ_ONLY = "https://other.example.net/live/"

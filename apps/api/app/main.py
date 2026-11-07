@@ -1,4 +1,4 @@
-"""Maljan API — FastAPI application factory.
+"""Malspark API — FastAPI application factory.
 
 Wires together all route modules, middleware, and lifecycle events
 into a single FastAPI application instance.
@@ -60,9 +60,9 @@ async def _probe_memory() -> dict[str, Any]:
     answered. A backend id the factory does not know is reported as not
     configured rather than as a failure; every answer names the backend.
     """
-    from maljan.core.plugins import ALLOW_LIST_KEY
-    from maljan.core.settings_overrides import StoredValueRefused, redact_url
-    from maljan.memory.store_factory import (
+    from malspark.core.plugins import ALLOW_LIST_KEY
+    from malspark.core.settings_overrides import StoredValueRefused, redact_url
+    from malspark.memory.store_factory import (
         MemoryBackendNotConfiguredError,
         build_memory_store,
         configured_backend,
@@ -146,7 +146,7 @@ async def _probe_components() -> dict[str, dict[str, Any]]:
             # the database and the role it was refused for. The class says
             # what kind of failure it was; the text goes to the log, where an
             # operator reads it.
-            from maljan.core.settings_overrides import redact_url
+            from malspark.core.settings_overrides import redact_url
 
             logger.warning(
                 "health probe %s failed: %s: %s",
@@ -227,11 +227,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         raise
 
     # ── Startup ──────────────────────────────────────────────
-    logger.info("Starting Maljan API server...")
+    logger.info("Starting Malspark API server...")
+    from malspark.core.previous_name import warn_previous_environment
+
+    warn_previous_environment(logger)
 
     # The API's own credentials (database, Redis, object store) mask shown
-    # text by value from the start (``maljan.core.settings_masking``).
-    from maljan.core.settings_masking import remember_settings_values
+    # text by value from the start (``malspark.core.settings_masking``).
+    from malspark.core.settings_masking import remember_settings_values
 
     remember_settings_values(get_settings(), scope="process")
 
@@ -424,14 +427,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     audit_anchor.start_anchoring(async_engine)
 
     logger.info(
-        f"Maljan API v{settings.app_version} started successfully",
+        f"Malspark API v{settings.app_version} started successfully",
         extra={"component": "lifecycle"},
     )
 
     yield
 
     # ── Shutdown ─────────────────────────────────────────────
-    logger.info("Shutting down Maljan API...")
+    logger.info("Shutting down Malspark API...")
     # Anchor writes already scheduled finish (bounded) before their engine goes.
     await audit_anchor.drain()
     await async_engine.dispose()
@@ -456,7 +459,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         description=(
-            "Maljan — Multi-Agent Malware Analysis Platform. "
+            "Malspark — Multi-Agent Malware Analysis Platform. "
             "Professional-grade malware analysis powered by LangGraph, "
             "adversarial multi-agent debate, and STIX 2.1 intelligence output."
         ),
@@ -516,7 +519,7 @@ def create_app() -> FastAPI:
     # Any route that reads the core settings while a stored value is refused
     # answers 409 with the key, the reason and the remedy, rather than a bare
     # 500 or a default in its place. The settings page itself reads past it.
-    from maljan.core.settings_overrides import StoredValueRefused
+    from malspark.core.settings_overrides import StoredValueRefused
 
     app.add_exception_handler(StoredValueRefused, stored_value_refused_response)
 

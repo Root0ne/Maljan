@@ -13,7 +13,7 @@ from app.deps import require_admin
 from app.models.user import UserRole
 from app.services import settings_catalog_api as cat
 from app.services import settings_probes as probes
-from maljan.core.settings_overrides import redact_url
+from malspark.core.settings_overrides import redact_url
 
 
 def _dsn(scheme: str, userinfo: str, rest: str) -> str:

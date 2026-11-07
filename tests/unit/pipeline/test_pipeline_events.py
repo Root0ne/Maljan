@@ -20,20 +20,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from maljan.pipeline.events import (
+from malspark.pipeline.events import (
     AGENT_MESSAGE,
     REPORT_CHAR_LIMIT,
     claims_to_payload,
     emit,
     emit_agent_message,
 )
-from maljan.pipeline.nodes import (
+from malspark.pipeline.nodes import (
     ROOM_SPEAKER,
     make_negotiation_node,
     make_revision_node,
     make_stage_agent_node,
 )
-from maljan.schemas.isr_models import AgentISR, ClaimEvidence
+from malspark.schemas.isr_models import AgentISR, ClaimEvidence
 from tests.stages import ANALYSIS_STAGE, paper_profile
 
 
@@ -149,7 +149,7 @@ class TestClaimsToPayload:
 
     def test_headline_collapses_model_whitespace(self) -> None:
         """Claim text arrives with newlines and markdown; the headline is one line."""
-        from maljan.pipeline.events import summarize_claims
+        from malspark.pipeline.events import summarize_claims
 
         claims = [
             ClaimEvidence(
@@ -166,7 +166,7 @@ class TestClaimsToPayload:
         )
 
     def test_headline_without_claims_names_the_layer(self) -> None:
-        from maljan.pipeline.events import summarize_claims
+        from malspark.pipeline.events import summarize_claims
 
         assert summarize_claims([], speaker="dynamic") == "dynamic: no claims produced."
 
@@ -426,7 +426,7 @@ class TestSycophancyAndJudgeSpeak:
             claims=[ClaimEvidence(claim="identical", evidence_ref="r", confidence=0.9)],
         )
         node = make_negotiation_node(container)
-        with patch("maljan.pipeline.nodes.detect_sycophancy", return_value=True):
+        with patch("malspark.pipeline.nodes.detect_sycophancy", return_value=True):
             asyncio.run(
                 node(
                     {
@@ -452,7 +452,7 @@ class TestSycophancyAndJudgeSpeak:
         container.get_judge_agent.return_value = judge
 
         node = make_negotiation_node(container)
-        with patch("maljan.pipeline.nodes.detect_sycophancy", return_value=False):
+        with patch("malspark.pipeline.nodes.detect_sycophancy", return_value=False):
             asyncio.run(
                 node({"iteration_count": 2, "reports": {"network": "f"}, "isr_reports": {}})
             )

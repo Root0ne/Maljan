@@ -23,7 +23,7 @@ import json
 import re
 from typing import Any
 
-from maljan.core.config import (
+from malspark.core.config import (
     SERVER_KEY_PATTERN,
     MCPServerConfig,
     _builtin_definitions,
@@ -32,13 +32,14 @@ from maljan.core.config import (
     reserved_server_keys,
     shipped_server_keys,
 )
-from maljan.core.settings_overrides import (
+from malspark.core.previous_name import CURRENT_NAME, PREVIOUS_NAME
+from malspark.core.settings_overrides import (
     SERVER_MAP_PATH,
     server_entry_in_force,
     shipped_tool_facts,
     shipped_tools,
 )
-from maljan.core.tool_declarations import (
+from malspark.core.tool_declarations import (
     changed_declaration_errors,
     check_own_prefix,
     fill_declaration,
@@ -128,6 +129,26 @@ def split_server_env(servers: Any) -> tuple[Any, dict[str, str | None]]:
             out[name] = entry
             envs[name] = None
     return out, envs
+
+
+def env_under_current_names(env: dict[str, Any]) -> dict[str, Any]:
+    """``env`` with every name under the product's previous prefix under the current one.
+
+    A server's encrypted ``env`` row written before the rename (T-576) may
+    name a variable by its previous name, which no sidecar reads any more;
+    migration ``20261107000000`` renames only the clear map, never a secret
+    row, so the row is renamed here, as it is read. A name the map already
+    sets under the current prefix wins. Values are never logged.
+    """
+    previous = f"{PREVIOUS_NAME.upper()}_"
+    if not any(str(k).startswith(previous) for k in env):
+        return env
+    current = f"{CURRENT_NAME.upper()}_"
+    out = {k: v for k, v in env.items() if not str(k).startswith(previous)}
+    for key, value in env.items():
+        if str(key).startswith(previous):
+            out.setdefault(current + str(key)[len(previous) :], value)
+    return out
 
 
 def env_of_row(row_value: Any) -> dict[str, Any] | None:
@@ -407,7 +428,11 @@ def _keep_masked_env(value: Any, stored: dict[str, Any] | None) -> Any:
             continue
         stored_entry = (stored or {}).get(name)
         stored_env = stored_entry.get("env") if isinstance(stored_entry, dict) else {}
-        stored_env = stored_env if isinstance(stored_env, dict) else {}
+        # A row stored before the rename names its variables by the previous
+        # prefix; the editor showed (and sends back) the current names.
+        stored_env = env_under_current_names(stored_env) if isinstance(stored_env, dict) else {}
+        # An export written before the rename sends the previous names back.
+        env = env_under_current_names(env)
         kept = {
             var: (stored_env.get(var) if item == TOKEN_MASK else item)
             for var, item in env.items()
@@ -452,5 +477,8 @@ def merge_server_secrets(overrides: dict[str, Any]) -> dict[str, Any]:
             # The encrypted row is the server's env; a map written before the
             # rows existed may still carry one in clear, and the row wins.
             merged[name]["env"] = env
+    for entry in merged.values():
+        if isinstance(entry.get("env"), dict):
+            entry["env"] = env_under_current_names(entry["env"])
     out[SERVER_MAP_KEY] = merged
     return out

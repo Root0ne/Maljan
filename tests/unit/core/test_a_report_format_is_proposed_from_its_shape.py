@@ -19,9 +19,9 @@ from typing import Any
 
 import pytest
 
-from maljan.core.report_formats import ReportFormat
-from maljan.core.report_proposals import KEY_HORIZON, READ_DEPTH, propose_format
-from maljan.core.report_shapes import row_shape
+from malspark.core.report_formats import ReportFormat
+from malspark.core.report_proposals import KEY_HORIZON, READ_DEPTH, propose_format
+from malspark.core.report_shapes import row_shape
 
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "sandbox"
 
@@ -136,12 +136,12 @@ def test_no_run_module_reads_a_proposal() -> None:
     """A proposal reaches the upload answer and the console, nothing a run reads."""
     import re
 
-    import maljan
+    import malspark
 
     imports = re.compile(
-        r"^\s*(?:from|import)\s+maljan\.core\.(report_proposals|report_shapes)\b", re.M
+        r"^\s*(?:from|import)\s+malspark\.core\.(report_proposals|report_shapes)\b", re.M
     )
-    root = Path(maljan.__file__).parent
+    root = Path(malspark.__file__).parent
     readers = sorted(
         str(path.relative_to(root))
         for path in root.rglob("*.py")

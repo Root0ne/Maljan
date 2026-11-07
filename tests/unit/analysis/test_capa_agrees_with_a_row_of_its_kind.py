@@ -13,20 +13,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from maljan.analysis.anti_analysis import (
+from malspark.analysis.anti_analysis import (
     RULE_NAME_KINDS as CAPA_RULE_KINDS,
 )
-from maljan.analysis.anti_analysis import (
+from malspark.analysis.anti_analysis import (
     RULE_NAMESPACE_KINDS as CAPA_NAMESPACE_KINDS,
 )
-from maljan.analysis.anti_analysis import (
+from malspark.analysis.anti_analysis import (
     SCAN_KINDS,
     scan_kind,
 )
-from maljan.analysis.anti_analysis import (
+from malspark.analysis.anti_analysis import (
     rule_agrees as capa_agrees,
 )
-from maljan.pipeline import triage_pack
+from malspark.pipeline import triage_pack
 
 DEBUGGER = "anti-analysis/anti-debugging/debugger-detection"
 VM = "anti-analysis/anti-vm/vm-detection"

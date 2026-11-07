@@ -20,8 +20,8 @@ from typing import Any
 
 import pytest
 
-import maljan.core.tool_declarations as td
-from maljan.core.tool_declarations import granted_launch, trusts_served
+import malspark.core.tool_declarations as td
+from malspark.core.tool_declarations import granted_launch, trusts_served
 
 SOURCE = "mcp:zq-never-seen-server"
 
@@ -226,8 +226,8 @@ def test_an_option_s_path_value_is_read_as_the_file_it_names(tmp_path: Path) -> 
 def test_the_grant_reads_the_launch_as_the_server_is_started(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.agents.subprocess_env import stdio_launch
-    from maljan.core.config import MCPServerConfig
+    from malspark.agents.subprocess_env import stdio_launch
+    from malspark.core.config import MCPServerConfig
 
     # A relative working directory and a relative argument are rooted at the
     # project, as the launch roots them, whatever directory this process is in.
@@ -241,7 +241,7 @@ def test_the_grant_reads_the_launch_as_the_server_is_started(
     elsewhere = tmp_path / "elsewhere"
     (elsewhere / "scripts").mkdir(parents=True)
     (elsewhere / "scripts" / "server.py").write_text("")
-    monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: root)
+    monkeypatch.setattr("malspark.core.paths.get_project_root", lambda *a, **k: root)
     monkeypatch.chdir(elsewhere)
     config = MCPServerConfig(
         enabled=True, command=sys.executable, args=["scripts/server.py"], cwd="srv"
@@ -262,14 +262,14 @@ def test_the_grant_reads_the_launch_as_the_server_is_started(
 def test_a_server_started_away_from_its_grant_does_not_trust_its_declaration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.core.config import MCPServerConfig
-    from maljan.providers.servers import ServerHandle
+    from malspark.core.config import MCPServerConfig
+    from malspark.providers.servers import ServerHandle
 
     class _Toolkit:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
 
-    monkeypatch.setattr("maljan.agents.mcp_client.MCPLangChainToolkit", _Toolkit)
+    monkeypatch.setattr("malspark.agents.mcp_client.MCPLangChainToolkit", _Toolkit)
     for where in ("one", "two"):
         _program(tmp_path / where / "zq-server")
     link = tmp_path / "zq-server"
@@ -290,14 +290,14 @@ def test_a_server_started_away_from_its_grant_does_not_trust_its_declaration(
 def test_the_grant_reads_a_relative_command_rooted_as_the_launch_starts_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from maljan.core.config import MCPServerConfig
+    from malspark.core.config import MCPServerConfig
 
     # The parent's directory holds a file under the same relative path; the
     # launch runs the project's, and so does the grant, from either directory.
     root = tmp_path / "project"
     ours = _program(root / "bin" / "zq-server")
     _program(tmp_path / "elsewhere" / "bin" / "zq-server")
-    monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: root)
+    monkeypatch.setattr("malspark.core.paths.get_project_root", lambda *a, **k: root)
     config = MCPServerConfig(enabled=True, command="bin/zq-server")
     monkeypatch.chdir(tmp_path / "elsewhere")
     resolved = td._resolved_launch(config)
@@ -314,10 +314,10 @@ def test_a_grant_for_a_bare_name_or_absolute_command_is_unchanged(
 ) -> None:
     import dataclasses
 
-    import maljan.agents.subprocess_env as subprocess_env
+    import malspark.agents.subprocess_env as subprocess_env
 
     program = _program(tmp_path / "bin" / "zq-server")
-    monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: tmp_path)
+    monkeypatch.setattr("malspark.core.paths.get_project_root", lambda *a, **k: tmp_path)
     command = "zq-server" if bare else str(program)
     block = _block(command=command, env={"PATH": str(program.parent)})
     grant = granted_launch(block)
@@ -338,7 +338,7 @@ def test_a_grant_for_an_argument_rooted_out_of_the_project_does_not_hold_for_ano
 ) -> None:
     import dataclasses
 
-    import maljan.agents.subprocess_env as subprocess_env
+    import malspark.agents.subprocess_env as subprocess_env
 
     # ``../server.py`` was once rooted at the project, so the child ran the
     # file beside the project; it now reaches the child as written, read from
@@ -350,7 +350,7 @@ def test_a_grant_for_an_argument_rooted_out_of_the_project_does_not_hold_for_ano
     (tmp_path / "elsewhere" / "run").mkdir(parents=True)
     other = tmp_path / "elsewhere" / "server.py"
     other.write_text("print('zq')\n")
-    monkeypatch.setattr("maljan.core.paths.get_project_root", lambda *a, **k: root)
+    monkeypatch.setattr("malspark.core.paths.get_project_root", lambda *a, **k: root)
     monkeypatch.chdir(tmp_path / "elsewhere" / "run")
     block = _block(command=sys.executable, args=["../server.py"])
     now = td._resolved_launch(block)

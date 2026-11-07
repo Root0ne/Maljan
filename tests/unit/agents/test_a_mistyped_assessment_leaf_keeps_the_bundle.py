@@ -1,6 +1,6 @@
 """One badly typed assessment leaf does not cost the judge its whole answer.
 
-``x_maljan_assessment`` was validated as part of the Bundle, so a confidence
+``x_malspark_assessment`` was validated as part of the Bundle, so a confidence
 of 85 where 0..1 is asked, a family written as a bare name, a severity written
 as a bare rating or an ``evidence_ids`` written as one string failed the whole
 model, and every STIX object the judge wrote went down the text fallback with
@@ -25,18 +25,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.judge_agent import (
+from malspark.agents.judge_agent import (
     VERDICT_FALLBACK_CODE,
     JudgeAgent,
     stated_assessment_in,
 )
-from maljan.agents.judge_postprocess import (
+from malspark.agents.judge_postprocess import (
     ASSESSMENT_READ_LOOSELY_CODE,
     ASSESSMENT_UNREADABLE_CODE,
     ASSESSMENT_UNREADABLE_REASON,
     read_judge_assessment,
 )
-from maljan.schemas.judgement import JudgeAssessment, read_assessment
+from malspark.schemas.judgement import JudgeAssessment, read_assessment
 
 MALWARE_ID = "malware--0f1e2d3c-4b5a-4968-8776-655443332211"
 
@@ -94,7 +94,9 @@ def _judge(*answers: str) -> JudgeAgent:
 
 
 def _answer(assessment: Any) -> str:
-    return json.dumps({"type": "bundle", "objects": _objects(), "x_maljan_assessment": assessment})
+    return json.dumps(
+        {"type": "bundle", "objects": _objects(), "x_malspark_assessment": assessment}
+    )
 
 
 # The seven shapes, each with what is read and what is recorded.
@@ -290,13 +292,13 @@ class TestTheRowsThePostprocessorRecords:
         data = {
             "type": "bundle",
             "objects": [],
-            "x_maljan_assessment": _with(malware_category=written),
+            "x_malspark_assessment": _with(malware_category=written),
         }
 
         (row,) = read_judge_assessment(data)
 
         assert row.code == ASSESSMENT_UNREADABLE_CODE
-        assert f"x_maljan_assessment.malware_category is {shown}," in row.message
+        assert f"x_malspark_assessment.malware_category is {shown}," in row.message
 
     @pytest.mark.parametrize(
         ("assessment", "path", "code"),
@@ -306,15 +308,17 @@ class TestTheRowsThePostprocessorRecords:
     def test_each_shape_is_recorded_under_its_code(
         self, assessment: dict[str, Any], path: str, code: str
     ) -> None:
-        data = {"type": "bundle", "objects": _objects(), "x_maljan_assessment": assessment}
+        data = {"type": "bundle", "objects": _objects(), "x_malspark_assessment": assessment}
 
         found = read_judge_assessment(data)
 
-        assert [(v.code, v.path) for v in found] == [(code, f"x_maljan_assessment.{_noted(path)}")]
-        assert isinstance(data["x_maljan_assessment"], JudgeAssessment)
+        assert [(v.code, v.path) for v in found] == [
+            (code, f"x_malspark_assessment.{_noted(path)}")
+        ]
+        assert isinstance(data["x_malspark_assessment"], JudgeAssessment)
 
     def test_an_unreadable_leaf_is_quoted_and_said_to_be_absent(self) -> None:
-        data = {"type": "bundle", "objects": [], "x_maljan_assessment": _with(confidence=85)}
+        data = {"type": "bundle", "objects": [], "x_malspark_assessment": _with(confidence=85)}
 
         (row,) = read_judge_assessment(data)
 
@@ -325,7 +329,7 @@ class TestTheRowsThePostprocessorRecords:
         data: dict[str, Any] = {"type": "bundle", "objects": _objects()}
 
         assert read_judge_assessment(data) == []
-        assert "x_maljan_assessment" not in data
+        assert "x_malspark_assessment" not in data
 
 
 class TestWhatTheRoundDoesWithIt:
@@ -337,7 +341,7 @@ class TestWhatTheRoundDoesWithIt:
 
         verdict = asyncio.run(judge.give_verdict(reports={"static": "it hollows"}, history=[]))
 
-        assert verdict.bundle.x_maljan_fallback_verdict is None
+        assert verdict.bundle.x_malspark_fallback_verdict is None
         assert len(verdict.bundle.objects) == len(_objects())
         assert VERDICT_FALLBACK_CODE not in [v.code for v in verdict.violations]
 
@@ -351,15 +355,15 @@ class TestWhatTheRoundDoesWithIt:
         assert verdict.fed_back.get(ASSESSMENT_UNREADABLE_CODE) == 1
         assert verdict.fed_back.get(ASSESSMENT_READ_LOOSELY_CODE) == 1
         assert len(verdict.bundle.objects) == len(_objects())
-        assert verdict.bundle.x_maljan_assessment is not None
-        assert verdict.bundle.x_maljan_assessment.confidence == 0.8
+        assert verdict.bundle.x_malspark_assessment is not None
+        assert verdict.bundle.x_malspark_assessment.confidence == 0.8
         assert ASSESSMENT_UNREADABLE_CODE not in [v.code for v in verdict.violations]
 
     @pytest.mark.parametrize(
         ("leaves", "path"),
         [
-            ({"severity": "none"}, "x_maljan_assessment.severity"),
-            ({"confidence": True}, "x_maljan_assessment.confidence"),
+            ({"severity": "none"}, "x_malspark_assessment.severity"),
+            ({"confidence": True}, "x_malspark_assessment.confidence"),
         ],
         ids=["bare severity none", "confidence true"],
     )
@@ -380,20 +384,20 @@ class TestWhatTheRoundDoesWithIt:
         verdict = asyncio.run(judge.give_verdict(reports={"static": "it hollows"}, history=[]))
 
         assert len(verdict.bundle.objects) == len(_objects())
-        assert verdict.bundle.x_maljan_assessment is not None
-        assert verdict.bundle.x_maljan_assessment.verdict == "Malware"
-        assert verdict.bundle.x_maljan_assessment.confidence is None
+        assert verdict.bundle.x_malspark_assessment is not None
+        assert verdict.bundle.x_malspark_assessment.verdict == "Malware"
+        assert verdict.bundle.x_malspark_assessment.confidence is None
         rows = [v for v in verdict.violations if v.code == ASSESSMENT_UNREADABLE_CODE]
-        assert [v.path for v in rows] == ["x_maljan_assessment.confidence"]
+        assert [v.path for v in rows] == ["x_malspark_assessment.confidence"]
 
     def test_a_loose_reading_costs_no_retry(self) -> None:
         judge = _judge(_answer(_with(family="AsyncRAT")))
 
         verdict = asyncio.run(judge.give_verdict(reports={"static": "it hollows"}, history=[]))
 
-        assert verdict.bundle.x_maljan_assessment is not None
-        assert verdict.bundle.x_maljan_assessment.family is not None
-        assert verdict.bundle.x_maljan_assessment.family.name == "AsyncRAT"
+        assert verdict.bundle.x_malspark_assessment is not None
+        assert verdict.bundle.x_malspark_assessment.family is not None
+        assert verdict.bundle.x_malspark_assessment.family.name == "AsyncRAT"
         assert verdict.fed_back.get(ASSESSMENT_READ_LOOSELY_CODE)
         assert ASSESSMENT_READ_LOOSELY_CODE not in {v.code for v in verdict.violations if v.asked}
 
@@ -403,7 +407,7 @@ class TestTheStatedAssessment:
         "assessment", [shape[1] for shape in SHAPES], ids=[shape[0] for shape in SHAPES]
     )
     def test_a_cut_answer_keeps_its_stated_assessment(self, assessment: dict[str, Any]) -> None:
-        text = '{"type": "bundle", "x_maljan_assessment": ' + json.dumps(assessment)
+        text = '{"type": "bundle", "x_malspark_assessment": ' + json.dumps(assessment)
         text += ', "objects": [{"type": "malware", "id": "mal'
 
         stated = stated_assessment_in(text)
@@ -412,7 +416,7 @@ class TestTheStatedAssessment:
         assert stated.verdict == "Malware"
 
     def test_its_unreadable_leaf_is_noted(self) -> None:
-        text = '{"type": "bundle", "x_maljan_assessment": ' + json.dumps(_with(confidence=85))
+        text = '{"type": "bundle", "x_malspark_assessment": ' + json.dumps(_with(confidence=85))
         notes: list[Any] = []
 
         stated = stated_assessment_in(text, notes)
@@ -425,11 +429,11 @@ class TestTheReportReaderIsTold:
     def test_a_leaf_left_absent_is_a_degradation_reason(self) -> None:
         from unittest.mock import AsyncMock
 
-        from maljan.agents.judge_agent import JudgeVerdict
-        from maljan.pipeline.nodes import make_judge_node
-        from maljan.pipeline.validation import Violation
-        from maljan.schemas.evidence import EvidenceCounter
-        from maljan.schemas.stix_models import Bundle
+        from malspark.agents.judge_agent import JudgeVerdict
+        from malspark.pipeline.nodes import make_judge_node
+        from malspark.pipeline.validation import Violation
+        from malspark.schemas.evidence import EvidenceCounter
+        from malspark.schemas.stix_models import Bundle
         from tests.unit.pipeline.test_a_fallback_verdict_assesses_nothing import (
             _Container,
             _state,
@@ -440,13 +444,13 @@ class TestTheReportReaderIsTold:
         judge.give_verdict = AsyncMock(
             return_value=JudgeVerdict(
                 bundle=Bundle.model_validate(
-                    {"objects": _objects(), "x_maljan_assessment": {"verdict": "Malware"}}
+                    {"objects": _objects(), "x_malspark_assessment": {"verdict": "Malware"}}
                 ),
                 violations=[
                     Violation(
                         code=ASSESSMENT_UNREADABLE_CODE,
-                        message="x_maljan_assessment.confidence is 85",
-                        path="x_maljan_assessment.confidence",
+                        message="x_malspark_assessment.confidence is 85",
+                        path="x_malspark_assessment.confidence",
                     )
                 ],
                 retries=1,
@@ -458,6 +462,6 @@ class TestTheReportReaderIsTold:
 
         assert update["degraded_mode"] is True
         assert (
-            f"{ASSESSMENT_UNREADABLE_REASON}: x_maljan_assessment.confidence"
+            f"{ASSESSMENT_UNREADABLE_REASON}: x_malspark_assessment.confidence"
             in update["degradation_reasons"]
         )

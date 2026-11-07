@@ -11,8 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maljan.agents.base_agent import BaseAnalyst, _tier_specs, _view_specs
-from maljan.core.exceptions import AnalystError
+from malspark.agents.base_agent import BaseAnalyst, _tier_specs, _view_specs
+from malspark.core.exceptions import AnalystError
 
 
 def _block(claim: str, technique: str) -> str:

@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents.judge_postprocess import (
+from malspark.agents.judge_postprocess import (
     _technique_display_name,
     enforce_bundle_integrity,
     postprocess_judge_bundle,
 )
-from maljan.memory.attck_validator import ATTCKValidator
+from malspark.memory.attck_validator import ATTCKValidator
 
 
 def _bundle_with(indicators: list[dict]) -> dict:

@@ -22,8 +22,8 @@ from typing import Any
 
 import pytest
 
-from maljan.core.config import Settings
-from maljan.core.container import ServiceContainer
+from malspark.core.config import Settings
+from malspark.core.container import ServiceContainer
 
 
 class _Registry:
@@ -127,7 +127,7 @@ class _FakeLoop:
 
 class TestWhatRetirementDrops:
     def test_every_model_cache_and_the_shared_pool(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.core import container as module
+        from malspark.core import container as module
 
         container, registry = _container()
         container.get_mediator_llm()
@@ -143,7 +143,7 @@ class TestWhatRetirementDrops:
             module, "_LIVE_CONTAINERS", module.weakref.WeakSet([container]), raising=False
         )
         monkeypatch.setattr(
-            "maljan.llm.openai_provider.clear_shared_httpx_clients",
+            "malspark.llm.openai_provider.clear_shared_httpx_clients",
             lambda: cleared.append(True),
         )
 
@@ -167,7 +167,7 @@ class TestWhatRetirementDrops:
         the analyst tool loop's, which is the loop being retired. Everything
         else is bound to a loop that is still running.
         """
-        from maljan.core import container as module
+        from malspark.core import container as module
 
         container, _registry = _container()
         # Weakly keyed, so the stand-in loops must be objects a weak
@@ -181,7 +181,7 @@ class TestWhatRetirementDrops:
         monkeypatch.setattr(
             module, "_LIVE_CONTAINERS", module.weakref.WeakSet([container]), raising=False
         )
-        monkeypatch.setattr("maljan.llm.openai_provider.clear_shared_httpx_clients", lambda: None)
+        monkeypatch.setattr("malspark.llm.openai_provider.clear_shared_httpx_clients", lambda: None)
 
         module._drop_llm_caches_on_retirement(retired)
 
@@ -190,7 +190,7 @@ class TestWhatRetirementDrops:
         assert container._judge_llm_cache.lookup(other, "judge") is survivor
 
     def test_the_next_call_rebuilds(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from maljan.core import container as module
+        from malspark.core import container as module
 
         container, registry = _container()
         before = container.get_judge_llm()
@@ -205,7 +205,7 @@ class TestWhatRetirementDrops:
 
 class TestTheProviderOwnsItsPool:
     def test_two_models_for_one_endpoint_do_not_share_connections(self) -> None:
-        from maljan.llm.openai_provider import OpenAIProvider
+        from malspark.llm.openai_provider import OpenAIProvider
 
         settings = Settings(
             _env_file=None,
@@ -220,7 +220,7 @@ class TestTheProviderOwnsItsPool:
         assert first.http_async_client is not second.http_async_client
 
     def test_clearing_the_shared_cache_never_raises(self) -> None:
-        from maljan.llm.openai_provider import clear_shared_httpx_clients
+        from malspark.llm.openai_provider import clear_shared_httpx_clients
 
         clear_shared_httpx_clients()
         clear_shared_httpx_clients()

@@ -21,9 +21,9 @@ import openai
 import pytest
 from langchain_core.messages import HumanMessage
 
-from maljan.core.config import Settings
-from maljan.llm.generation_rate import as_connection_error
-from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
+from malspark.core.config import Settings
+from malspark.llm.generation_rate import as_connection_error
+from malspark.llm.openai_provider import OpenAIProvider, forget_standard_only
 
 
 @pytest.fixture(autouse=True)
@@ -113,7 +113,7 @@ class TestTheOpenAICompatibleStreams:
 
 
 def _ollama(failure: BaseException) -> Any:
-    from maljan.llm.ollama_provider import OllamaProvider
+    from malspark.llm.ollama_provider import OllamaProvider
 
     model = OllamaProvider(Settings(_env_file=None)).build_model("m", 0.0, max_tokens=512)
 

@@ -95,7 +95,7 @@ async def test_save_encrypts_secrets_and_reports_applies(key):
 
 @pytest.mark.asyncio
 async def test_values_masks_secrets_and_labels_source(key):
-    from maljan.core import settings_secrets as box
+    from malspark.core import settings_secrets as box
 
     rows = [
         RuntimeSetting(
@@ -254,7 +254,7 @@ async def test_readonly_key_reports_env_value_and_database_url_is_masked():
     vals = await s.values()
     db_info = vals["api.database_url"]
     assert db_info.source in ("env", "default")
-    assert "maljan_dev" not in str(db_info.value)
+    assert "malspark_dev" not in str(db_info.value)
     assert "***" in str(db_info.value)
 
 
@@ -324,8 +324,8 @@ async def test_the_server_editor_shows_the_environment_names_a_built_in_really_g
     """A registry row saved before a sidecar gained a variable is repaired on
     load, so the editor shows what the child is started with rather than what
     the row happens to hold."""
-    from maljan.core.config import Settings
-    from maljan.tools.roots import SAMPLE_ROOTS_ENV
+    from malspark.core.config import Settings
+    from malspark.tools.roots import SAMPLE_ROOTS_ENV
 
     stored: dict[str, Any] = {}
     for name, server in Settings(_env_file=None).mcp.servers.items():
@@ -346,7 +346,7 @@ async def test_the_server_editor_shows_the_environment_names_a_built_in_really_g
 async def test_the_server_editor_shows_a_shipped_name_an_admin_took_away_as_gone(key):
     """What an admin cleared is not quietly put back under them: the intel keys
     are the deployment's credentials, and an emptied list is an instruction."""
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     stored: dict[str, Any] = {}
     for name, server in Settings(_env_file=None).mcp.servers.items():

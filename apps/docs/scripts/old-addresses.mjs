@@ -1,5 +1,5 @@
 /* The docs addresses the old site served, relative to its root
- * (https://root0ne.github.io/Maljan/), from the MkDocs era on.
+ * (https://root0ne.github.io/Malspark/), from the MkDocs era on.
  *
  * Each now lives at the same path under /docs/ on malspark.com, except those
  * in MOVED, which name their new address. scripts/pages-redirect.mjs applies

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from maljan.agents.image_range import program_name, same_program
+from malspark.agents.image_range import program_name, same_program
 
 
 @pytest.mark.parametrize(

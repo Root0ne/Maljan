@@ -33,7 +33,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
-from maljan.llm.generation_rate import (
+from malspark.llm.generation_rate import (
     IN_CALL_SOURCE,
     TIMEOUT_MARGIN,
     WALL_CLOCK_SOURCE,
@@ -220,7 +220,7 @@ class TestACallWithNoOutputCap:
         assert answer.content == "x" * 5000
 
     def test_with_a_known_window_it_is_sized_from_the_room_the_window_leaves(self) -> None:
-        from maljan.llm.context_window import PROBED, WindowFact, record_built_window
+        from malspark.llm.context_window import PROBED, WindowFact, record_built_window
 
         model = record_built_window(
             _model(pieces=5000, stall_after=100, max_tokens=None),
@@ -435,7 +435,7 @@ class TestTheSynchronousStreamIsHeldToo:
 
 
 def _registry_settings(**openai: Any) -> Any:
-    from maljan.core.config import Settings
+    from malspark.core.config import Settings
 
     return Settings(
         _env_file=None,
@@ -449,8 +449,8 @@ def _registry_settings(**openai: Any) -> Any:
 
 class TestTheBuiltModelCarriesItsKnownWindow:
     def test_the_registry_records_the_declared_window(self) -> None:
-        from maljan.llm.context_window import built_window, forget_learned_windows
-        from maljan.llm.registry import LLMProviderRegistry
+        from malspark.llm.context_window import built_window, forget_learned_windows
+        from malspark.llm.registry import LLMProviderRegistry
 
         forget_learned_windows()
         model = LLMProviderRegistry(_registry_settings(context_size=16384)).build_model()
@@ -460,8 +460,8 @@ class TestTheBuiltModelCarriesItsKnownWindow:
         assert fact.tokens == 16384
 
     def test_no_window_is_recorded_where_none_is_declared_or_probed(self) -> None:
-        from maljan.llm.context_window import built_window, forget_learned_windows
-        from maljan.llm.registry import LLMProviderRegistry
+        from malspark.llm.context_window import built_window, forget_learned_windows
+        from malspark.llm.registry import LLMProviderRegistry
 
         forget_learned_windows()
         model = LLMProviderRegistry(_registry_settings()).build_model()

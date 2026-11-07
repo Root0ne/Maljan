@@ -2,13 +2,13 @@
 
 Reference lookups over stdio MCP: MITRE ATT&CK, the API-behaviour catalog, the
 LOLBin table, and retrieval over the vendored family fingerprints and prior
-cases. Delegates to `maljan.tools.knowledge`.
+cases. Delegates to `malspark.tools.knowledge`.
 
-Launched by `maljan.core.config._builtin_servers()` as the `knowledge` server —
+Launched by `malspark.core.config._builtin_servers()` as the `knowledge` server —
 `sys.executable services/knowledge-mcp/server.py`, cwd `services/knowledge-mcp`,
 no environment variables passed through. It is registered with `agents: []` and
 reaches every built-in analyst and the judge through the `ToolRef`s in their
-definitions, so the definition's tool list is the only binding. `similar_cases` leaves out the run's own sample (`MALJAN_SAMPLE_SHA256`, which the platform writes into the child's environment); that needs the stdio transport, since a remote transport gets no environment.
+definitions, so the definition's tool list is the only binding. `similar_cases` leaves out the run's own sample (`MALSPARK_SAMPLE_SHA256`, which the platform writes into the child's environment); that needs the stdio transport, since a remote transport gets no environment.
 
 ## Tools
 

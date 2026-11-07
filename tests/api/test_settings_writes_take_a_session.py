@@ -44,7 +44,7 @@ WRITE_ROUTES: list[tuple[str, str, dict[str, Any] | None]] = [
     ("PATCH", "/api/v1/settings", {"changes": {"core.llm.provider": "openai"}}),
     ("DELETE", "/api/v1/settings?group=llm", None),
     ("DELETE", "/api/v1/settings/core.llm.provider", None),
-    ("POST", "/api/v1/settings/import", {"format": "maljan-settings/1", "values": {}}),
+    ("POST", "/api/v1/settings/import", {"format": "malspark-settings/1", "values": {}}),
     ("POST", "/api/v1/settings/servers/virustotal/credential", None),
     ("POST", "/api/v1/settings/test/mcp?server=x", {"values": {}}),
     ("POST", "/api/v1/settings/test/agent", {"values": {}}),
@@ -142,7 +142,7 @@ def test_a_session_resets_and_imports():
         assert client.delete("/api/v1/settings/core.llm.provider").status_code == 200
         imported = client.post(
             "/api/v1/settings/import",
-            json={"format": "maljan-settings/1", "values": {"core.llm.provider": "openai"}},
+            json={"format": "malspark-settings/1", "values": {"core.llm.provider": "openai"}},
         )
     assert imported.status_code == 200, imported.text
 
@@ -191,7 +191,7 @@ def test_a_policy_change_without_the_current_password_is_refused(route, step_up_
         else:
             r = client.post(
                 "/api/v1/settings/import",
-                json={"format": "maljan-settings/1", "values": {POLICY_KEY: 100}},
+                json={"format": "malspark-settings/1", "values": {POLICY_KEY: 100}},
             )
     assert r.status_code == 422
     assert POLICY_KEY in r.json()["errors"]["current_password"]
@@ -214,7 +214,7 @@ def test_a_policy_change_with_a_wrong_password_is_refused_and_counted(route, ste
             r = client.post(
                 "/api/v1/settings/import",
                 json={
-                    "format": "maljan-settings/1",
+                    "format": "malspark-settings/1",
                     "values": {POLICY_KEY: 100},
                     "current_password": WRONG_PASSWORD,
                 },
@@ -243,7 +243,7 @@ def test_a_policy_change_with_the_current_password_saves(route, step_up_offline)
             r = client.post(
                 "/api/v1/settings/import",
                 json={
-                    "format": "maljan-settings/1",
+                    "format": "malspark-settings/1",
                     "values": {POLICY_KEY: 100},
                     "current_password": CURRENT_PASSWORD,
                 },

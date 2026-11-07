@@ -21,9 +21,9 @@ import time
 import pytest
 from pydantic import ValidationError
 
-from maljan.core import settings_overrides as ov
-from maljan.core.config import MCPServerConfig, Settings
-from maljan.core.settings_catalog import core_catalog, snapshot_hidden_paths
+from malspark.core import settings_overrides as ov
+from malspark.core.config import MCPServerConfig, Settings
+from malspark.core.settings_catalog import core_catalog, snapshot_hidden_paths
 
 _PREFIX = "f10mark"
 
@@ -105,7 +105,7 @@ def test_no_marker_survives_in_the_snapshot(snapshot):
     elif snapshot == "disclosure":
         snap = ov.public_snapshot(settings, ())
     elif snapshot == "efficiency":
-        from maljan.analysis.efficiency import masked_settings
+        from malspark.analysis.efficiency import masked_settings
 
         snap = masked_settings(settings)
     else:
@@ -182,7 +182,7 @@ def test_an_old_stored_snapshot_still_reads():
 
 def test_the_fingerprint_hashes_a_servers_masked_identity():
     """``declared_server`` hashes each field masked, so a token never feeds a digest."""
-    from maljan.analysis.efficiency import declared_server
+    from malspark.analysis.efficiency import declared_server
 
     def server(token: str, name: str = "plain") -> MCPServerConfig:
         return MCPServerConfig(
@@ -198,7 +198,7 @@ def test_the_fingerprint_hashes_a_servers_masked_identity():
 
 
 def test_masking_replaces_each_hidden_part_and_removes_no_text():
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     assert masked_text("see https://h.example/x#sec-2 here") == "see https://h.example/x#*** here"
     assert masked_text("https://h.example/?a=&b=1&flag") == "https://h.example/?a=&b=***&flag"
@@ -228,7 +228,7 @@ class _CountedText(str):
     ids=["letters-then-url", "one-long-scheme", "many-schemes", "repeated-runs"],
 )
 def test_finding_urls_reads_each_character_a_bounded_number_of_times(text):
-    from maljan.core.settings_masking import url_spans
+    from malspark.core.settings_masking import url_spans
 
     _CountedText.reads = 0
     url_spans(_CountedText(text))
@@ -236,7 +236,7 @@ def test_finding_urls_reads_each_character_a_bounded_number_of_times(text):
 
 
 def test_a_credential_that_begins_with_a_dash_is_masked():
-    from maljan.core.settings_masking import masked_args
+    from malspark.core.settings_masking import masked_args
 
     assert masked_args(["--api-key", "-ZZDASH", "--name", "n"]) == [
         "--api-key",
@@ -271,8 +271,8 @@ def test_a_schemeless_address_loses_its_userinfo_in_the_snapshot(written, masked
 
 @pytest.mark.parametrize(("written", "masked"), _SCHEMELESS)
 def test_every_url_masking_masks_a_schemeless_userinfo(written, masked):
-    from maljan.core.settings_catalog import configured_secret_values
-    from maljan.core.settings_masking import masked_text, masked_value
+    from malspark.core.settings_catalog import configured_secret_values
+    from malspark.core.settings_masking import masked_text, masked_value
 
     secret = _marker(501)
     value = written.format(pw=secret)
@@ -302,13 +302,13 @@ def test_every_url_masking_masks_a_schemeless_userinfo(written, masked):
     ],
 )
 def test_a_value_that_is_no_schemeless_address_is_kept(text):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     assert masked_text(text) == text
 
 
 def test_an_address_inside_compact_json_is_masked():
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     secret = _marker(502)
 
@@ -320,7 +320,7 @@ def test_an_address_inside_compact_json_is_masked():
 
 
 def _registered(value: str) -> set[str]:
-    from maljan.core.settings_catalog import configured_secret_values
+    from malspark.core.settings_catalog import configured_secret_values
 
     return configured_secret_values(_with_fragment(f"Error: cannot connect to {value}"))
 
@@ -328,7 +328,7 @@ def _registered(value: str) -> set[str]:
 @pytest.mark.parametrize("word", ["from", "to"])
 @pytest.mark.parametrize("tail", ["h:5432", "h:8080/v1"])
 def test_a_mailbox_word_before_a_password_and_a_port_is_no_mailbox(word, tail):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     secret = _marker(503)
     for value in (f"{word}:user:{secret}@{tail}", f"{word}:{secret}@{tail}"):
@@ -339,7 +339,7 @@ def test_a_mailbox_word_before_a_password_and_a_port_is_no_mailbox(word, tail):
 @pytest.mark.parametrize("opener", list("\"'([{<"))
 @pytest.mark.parametrize("tail", ["llm.internal", "llm.internal:8080/v1"])
 def test_a_password_holding_an_opener_leaves_nothing_of_itself(opener, tail):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     password = f"{_marker(504)}{opener}{_marker(505)}"
     value = f"user:{password}@{tail}"
@@ -363,7 +363,7 @@ def _with_fragment(fragment: str) -> Settings:
 
 @pytest.mark.parametrize("fragment", ["Label: x@example.com", "Contact: ops@example.com"])
 def test_a_mail_address_in_free_text_is_no_secret_and_is_kept(fragment):
-    from maljan.core.settings_catalog import configured_secret_values
+    from malspark.core.settings_catalog import configured_secret_values
 
     settings = _with_fragment(fragment)
 
@@ -372,7 +372,7 @@ def test_a_mail_address_in_free_text_is_no_secret_and_is_kept(fragment):
 
 
 def test_an_address_in_free_text_registers_only_its_password():
-    from maljan.core.settings_catalog import configured_secret_values
+    from malspark.core.settings_catalog import configured_secret_values
 
     fragment = "Error: cannot connect to admin:s3cr3t@10.0.0.5"
     settings = _with_fragment(fragment)
@@ -388,8 +388,8 @@ def test_an_address_in_free_text_registers_only_its_password():
 @pytest.mark.parametrize("opener", list("\"'([{<"))
 @pytest.mark.parametrize("tail", ["llm.internal:8080", "llm.internal:8080/v1", "llm.internal/v1"])
 def test_a_token_alone_holding_an_opener_leaves_nothing_of_itself(opener, tail):
-    from maljan.core.settings_masking import masked_text
-    from maljan.pipeline import events
+    from malspark.core.settings_masking import masked_text
+    from malspark.pipeline import events
 
     token = f"{_marker(506)}{opener}{_marker(507)}"
     value = f"{token}@{tail}"
@@ -408,7 +408,7 @@ def test_a_token_alone_holding_an_opener_leaves_nothing_of_itself(opener, tail):
 @pytest.mark.parametrize("opener", list("\"'([{<"))
 @pytest.mark.parametrize("tail", ["h:8080", "h/v1"])
 def test_a_token_alone_ending_in_an_opener_is_masked(opener, tail):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     token = f"{_marker(508)}{opener}"
 
@@ -436,7 +436,7 @@ def test_a_token_alone_ending_in_an_opener_is_masked(opener, tail):
     ],
 )
 def test_ordinary_text_with_an_opener_and_an_at_is_kept(text):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     assert masked_text(text) == text
     assert configured_secret_values_of(text) == set()
@@ -452,7 +452,7 @@ def test_ordinary_text_with_an_opener_and_an_at_is_kept(text):
     ],
 )
 def test_a_quoted_token_alone_keeps_what_stands_before_its_quote(text, masked, before):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     assert masked_text(text) == masked
     assert not any(before in value for value in configured_secret_values_of(text))
@@ -461,7 +461,7 @@ def test_a_quoted_token_alone_keeps_what_stands_before_its_quote(text, masked, b
 # A JSON-escaped quote or backslash before the "@" marks no path.
 @pytest.mark.parametrize("password", ['p\\"{pw}', 'p\\\\\\"{pw}', 'user:p\\"{pw}'])
 def test_a_password_escaped_in_json_text_is_masked(password):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     secret = _marker(510)
     text = '{"password":"' + password.format(pw=secret) + '@h:8080"}'
@@ -472,7 +472,7 @@ def test_a_password_escaped_in_json_text_is_masked(password):
 
 @pytest.mark.parametrize("path", ["C:\\Users\\bob@corp", "C:\\\\Users\\\\bob@h:8080"])
 def test_a_windows_path_is_kept(path):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     assert masked_text(path) == path
 
@@ -520,7 +520,7 @@ def _credential_shaped_token() -> str:
 
 @pytest.mark.parametrize(("written", "masked"), _BACKSLASHED_PASSWORDS)
 def test_a_backslash_before_a_letter_in_a_password_does_not_shield_it(written, masked):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     secret = _credential_shaped_token()
     text = written.replace("{pw}", secret)
@@ -544,7 +544,7 @@ def test_a_backslash_before_a_letter_in_a_password_does_not_shield_it(written, m
     ],
 )
 def test_a_backslashed_password_in_a_url_with_a_scheme_is_masked(written):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     secret = _marker(512)
     text = written.replace("{pw}", secret)
@@ -580,7 +580,7 @@ def test_a_backslashed_password_in_a_url_with_a_scheme_is_masked(written):
     ],
 )
 def test_a_windows_path_holding_an_at_is_kept_and_registers_nothing(path):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     assert masked_text(path) == path
     assert masked_text(f"opened {path}") == f"opened {path}"
@@ -592,7 +592,7 @@ def test_a_windows_path_holding_an_at_is_kept_and_registers_nothing(path):
     ["CORP\\Administrator@dc01:389", "DOMAIN\\svc_sql_prod01@h:1433", "logs\\app@h/x"],
 )
 def test_a_backslashed_name_that_is_no_token_registers_nothing(account):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     # Masked, as a token alone before a port or a path is; no part of it has
     # a token's shape, so the event scrub registers none of it.
@@ -625,7 +625,7 @@ _PASSWORDS_AFTER_A_PATH = [
 
 @pytest.mark.parametrize(("written", "masked"), _PASSWORDS_AFTER_A_PATH)
 def test_a_path_before_a_password_in_the_same_word_does_not_shield_it(written, masked):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     secret = _credential_shaped_token()
     text = written.replace("{pw}", secret)
@@ -653,7 +653,7 @@ _WORDS_A_READING_AFTER_A_PATH_MASKS = [
 
 @pytest.mark.parametrize(("written", "masked"), _WORDS_A_READING_AFTER_A_PATH_MASKS)
 def test_every_reading_after_a_path_masks_its_words(written, masked):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     secret = _credential_shaped_token()
     text = written.replace("{pw}", secret)
@@ -674,7 +674,7 @@ def test_every_reading_after_a_path_masks_its_words(written, masked):
     ],
 )
 def test_a_webdav_or_hidden_unc_share_is_kept_and_registers_nothing(path):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     assert masked_text(path) == path
     assert masked_text(f"opened {path}") == f"opened {path}"
@@ -696,7 +696,7 @@ def test_a_webdav_or_hidden_unc_share_is_kept_and_registers_nothing(path):
     ],
 )
 def test_a_unc_shaped_password_is_still_masked(written):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     secret = _credential_shaped_token()
     text = written.replace("{pw}", secret)
@@ -719,7 +719,7 @@ def test_a_unc_shaped_password_is_still_masked(written):
     ],
 )
 def test_a_password_written_as_a_webdav_or_hidden_share_is_the_named_residual(written, kept):
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     text = written.replace("{pw}", _credential_shaped_token())
 
@@ -729,7 +729,7 @@ def test_a_password_written_as_a_webdav_or_hidden_share_is_the_named_residual(wr
 def test_masking_backslashed_words_costs_time_linear_in_the_text():
     from tests.linear_cost import assert_scales
 
-    from maljan.core.settings_masking import bare_addresses, masked_text
+    from malspark.core.settings_masking import bare_addresses, masked_text
 
     def masking(text: str) -> None:
         masked_text(text)
@@ -765,7 +765,7 @@ def test_masking_backslashed_words_costs_time_linear_in_the_text():
 
 
 def configured_secret_values_of(text: str) -> set[str]:
-    from maljan.core.settings_catalog import configured_secret_values
+    from malspark.core.settings_catalog import configured_secret_values
 
     return configured_secret_values(_with_fragment(text))
 
@@ -775,13 +775,13 @@ def configured_secret_values_of(text: str) -> set[str]:
 
 
 def _bare_userinfo_before(token: str) -> tuple[str, str] | None:
-    from maljan.core.settings_masking import bare_userinfo
+    from malspark.core.settings_masking import bare_userinfo
 
     return None if "\\" in token.rpartition("@")[0] else bare_userinfo(token)
 
 
 def _address_in_before(word: str) -> int | None:
-    from maljan.core.settings_masking import TOKEN_OPENERS
+    from malspark.core.settings_masking import TOKEN_OPENERS
 
     last_at = word.rfind("@")
     if last_at < 0:
@@ -794,7 +794,7 @@ def _address_in_before(word: str) -> int | None:
 
 
 def _bare_secrets_before(address: str) -> list[str]:
-    from maljan.core.settings_catalog import _reads_as_a_credential, _url_secrets
+    from malspark.core.settings_catalog import _reads_as_a_credential, _url_secrets
 
     parts = _bare_userinfo_before(address)
     if parts is None:
@@ -845,8 +845,8 @@ def _fuzzed_words(count: int) -> list[str]:
 
 
 def test_masking_is_never_weaker_than_before_on_fuzzed_words():
-    from maljan.core.settings_catalog import _bare_secrets
-    from maljan.core.settings_masking import (
+    from malspark.core.settings_catalog import _bare_secrets
+    from malspark.core.settings_masking import (
         _CLOSERS,
         _NO_PASSWORD_BACKSLASH,
         _VALUE_SEPARATORS,
@@ -909,7 +909,7 @@ def test_masking_is_never_weaker_than_before_on_fuzzed_words():
 
 
 def test_a_token_alone_holding_openers_leaves_no_character_on_fuzzed_words():
-    from maljan.core.settings_masking import masked_text
+    from malspark.core.settings_masking import masked_text
 
     draw = random.Random(3710)
     for _ in range(2_000):
@@ -922,7 +922,7 @@ def test_a_token_alone_holding_openers_leaves_no_character_on_fuzzed_words():
 
 
 def test_masking_a_ten_times_longer_text_costs_about_ten_times_as_much():
-    from maljan.core.settings_masking import bare_addresses, masked_text
+    from malspark.core.settings_masking import bare_addresses, masked_text
 
     def cost(text: str) -> float:
         best = float("inf")

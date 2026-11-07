@@ -18,15 +18,15 @@ from typing import Any, ClassVar
 import pytest
 from langchain_core.tools import StructuredTool
 
-from maljan.agents.composition import ResolvedAgent
-from maljan.agents.configurable_analyst import ConfigurableAnalyst
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
-from maljan.analysis.anti_analysis import SCAN_TOOL
-from maljan.analysis.sink_reachability import CallGraph
-from maljan.core.config import Settings
-from maljan.pipeline.nodes import _anti_analysis_step
-from maljan.pipeline.triage_pack import (
+from malspark.agents.composition import ResolvedAgent
+from malspark.agents.configurable_analyst import ConfigurableAnalyst
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.agents.prompt_fragments import PROVIDER_FAMILY, stamp_source
+from malspark.analysis.anti_analysis import SCAN_TOOL
+from malspark.analysis.sink_reachability import CallGraph
+from malspark.core.config import Settings
+from malspark.pipeline.nodes import _anti_analysis_step
+from malspark.pipeline.triage_pack import (
     PIPELINE,
     CapaSettings,
     PackInputs,
@@ -34,15 +34,15 @@ from maljan.pipeline.triage_pack import (
     pack_entries,
     run_pack,
 )
-from maljan.providers import registry
-from maljan.providers.base import (
+from malspark.providers import registry
+from malspark.providers.base import (
     StaticCapabilities,
     StaticJobContext,
     StaticProvider,
     prepare_sample,
 )
-from maljan.schemas.evidence import EvidenceCounter
-from maljan.tools import rules
+from malspark.schemas.evidence import EvidenceCounter
+from malspark.tools import rules
 from tests.unit.tools.synthetic_pe import TEXT_RVA, SyntheticPE
 
 INVENTED = "acme_disassembler"
@@ -315,13 +315,13 @@ class TestItsVariableNames:
     def test_a_registered_provider_s_variable_is_kept_whole_in_published_text(
         self, acme: type[_Acme]
     ) -> None:
-        from maljan.pipeline.events import scrub
+        from malspark.pipeline.events import scrub
 
         said = "check ACMECONTAINERSAMPLESDIRECTORYPATH and the mount"
         assert scrub(said) == said
 
     def test_it_is_redacted_once_the_provider_is_gone(self) -> None:
-        from maljan.pipeline.events import scrub
+        from malspark.pipeline.events import scrub
 
         assert "ACMECONTAINERSAMPLESDIRECTORYPATH" not in scrub(
             "check ACMECONTAINERSAMPLESDIRECTORYPATH and the mount"

@@ -16,15 +16,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from maljan.agents.evidence_recorder import EvidenceRecorder
-from maljan.agents.run_evidence_corpus import RunEvidenceCorpus
-from maljan.analysis import directed_text
-from maljan.core.pack_steps import PACK_RENDERERS, shipped_tools_of
-from maljan.pipeline import triage_pack
-from maljan.pipeline.triage_pack import NOT_RUN_PREFIX, PIPELINE, PackDetail, render_pack
-from maljan.pipeline.validation import Haystack
-from maljan.schemas.evidence import ENTRY_ID_RE, build_entry, format_entry_id
-from maljan.utils.written_forms import (
+from malspark.agents.evidence_recorder import EvidenceRecorder
+from malspark.agents.run_evidence_corpus import RunEvidenceCorpus
+from malspark.analysis import directed_text
+from malspark.core.pack_steps import PACK_RENDERERS, shipped_tools_of
+from malspark.pipeline import triage_pack
+from malspark.pipeline.triage_pack import NOT_RUN_PREFIX, PIPELINE, PackDetail, render_pack
+from malspark.pipeline.validation import Haystack
+from malspark.schemas.evidence import ENTRY_ID_RE, build_entry, format_entry_id
+from malspark.utils.written_forms import (
     pack_escaped,
     sample_written_out,
     written_forms,

@@ -10,7 +10,7 @@ import type {
  * Geometry for the team preview beside the stage editor.
  *
  * Where each stage sits is not decided here. The API lays the team out with
- * `maljan.core.team_layout` — the layout the architecture page's team diagrams
+ * `malspark.core.team_layout` — the layout the architecture page's team diagrams
  * are drawn with — and sends a row and a column per stage. This turns those
  * into pixels and attaches each lint finding to the stage it concerns, and it
  * stays in the settings area: nothing outside the team editor draws with it.

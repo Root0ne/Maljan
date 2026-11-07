@@ -2,7 +2,7 @@
 
 ``evidence_entries`` recorded that a call failed (``ok``) and what it printed
 (``output``); the message a tool gave for the failure and the remediation it
-authored (``maljan.tools.errors``) were only inside that text. The console's
+authored (``malspark.tools.errors``) were only inside that text. The console's
 evidence row and the report header show both, so they become columns of their
 own: ``error``, the failure text, and ``remediation``, what would make the
 next call succeed. Both are nullable; a row written before this revision reads

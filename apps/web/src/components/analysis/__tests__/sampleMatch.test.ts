@@ -8,8 +8,8 @@ const SAID = "Run against the sample it was drafted from: ";
 function rule(extra: Partial<DetectionRule> = {}): DetectionRule {
   return {
     kind: "yara",
-    name: "Maljan_AutoGen_Example",
-    body: "rule Maljan_AutoGen_Example { condition: true }",
+    name: "Malspark_AutoGen_Example",
+    body: "rule Malspark_AutoGen_Example { condition: true }",
     auto_generated: true,
     source_evidence: [],
     compile_error: null,
@@ -157,7 +157,7 @@ const HAIKU8_STANDING =
   "Not printed in the analyst report: it matches the sample by its sha256 and imphash only, " +
   "not by its content; its body is in the evidence bundle.";
 const HAIKU8 = rule({
-  name: "Maljan_AutoGen_Latrodectus",
+  name: "Malspark_AutoGen_Latrodectus",
   matches_sample: true,
   matched_by: ["sha256", "imphash"],
   sample_strings: ["$s0", "$s1", "$s2", "$s3", "$s4"].map((identifier) => ({ identifier, offset: null })),

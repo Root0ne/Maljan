@@ -1,4 +1,4 @@
-"""``maljan.tools.binary`` reports structure, and reports it as facts.
+"""``malspark.tools.binary`` reports structure, and reports it as facts.
 
 Synthetic inputs throughout: a hand-built ELF header, a zip with an
 ``AndroidManifest.xml``, a PDF carrying ``/JS`` and ``/OpenAction``. They are
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from maljan.tools import binary as tool
+from malspark.tools import binary as tool
 
 
 def _elf(machine: int = 0x3E) -> bytes:

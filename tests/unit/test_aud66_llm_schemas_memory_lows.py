@@ -12,12 +12,12 @@ import openai
 import pytest
 from langchain_core.messages import HumanMessage
 
-from maljan.core.config import Settings
-from maljan.llm.openai_provider import OpenAIProvider, forget_standard_only
-from maljan.memory.attck_case_index import AttckCaseIndex
-from maljan.schemas.evidence import parse_structured
-from maljan.schemas.evidence_spill import spill_part
-from maljan.schemas.sandbox_report import _split_host_port, cape_report_to_sandbox_report
+from malspark.core.config import Settings
+from malspark.llm.openai_provider import OpenAIProvider, forget_standard_only
+from malspark.memory.attck_case_index import AttckCaseIndex
+from malspark.schemas.evidence import parse_structured
+from malspark.schemas.evidence_spill import spill_part
+from malspark.schemas.sandbox_report import _split_host_port, cape_report_to_sandbox_report
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +80,7 @@ def test_l2_a_spill_of_a_too_deep_structure_is_stated_not_raised() -> None:
         def put(self, digest: str, blob: bytes, content_type: str) -> str:
             return digest
 
-    from maljan.schemas import evidence_spill
+    from malspark.schemas import evidence_spill
 
     part = next(p for p, t in evidence_spill.CONTENT_TYPES.items() if t == evidence_spill.JSON)
     ref = spill_part(_Sink(), part, deep)  # type: ignore[arg-type]
@@ -93,7 +93,7 @@ def test_l2_a_spill_of_a_too_deep_structure_is_stated_not_raised() -> None:
 def test_l3_a_logged_base_url_carries_no_credential(caplog: pytest.LogCaptureFixture) -> None:
     from types import SimpleNamespace
 
-    from maljan.llm.registry import LLMProviderRegistry
+    from malspark.llm.registry import LLMProviderRegistry
 
     secret = "-".join(("pw", "9f2c"))
     url = f"https://user:{secret}@llm.internal/v1"
@@ -101,7 +101,7 @@ def test_l3_a_logged_base_url_carries_no_credential(caplog: pytest.LogCaptureFix
         provider="openai", model="m", temperature=None, base_url=url, effort=None
     )
     registry = LLMProviderRegistry(Settings(_env_file=None))
-    with caplog.at_level(logging.DEBUG, logger="maljan"):
+    with caplog.at_level(logging.DEBUG, logger="malspark"):
         try:
             registry._build_choice("static", choice, None)
         except Exception:  # noqa: BLE001 - built or refused, the log line is what is read
@@ -175,7 +175,7 @@ def test_l4_a_stream_that_finished_is_the_answer() -> None:
 
 
 def test_l4_an_ollama_stream_without_done_is_a_dropped_connection() -> None:
-    from maljan.llm.ollama_provider import OllamaProvider
+    from malspark.llm.ollama_provider import OllamaProvider
 
     model = OllamaProvider(Settings(_env_file=None)).build_model("m", 0.0, max_tokens=512)
 

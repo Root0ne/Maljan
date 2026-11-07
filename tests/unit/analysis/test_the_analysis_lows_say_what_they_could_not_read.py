@@ -5,12 +5,12 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from maljan.analysis.evidence_roots import _gather, _Stated, answer_facts, statement_values
-from maljan.schemas.evidence import LedgerEntry
+from malspark.analysis.evidence_roots import _gather, _Stated, answer_facts, statement_values
+from malspark.schemas.evidence import LedgerEntry
 
 
 def test_a_l1_a_summary_with_no_negotiation_states_no_confidence() -> None:
-    from maljan.analysis.run_summary import RunSummaryBuilder
+    from malspark.analysis.run_summary import RunSummaryBuilder
 
     summary = RunSummaryBuilder(start_time=time.time()).build()
 
@@ -20,9 +20,9 @@ def test_a_l1_a_summary_with_no_negotiation_states_no_confidence() -> None:
 
 
 def test_a_l2_a_failed_coverage_or_efficiency_build_says_it_was_not_built() -> None:
-    from maljan.analysis.coverage import coverage_record
-    from maljan.analysis.disclosure import NOT_BUILT_UNREAD, not_built
-    from maljan.analysis.efficiency import efficiency_record
+    from malspark.analysis.coverage import coverage_record
+    from malspark.analysis.disclosure import NOT_BUILT_UNREAD, not_built
+    from malspark.analysis.efficiency import efficiency_record
 
     broken: Any = 5  # not a ledger: reading it raises
     assert coverage_record(entries=broken, isr_reports=broken) == not_built(NOT_BUILT_UNREAD)
@@ -59,7 +59,7 @@ def test_a_l4_a_number_equal_to_a_count_places_nothing_without_what_it_counts() 
 
 
 def test_a_l5_the_cli_fallback_summary_keeps_the_degradation(tmp_path: Any) -> None:
-    from maljan.cli import _write_markdown_report
+    from malspark.cli import _write_markdown_report
 
     summary = {
         "final_decision": "Malware",

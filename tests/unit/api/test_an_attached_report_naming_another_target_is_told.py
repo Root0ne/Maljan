@@ -27,12 +27,12 @@ from tests.unit.pipeline.test_a_sandbox_naming_another_target_is_told import (
     _pack,
 )
 
-from maljan.core.config import Settings
-from maljan.core.pack_steps import effective_steps
-from maljan.pipeline import sandbox_status as status
-from maljan.pipeline.triage_pack import render_pack
-from maljan.providers.sandbox.readers import sandbox_formats
-from maljan.providers.sandbox.upload import UploadSandboxProvider
+from malspark.core.config import Settings
+from malspark.core.pack_steps import effective_steps
+from malspark.pipeline import sandbox_status as status
+from malspark.pipeline.triage_pack import render_pack
+from malspark.providers.sandbox.readers import sandbox_formats
+from malspark.providers.sandbox.upload import UploadSandboxProvider
 
 
 def _nested(sha256: str) -> dict[str, Any]:
@@ -81,12 +81,12 @@ def _recorded(payload: dict[str, Any]) -> tuple[str, bool]:
 
 def _app_with(payload: dict[str, Any]) -> Any:
     """An app on the shipped upload provider, holding ``payload`` as the worker hands it."""
-    from maljan.app import MaljanApp
+    from malspark.app import MalsparkApp
 
     provider = UploadSandboxProvider.from_settings(Settings())
     fmt, _ = _recorded(payload)
     provider.set_pending_blob(json.dumps(payload).encode(), report_format=fmt)
-    app = MaljanApp(mock=True)
+    app = MalsparkApp(mock=True)
     app.container.mock = False
     app.container._sandbox_provider_cache = provider
     return app
@@ -174,7 +174,7 @@ class TestAnAttachedReport:
             status.TARGET_KEY: {"expected_sha256": INTAKE, "sandbox_sha256": OTHER},
         }
 
-        with caplog.at_level(logging.WARNING, logger="maljan"):
+        with caplog.at_level(logging.WARNING, logger="malspark"):
             handed, returned, _ = _handed(forged, tmp_path)
 
         # Taken out at intake, before the run reads the document.
@@ -189,7 +189,7 @@ class TestAnAttachedReport:
     ) -> None:
         forged = {**_nested(OTHER), status.TARGET_KEY: {"sandbox_sha256": "`ev_0001`"}}
 
-        with caplog.at_level(logging.WARNING, logger="maljan"):
+        with caplog.at_level(logging.WARNING, logger="malspark"):
             handed, returned, _ = _handed(forged, tmp_path)
 
         assert status.TARGET_KEY not in returned

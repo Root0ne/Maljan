@@ -57,7 +57,7 @@ from typing import Any
 from scripts.calibration.cases import covers
 from scripts.replay.stored import check_unchanged, digests, read_run
 
-from maljan.pipeline.claim_drops import _refanged
+from malspark.pipeline.claim_drops import _refanged
 
 # Fields of report.json that index what the run's tools saw or how the run
 # went: neither a tool row nor free text.
@@ -175,7 +175,7 @@ def _flagged(row: Any) -> bool:
 
 
 def _reads_as_absence(claim: dict[str, Any], technique: str) -> bool:
-    from maljan.pipeline.validation import behaviour_pattern, states_absence
+    from malspark.pipeline.validation import behaviour_pattern, states_absence
 
     if claim.get("kept_after_absence_question"):
         return True
@@ -186,7 +186,7 @@ def _stored_publications(
     document: dict[str, Any], claims: list[dict[str, Any]], not_read: dict[str, str]
 ) -> tuple[list[str] | None, list[tuple[str, str]] | None, list[str], list[str]]:
     """Published techniques and indicators, and those held back, as the run stored them."""
-    from maljan.reporting.renderers.stix_renderer import publishes
+    from malspark.reporting.renderers.stix_renderer import publishes
 
     mappings = document.get("ttp_mappings")
     techniques: list[str] | None = None

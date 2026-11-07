@@ -1,5 +1,5 @@
 /* Writes the GitHub Pages site that sends readers from the old docs address,
- * https://root0ne.github.io/Maljan/<path>, to https://malspark.com/docs/<path>
+ * https://root0ne.github.io/Malspark/<path>, to https://malspark.com/docs/<path>
  * (and /examples/... and /assets/... to the same path on malspark.com), query
  * and anchor kept. An address in MOVED (scripts/old-addresses.mjs) goes to the
  * page that holds its text now.
@@ -23,12 +23,12 @@ if (!out) {
 const site = 'https://malspark.com';
 const home = `${site}/docs/`;
 
-/* The path after /Maljan; an address already under /docs/, /examples/ or
+/* The path after /Malspark; an address already under /docs/, /examples/ or
  * /assets/ keeps its prefix, anything else is a docs page. */
 const script = `<script>
 (function () {
   var moved = ${JSON.stringify(MOVED)};
-  var rest = location.pathname.replace(/^\\/Maljan(?=\\/|$)/, '').replace(/\\/index\\.html$/, '/') || '/';
+  var rest = location.pathname.replace(/^\\/Malspark(?=\\/|$)/, '').replace(/\\/index\\.html$/, '/') || '/';
   var key = rest.replace(/\\/?$/, '/');
   var path = moved[key] || (/^\\/(docs|examples|assets)(\\/|$)/.test(rest) ? rest : '/docs' + rest);
   location.replace('${site}' + path + location.search + location.hash);
