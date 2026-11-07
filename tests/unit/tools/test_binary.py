@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from malspark.tools import binary as tool
+from tests.unit._elf_image import INTERP, LIBRARY, dynamic_elf
 
 
 def _elf(machine: int = 0x3E) -> bytes:
@@ -286,17 +287,16 @@ class TestElfInfo:
         assert result["bitness"] == 64
         assert result["endianness"] == "little"
 
-    def test_a_real_system_binary_reports_its_interpreter_and_needed_libraries(self) -> None:
-        binary = Path("/bin/ls")
-        if not binary.is_file():
-            pytest.skip("no /bin/ls on this box")
+    def test_a_dynamically_linked_binary_reports_its_interpreter_and_needed_libraries(
+        self, tmp_path: Path
+    ) -> None:
+        binary = tmp_path / "s.so"
+        binary.write_bytes(dynamic_elf())
         result = tool.elf_info(str(binary))
-        assert result["sections"], "a system binary has sections"
-        # A dynamically linked binary names its loader; a static one would not,
-        # and then there is nothing to assert about linkage.
-        if result["interp"]:
-            assert result["interp"].startswith("/")
-            assert result["needed"], "a dynamic binary needs at least one library"
+        assert result["sections"], "a linked binary has sections"
+        assert result["interp"] == INTERP
+        assert result["needed"] == [LIBRARY]
+        assert {row["function"] for row in result["imports"]} >= {"malloc", "free"}
 
     def test_a_file_without_the_elf_magic_is_refused_by_name(self, tmp_path: Path) -> None:
         target = tmp_path / "s.bin"
