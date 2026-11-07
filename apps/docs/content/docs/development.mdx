@@ -73,10 +73,32 @@ on loopback port 8080.
 | `make check` | lint, format check, typecheck, tests — the local mirror of CI. |
 | `make semgrep` | the four rulesets CI runs, at the pinned version, over the same targets. |
 | `make migrate` | `alembic upgrade head` against `DATABASE_URL`. |
-| `make dev-up` / `dev-down` / `dev-logs` | the compose stack with the development overlay. |
+| `make dev-up` / `dev-down` / `dev-logs` | the compose stack with the development overlay, plus the files `COMPOSE_FILE_EXTRA` names. |
+| `make create-admin EMAIL=...` | `malspark create-admin` in the running stack's API container: the first admin account. |
 | `make fe-rebuild` / `worker-restart` | make a source edit real on the production stack. |
 | `make external` | refetch the third-party trees at their pinned refs. |
 | `make ghidra-status` / `-sync` / `-build` / `-watch` | the Ghidra MCP manager. |
+
+### Your own compose overrides
+
+`make dev-up` passes two files to Compose, `docker/docker-compose.yml` and the
+development overlay `docker/docker-compose.dev.yml`. Compose reads a
+`docker-compose.override.yml` on its own only when it is given no `-f`, so on
+the dev targets an override file is not read unless you name it.
+`COMPOSE_FILE_EXTRA` names it: each file in it, space-separated, is appended as
+one more `-f`, after the two shipped files, so it wins over both.
+
+```bash
+COMPOSE_FILE_EXTRA=docker/local.yml make dev-up
+make dev-logs COMPOSE_FILE_EXTRA="docker/local.yml docker/gpu.yml"
+```
+
+Give `dev-down` and `dev-logs` the same value. The value is split on spaces,
+so a path with a space in it is not supported. A path in `COMPOSE_FILE_EXTRA`
+is read from the repository root; relative paths inside the file (a volume, a
+build context) are read from `docker/`, the first file's directory. The
+`docker-up` family passes no `-f`, and so does read
+`docker/docker-compose.override.yml` when it is there.
 
 ## Tests
 
@@ -191,6 +213,31 @@ INFO line says so when the encoding changes. An operator's own tool server
 keeps the environment it was started with, and so the operator's locale: a
 YARA engine inside one can still mishandle I and i on such a host. The
 backend image already runs under `LANG=C.UTF-8`.
+
+### Native runs on macOS
+
+The PDF export uses WeasyPrint, which loads Pango and GLib when it prints. On a
+Mac, install them from Homebrew:
+
+```bash
+brew install pango   # brings glib with it
+```
+
+On Apple Silicon, Homebrew installs into `/opt/homebrew/lib`, where the dynamic
+loader does not look, so WeasyPrint does not find `libgobject-2.0` and the PDF
+export fails. Point the loader's fallback path there in the shell that runs the
+tests, the API or the worker:
+
+```bash
+export DYLD_FALLBACK_LIBRARY_PATH=/opt/homebrew/lib
+uv run pytest tests/ -q
+```
+
+macOS removes `DYLD_` variables from the environment of its own protected
+programs (`/bin/sh`, `/usr/bin/make`, `/usr/bin/env`) and of everything they
+start, so a `make` target does not pass it on: run the `uv run` command
+directly. An Intel Mac's Homebrew installs into `/usr/local/lib`, which the
+loader already searches.
 
 ## Documentation site
 

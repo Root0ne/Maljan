@@ -1,7 +1,7 @@
 ---
 title: "Command line"
 sidebarTitle: "CLI"
-description: "The malspark command: run the pipeline in one process, show the configuration, and maintain the long-term memory."
+description: "The malspark command: run the pipeline in one process, show the configuration, maintain the long-term memory and make the first admin account."
 ---
 
 The `malspark` command runs the pipeline in a single process, with no API,
@@ -65,6 +65,58 @@ uv run malspark analyze sample_1 --mock --name test.exe
 Prints the active configuration: the LLM provider, the expert and judge
 models, the round limit, the token limit, the active team, its analysts and
 the registered parsers.
+
+## `malspark create-admin`
+
+Creates an admin account, or promotes an existing account to admin, in the
+API's database. No endpoint grants `admin`, so this is how the first one is
+made. Unlike the other commands it works on the stack's database, not on the
+local settings: it reads `DATABASE_URL` as the API does and uses the API's own
+user model and password hashing, so it needs the API package (`uv sync
+--all-packages`, or the backend image).
+
+In the compose stack, run it in the API container, which has both:
+
+```bash
+make create-admin EMAIL=you@example.com
+# the same, by hand:
+docker compose -f docker/docker-compose.yml exec backend-api malspark create-admin you@example.com
+```
+
+`make create-admin` reads `EMAIL` from its own command line only, never from
+the environment, where git and other tools keep the user's own address.
+
+| Argument or option | Meaning |
+| :-- | :-- |
+| `EMAIL` | The account's e-mail address, exactly as it signs in with it. |
+| `--full-name` | The name of an account the command creates. Default `Administrator`. |
+| `--password-stdin` | Read a new account's password from standard input instead of asking for it (once, and without echo when standard input is a terminal). |
+
+- **No account with that address:** one is created with the `admin` role.
+  Its password is asked for twice on the terminal, hidden. It is never taken
+  from an argument, and it follows the registration's rule of 8 to 128
+  characters.
+- **An existing account:** it is promoted and keeps its password; nothing is
+  asked. Promoting an account that is already an admin changes nothing and
+  says so. A deactivated account is promoted and stays deactivated, and the
+  command says that it cannot sign in.
+- **An account whose address differs only in case** (`Kate@` against
+  `kate@`): sign-in compares the address exactly, so these are two accounts.
+  The command refuses, says how many there are, and changes nothing; give
+  the stored address exactly.
+
+A creation or a promotion is recorded in the audit log as `auth.role.grant`, with no actor (the command line is not an account) and the account as its resource.
+The command refuses, and changes nothing, when the database cannot be reached
+or does not carry this release's migrations (run `make migrate`, or let the
+stack's `migrate` service finish, first). It exits with code 1 on a refusal.
+
+For a script, write the password to standard input. `-T` turns off the
+terminal that `docker compose exec` allocates:
+
+```bash
+printf '%s\n' "$ADMIN_PASSWORD" | docker compose -f docker/docker-compose.yml \
+  exec -T backend-api malspark create-admin you@example.com --password-stdin
+```
 
 ## `malspark memory`
 
