@@ -60,6 +60,32 @@ class TestRecycleFiresOnlyWhenBloated:
         # database engine and the Redis pool.
         assert sig == signal.SIGTERM
 
+    @pytest.mark.asyncio
+    async def test_an_unread_rss_says_once_that_the_ceiling_is_not_applied(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """No reading is not a small worker: the ceiling that cannot be held is said."""
+        import logging
+        import threading
+
+        monkeypatch.setattr(analysis_worker, "_RSS_UNREAD_SAID", threading.Event())
+        loop = self._loop_spy()
+        with (
+            patch("malspark.core.memprobe.rss_mb", return_value=None),
+            patch("asyncio.get_running_loop", return_value=loop),
+            caplog.at_level(logging.WARNING),
+        ):
+            await analysis_worker._recycle_if_bloated({})
+            await analysis_worker._recycle_if_bloated({})
+
+        loop.call_later.assert_not_called()
+        said = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+        expected = analysis_worker.RSS_CEILING_NOT_APPLIED.format(
+            limit=analysis_worker._RSS_RESTART_MB
+        )
+        assert said == [expected]
+        assert "is not applied" in said[0]
+
     def test_the_threshold_comes_from_the_environment(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

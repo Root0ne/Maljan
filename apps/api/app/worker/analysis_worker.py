@@ -4731,6 +4731,12 @@ from app.worker.enrich_worker import (  # noqa: E402
 # ``run_analysis``'s ``finally`` works, a worker that has grown this large has
 # already stopped being safe to keep around.
 _RSS_RESTART_MB = float(os.environ.get("WORKER_RSS_RESTART_MB", "6000"))
+# What the worker says, once, where its resident set cannot be read.
+RSS_CEILING_NOT_APPLIED = (
+    "Worker RSS cannot be read on this host (neither /proc nor ps answered): the "
+    "{limit:.0f} MB recycle ceiling (WORKER_RSS_RESTART_MB) is not applied."
+)
+_RSS_UNREAD_SAID = threading.Event()
 
 # Absolute ceiling on end-of-job teardown. Reclaiming a subprocess and a socket
 # is never worth holding a finished job — and therefore the whole queue — open.
@@ -4753,6 +4759,13 @@ async def _recycle_if_bloated(ctx: dict, *args: Any, **kwargs: Any) -> None:
     from malspark.core import memprobe
 
     rss = memprobe.rss_mb()
+    if rss is None:
+        # No reading is not a small worker: the ceiling cannot be held, and that
+        # is said once rather than every job.
+        if not _RSS_UNREAD_SAID.is_set():
+            _RSS_UNREAD_SAID.set()
+            logger.warning(RSS_CEILING_NOT_APPLIED.format(limit=_RSS_RESTART_MB))
+        return
     if rss < _RSS_RESTART_MB:
         logger.info("Worker RSS %.0f MB (limit %.0f MB).", rss, _RSS_RESTART_MB)
         return
