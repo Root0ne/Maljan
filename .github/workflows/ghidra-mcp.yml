@@ -35,7 +35,7 @@ jobs:
   build:
     name: Build ghidra-mcp and wait for its healthcheck
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     # Values only for the compose file's guards: no other service is built or started.
     env:
       POSTGRES_PASSWORD: ci-only
@@ -56,26 +56,21 @@ jobs:
       - name: Build the image as the compose file does
         run: docker compose -f docker/docker-compose.yml --profile ghidra build ghidra-mcp
 
-      - name: Start it and wait for its healthcheck
-        run: |
-          token="$(openssl rand -hex 24)"
-          docker run -d --name ghidra-mcp-ci \
-            -e GHIDRA_MCP_AUTH_TOKEN="$token" \
-            -e GHIDRA_MCP_BIND_ADDRESS=0.0.0.0 \
-            -e GHIDRA_MCP_PORT=8089 \
-            ghidra-mcp-headless:latest
-          for _ in $(seq 1 60); do
-            state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' ghidra-mcp-ci)"
-            echo "$state"
-            case "$state" in
-              "running healthy") exit 0 ;;
-              running*) sleep 10 ;;
-              *) break ;;
-            esac
-          done
-          docker logs ghidra-mcp-ci
-          exit 1
+      # Started by the compose file, so it runs as it does in a deployment: the
+      # worker's ids, no capability, no-new-privileges, its HOME and JVM options,
+      # and the projects volume volume-init hands over (which builds the backend
+      # image volume-init runs from).
+      - name: Start it as the compose file does and wait for its healthcheck
+        env:
+          GHIDRA_MCP_AUTH_TOKEN: ${{ github.run_id }}-ci-only-token
+        run: >-
+          docker compose -f docker/docker-compose.yml --profile ghidra
+          up -d --wait --wait-timeout 600 ghidra-mcp
 
       - name: Server log
         if: always()
-        run: docker logs ghidra-mcp-ci 2>&1 | tail -n 100 || true
+        run: docker compose -f docker/docker-compose.yml --profile ghidra logs ghidra-mcp volume-init 2>&1 | tail -n 100 || true
+
+      - name: Remove the containers and volumes
+        if: always()
+        run: docker compose -f docker/docker-compose.yml --profile ghidra down -v || true
