@@ -17,12 +17,12 @@ from malspark.extractors.capability_matrix import (
 from malspark.extractors.network_extractor import _scored_domain
 from malspark.extractors.pe_extractor import _parse_elf_imports
 from malspark.schemas.isr_models import AgentISR, ClaimEvidence
-from tests.unit._elf_image import dynamic_elf
+from tests.unit._elf_image import ELF_SOURCES, elf_bytes
 
 
-def _hostile_elf(which: str) -> bytes:
+def _hostile_elf(which: str, clean: bytes) -> bytes:
     """A dynamically linked ELF with its .gnu.version_r damaged as a hostile sample would."""
-    base = bytearray(dynamic_elf())
+    base = bytearray(clean)
     elf = ELFFile(io.BytesIO(bytes(base)))
     idx = next(i for i, s in enumerate(elf.iter_sections()) if s.name == ".gnu.version_r")
     sec = elf.get_section(idx)
@@ -44,11 +44,15 @@ def _hostile_elf(which: str) -> bytes:
     return bytes(base)
 
 
+@ELF_SOURCES
 @pytest.mark.parametrize("which", ["loop", "auxloop", "past_eof", "cnt0"])
-def test_n1_a_hostile_version_table_costs_no_time_and_no_import_row(which: str) -> None:
-    clean = _parse_elf_imports(dynamic_elf())
+def test_n1_a_hostile_version_table_costs_no_time_and_no_import_row(
+    which: str, source: str
+) -> None:
+    image = elf_bytes(source)
+    clean = _parse_elf_imports(image)
     started = time.thread_time()
-    rows = _parse_elf_imports(_hostile_elf(which))
+    rows = _parse_elf_imports(_hostile_elf(which, image))
     assert time.thread_time() - started < 10
     assert sum(1 for r in rows if r.function) == sum(1 for r in clean if r.function)
 
@@ -78,10 +82,11 @@ def test_l9_a_run_without_a_ledger_reads_as_it_did() -> None:
     assert CORROBORATION_NOT_READ_NOTE not in cells[0].note
 
 
-def test_n_a_version_table_naming_one_long_string_costs_the_sections_size() -> None:
+@ELF_SOURCES
+def test_n_a_version_table_naming_one_long_string_costs_the_sections_size(source: str) -> None:
     """Many need entries whose names run into one huge unterminated-looking string."""
     n, length = 4000, 2_000_000
-    base = bytearray(dynamic_elf())
+    base = bytearray(elf_bytes(source))
     elf = ELFFile(io.BytesIO(bytes(base)))
     secs = {s.name: (i, s) for i, s in enumerate(elf.iter_sections())}
     header = elf["e_shoff"] + secs[".gnu.version_r"][0] * elf["e_shentsize"]

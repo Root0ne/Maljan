@@ -6,11 +6,21 @@ holds what such a binary was read for: an interpreter, one ``DT_NEEDED``
 library, undefined function symbols in ``.dynsym`` and a ``.gnu.version_r``
 table naming the library each symbol's version was needed from. It is never
 run; its program headers only describe its own layout.
+
+The host's own ``/bin/ls`` is read beside it where that is an ELF binary, so a
+real toolchain's output stays tested on such a host (``ELF_SOURCES``).
 """
 
 from __future__ import annotations
 
 import struct
+from pathlib import Path
+
+import pytest
+
+# The two images a test reads: the one built here, and the host's own binary.
+ELF_SOURCES = pytest.mark.parametrize("source", ["built", "host"])
+HOST_BINARY = Path("/bin/ls")
 
 INTERP = "/lib64/ld-linux-x86-64.so.2"
 LIBRARY = "libc.so.6"
@@ -176,3 +186,13 @@ def dynamic_elf() -> bytes:
     )
     image[:_SECTIONS_AT] = elf_header + program
     return bytes(image)
+
+
+def elf_bytes(source: str) -> bytes:
+    """The image ``source`` names; the host's is skipped where it is absent or not ELF."""
+    if source == "built":
+        return dynamic_elf()
+    blob = HOST_BINARY.read_bytes() if HOST_BINARY.is_file() else b""
+    if blob[:4] != b"\x7fELF":
+        pytest.skip(f"{HOST_BINARY} is absent or not an ELF binary on this host")
+    return blob
