@@ -22,6 +22,8 @@ import pytest
 from malspark.tools import emulated_strings as tool
 
 IMAGEBASE = 0x180000000
+# A fake build that answers --version as the pinned release does.
+ANSWERS = b'#!/bin/sh\necho "floss 3.1.1"\n'
 
 
 def _document() -> dict[str, Any]:
@@ -88,6 +90,13 @@ class _Runner:
 @pytest.fixture(autouse=True)
 def _nothing_remembered() -> None:
     tool.forget_documents()
+
+
+@pytest.fixture(autouse=True)
+def _the_standalone_build_is_pinned(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The fake builds below stand in for the standalone build, whose digest is
+    # the one pinned on every machine but arm64; an arm64 host runs them so too.
+    monkeypatch.setattr(tool, "_LAUNCHER_MACHINES", frozenset())
 
 
 def _pe(tmp_path: Path, name: str = "s.dll") -> str:
@@ -326,7 +335,7 @@ class TestTheExecutable:
     ) -> None:
         import hashlib
 
-        body = b"#!/bin/sh\n"
+        body = ANSWERS
         target = self._executable(tmp_path, body)
         monkeypatch.setenv("MALSPARK_FLOSS_PATH", str(target))
         monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(body).hexdigest())
@@ -342,7 +351,7 @@ class TestTheExecutable:
         monkeypatch.delenv("MALSPARK_FLOSS_PATH", raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
         monkeypatch.setenv("PATH", str(tmp_path / "empty"))
-        body = b"#!/bin/sh\n"
+        body = ANSWERS
         installed = tool.default_install_path()
         installed.parent.mkdir(parents=True)
         installed.write_bytes(body)
@@ -361,7 +370,7 @@ class TestTheExecutable:
         """The triage pack looks with the analysis server's environment."""
         import hashlib
 
-        body = b"#!/bin/sh\n"
+        body = ANSWERS
         target = self._executable(tmp_path, body)
         monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(body).hexdigest())
         monkeypatch.setenv("MALSPARK_FLOSS_PATH", str(tmp_path / "absent"))
@@ -376,7 +385,7 @@ class TestTheExecutable:
         import hashlib
 
         monkeypatch.setenv("HOME", str(tmp_path / "home"))
-        body = b"#!/bin/sh\n"
+        body = ANSWERS
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         target = bin_dir / "floss"
@@ -412,6 +421,24 @@ class TestTheBuildMustRunHere:
     ) -> None:
         body = b'#!/bin/sh\n[ "$1" = --version ] && echo "3.1.1" && exit 0\nexit 2\n'
         self._pinned(tmp_path, monkeypatch, body)
+
+        assert tool.floss_unavailable() is None
+
+    @pytest.mark.parametrize("answer", ["", "floss 3.1.0", "floss 3.1.10", "3.1.1.1"])
+    def test_a_build_that_does_not_report_the_pinned_release_is_not_installed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answer: str
+    ) -> None:
+        self._pinned(tmp_path, monkeypatch, f'#!/bin/sh\necho "{answer}"\n'.encode())
+
+        assert tool.floss_unavailable() == (
+            "floss is not installed: floss --version did not report 3.1.1"
+        )
+
+    @pytest.mark.parametrize("answer", ["floss 3.1.1", "floss v3.1.1-0-g3cd3ee6"])
+    def test_either_build_s_answer_reports_the_pinned_release(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answer: str
+    ) -> None:
+        self._pinned(tmp_path, monkeypatch, f'#!/bin/sh\necho "{answer}"\n'.encode())
 
         assert tool.floss_unavailable() is None
 
@@ -459,7 +486,7 @@ class TestTheBuildMustRunHere:
         import hashlib
 
         count = tmp_path / "asked"
-        body = f'#!/bin/sh\necho x >> "{count}"\n'.encode()
+        body = f'#!/bin/sh\necho x >> "{count}"\necho "floss 3.1.1"\n'.encode()
         target = self._pinned(tmp_path, monkeypatch, body)
 
         assert tool.floss_unavailable() is None
@@ -477,7 +504,7 @@ class TestTheBuildMustRunHere:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The manifest asks while the server starts, so the probe must answer."""
-        self._pinned(tmp_path, monkeypatch, b"#!/bin/sh\n")
+        self._pinned(tmp_path, monkeypatch, ANSWERS)
         real = tmp_path / "real-base"
         real.mkdir()
         link = tmp_path / "linked-base"
@@ -497,7 +524,9 @@ class TestTheBuildMustRunHere:
         slow = tmp_path / "slow"
         slow.touch()
         self._pinned(
-            tmp_path, monkeypatch, f'#!/bin/sh\n[ -e "{slow}" ] && exec sleep 30\nexit 0\n'.encode()
+            tmp_path,
+            monkeypatch,
+            f'#!/bin/sh\n[ -e "{slow}" ] && exec sleep 30\necho "floss 3.1.1"\n'.encode(),
         )
         monkeypatch.setattr(tool, "_PROBE_TIMEOUT_S", 1)
 
@@ -576,7 +605,7 @@ class TestTheBuildMustRunHere:
     def test_the_run_leaves_nothing_in_staging(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        self._pinned(tmp_path, monkeypatch, b"#!/bin/sh\n")
+        self._pinned(tmp_path, monkeypatch, ANSWERS)
 
         assert tool.floss_unavailable() is None
         assert list((tmp_path / "staging" / "floss").iterdir()) == []

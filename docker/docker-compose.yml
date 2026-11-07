@@ -202,7 +202,9 @@ services:
         GHIDRA_VERSION: "12.0.4"
         GHIDRA_DATE: "20260303"
     image: ghidra-mcp-headless:latest
-    # x86-64 only: Ghidra's release ships no linux_arm_64 decompiler; an arm64 host runs it emulated.
+    # x86-64 only: Ghidra's release ships no linux_arm_64 decompiler, and
+    # building one (support/buildNatives) needs a compiler toolchain in the
+    # image the external tree builds; an arm64 host runs it emulated.
     platform: linux/amd64
     container_name: malspark-ghidra-mcp
     # `no` keeps a stopped container stopped across a reboot or a daemon
@@ -368,7 +370,8 @@ services:
       context: ../services
       dockerfile: die-mcp/Dockerfile
     image: malspark-die-mcp:3.21
-    # x86-64 only: the image installs DIE's amd64 .deb; an arm64 host runs it emulated.
+    # x86-64 only: Detect It Easy 3.21 publishes Linux packages for amd64
+    # alone, and the image installs its amd64 .deb; an arm64 host runs it emulated.
     platform: linux/amd64
     container_name: malspark-die-mcp
     environment:
@@ -437,8 +440,6 @@ services:
       context: ../services
       dockerfile: goresym-mcp/Dockerfile
     image: malspark-goresym-mcp:3.4.1
-    # x86-64 only: the image unpacks GoReSym's x86-64 Linux build; an arm64 host runs it emulated.
-    platform: linux/amd64
     container_name: malspark-goresym-mcp
     environment:
       MCP_AUTH_TOKEN: ${GORESYM_MCP_AUTH_TOKEN:-}
@@ -490,8 +491,6 @@ services:
       context: ../services
       dockerfile: yarax-mcp/Dockerfile
     image: malspark-yarax-mcp:1.21.0
-    # x86-64 only: the image unpacks yara-x's x86_64 Linux build; an arm64 host runs it emulated.
-    platform: linux/amd64
     container_name: malspark-yarax-mcp
     environment:
       MCP_AUTH_TOKEN: ${YARAX_MCP_AUTH_TOKEN:-}
@@ -555,8 +554,6 @@ services:
       context: ../services
       dockerfile: webcrack-mcp/Dockerfile
     image: malspark-webcrack-mcp:2.16.0
-    # x86-64 only: the image unpacks Node's linux-x64 build; an arm64 host runs it emulated.
-    platform: linux/amd64
     container_name: malspark-webcrack-mcp
     environment:
       MCP_AUTH_TOKEN: ${WEBCRACK_MCP_AUTH_TOKEN:-}
@@ -616,8 +613,6 @@ services:
       context: ../services
       dockerfile: unblob-mcp/Dockerfile
     image: malspark-unblob-mcp:26.6.4
-    # x86-64 only: the image installs sasquatch's amd64 .deb; an arm64 host runs it emulated.
-    platform: linux/amd64
     container_name: malspark-unblob-mcp
     environment:
       MCP_AUTH_TOKEN: ${UNBLOB_MCP_AUTH_TOKEN:-}
@@ -654,8 +649,6 @@ services:
       context: ../services
       dockerfile: jadx-mcp/Dockerfile
     image: malspark-jadx-mcp:1.5.6
-    # x86-64 only: the image unpacks Temurin's x64 JRE; an arm64 host runs it emulated.
-    platform: linux/amd64
     container_name: malspark-jadx-mcp
     environment:
       MCP_AUTH_TOKEN: ${JADX_MCP_AUTH_TOKEN:-}

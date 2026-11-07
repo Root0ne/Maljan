@@ -3,7 +3,8 @@
 webcrack over MCP: a JavaScript dropper unminified, unpacked and deobfuscated,
 never run. One tool around `deobfuscate.mjs`, which hands the file to webcrack
 2.16.0 (MIT) on Node.js 22, in an image of its own: Node.js is the release's
-Linux build checked against its published sha256, and webcrack and every
+Linux build for the image's architecture (x64 or arm64) checked against its
+published sha256, and webcrack and every
 package it needs are pinned by integrity hash (`package-lock.json`) and
 installed with `npm ci --ignore-scripts`. The shared plumbing is
 `../cli-sidecar`.

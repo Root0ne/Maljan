@@ -1,0 +1,204 @@
+name: Native images
+
+on:
+  # The images the release publishes for amd64 and arm64. Those that pick a
+  # pinned download, or a build stage, per architecture can break on either
+  # side while the other builds: when an asset or its digest moves, a base
+  # image changes, or a hashed requirement has no build for one of the two.
+  # Changes to the images' files, the backend's dependency set and the compose
+  # file build them, and so does a weekly run; other pull requests do not,
+  # since the backend takes minutes. Each architecture builds on a runner of
+  # its own, not emulated.
+  pull_request:
+    branches: ["main", "dev"]
+    paths:
+      # The images' own files, what the backend's dependency layer is built
+      # from, and the sources every sidecar image copies in.
+      - "docker/Dockerfile.*"
+      - "docker/docker-compose.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "apps/api/pyproject.toml"
+      - "apps/web/package.json"
+      - "apps/web/package-lock.json"
+      - "scripts/floss/**"
+      - "services/cli-sidecar/**"
+      - "services/goresym-mcp/**"
+      - "services/ilspy-mcp/**"
+      - "services/jadx-mcp/**"
+      - "services/oletools-mcp/**"
+      - "services/unblob-mcp/**"
+      - "services/webcrack-mcp/**"
+      - "services/yarax-mcp/**"
+      - ".github/workflows/native-images.yml"
+  push:
+    branches: ["dev"]
+    paths:
+      # The images' own files, what the backend's dependency layer is built
+      # from, and the sources every sidecar image copies in.
+      - "docker/Dockerfile.*"
+      - "docker/docker-compose.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "apps/api/pyproject.toml"
+      - "apps/web/package.json"
+      - "apps/web/package-lock.json"
+      - "scripts/floss/**"
+      - "services/cli-sidecar/**"
+      - "services/goresym-mcp/**"
+      - "services/ilspy-mcp/**"
+      - "services/jadx-mcp/**"
+      - "services/oletools-mcp/**"
+      - "services/unblob-mcp/**"
+      - "services/webcrack-mcp/**"
+      - "services/yarax-mcp/**"
+      - ".github/workflows/native-images.yml"
+  schedule:
+    - cron: "41 4 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.image.name }} on ${{ matrix.arch.platform }}
+    runs-on: ${{ matrix.arch.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+        # The smoke asks each image's program for its version, as the image's
+        # own user; the backend's also runs the analysis server's FLOSS probe,
+        # which checks the executable's pinned digest for the machine and asks
+        # it --version.
+        image:
+          - name: backend
+            context: .
+            file: docker/Dockerfile.backend
+            # On arm64 it also times the launcher against a bare start of the
+            # same FLOSS, which is what the launcher's check costs.
+            smoke: >-
+              python -c "import subprocess, time; s = time.monotonic();
+              subprocess.run(['floss', '--version'], check=True);
+              print(f'floss --version took {time.monotonic() - s:.2f} s')" &&
+              if [ -x /opt/floss/bin/python3 ]; then
+              python -c "import subprocess, time; s = time.monotonic();
+              subprocess.run(['/opt/floss/bin/python3', '-ISB', '-c',
+              'import sys; sys.path.append(sys.argv[1]); sys.argv[1:] = [\"--version\"];
+              from floss.main import main; main()',
+              '/opt/floss/lib/python3.13/site-packages'], check=True);
+              print(f'a bare start took {time.monotonic() - s:.2f} s')"; fi &&
+              python -c "from malspark.tools.emulated_strings import find_floss;
+              path, reason = find_floss(); assert path, reason; print(path)"
+          - name: frontend
+            context: .
+            file: docker/Dockerfile.frontend
+            smoke: node --version && test -f server.js
+          - name: minio
+            context: docker
+            file: docker/Dockerfile.minio
+            smoke: minio --version
+          - name: goresym-mcp
+            context: services
+            file: services/goresym-mcp/Dockerfile
+            # The output is captured first: in a pipe, sh keeps only the last
+            # command's status, and a GoReSym that failed would pass.
+            smoke: out="$(GoReSym -about)" && printf '%s\n' "$out" | head -n 1
+          - name: ilspy-mcp
+            context: services
+            file: services/ilspy-mcp/Dockerfile
+            smoke: test -f "$ILSPYCMD_DLL" && dotnet --list-runtimes
+          - name: jadx-mcp
+            context: services
+            file: services/jadx-mcp/Dockerfile
+            smoke: java -version && java -cp /opt/jadx/jadx.jar jadx.cli.JadxCLI --version
+          - name: oletools-mcp
+            context: services
+            file: services/oletools-mcp/Dockerfile
+            smoke: python3 -c "import oletools.olevba as olevba; print(olevba.__version__)"
+          - name: unblob-mcp
+            context: services
+            file: services/unblob-mcp/Dockerfile
+            smoke: unblob --version && test -x /usr/bin/sasquatch
+          - name: webcrack-mcp
+            context: services
+            file: services/webcrack-mcp/Dockerfile
+            smoke: node --version && test -d node_modules/webcrack
+          - name: yarax-mcp
+            context: services
+            file: services/yarax-mcp/Dockerfile
+            smoke: yr --version
+    env:
+      IMAGE: malspark-${{ matrix.image.name }}:native-ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Loaded into the runner's Docker, never pushed.
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
+          platforms: ${{ matrix.arch.platform }}
+          push: false
+          load: true
+          provenance: false
+          sbom: false
+          tags: ${{ env.IMAGE }}
+
+      - name: The image is the runner's architecture
+        env:
+          PLATFORM: ${{ matrix.arch.platform }}
+        run: |
+          built="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$IMAGE")"
+          echo "built $built"
+          test "$built" = "$PLATFORM"
+
+      - name: Smoke
+        env:
+          SMOKE: ${{ matrix.image.smoke }}
+        # Through sh whatever the image's entrypoint (MinIO's is the server).
+        run: docker run --rm --entrypoint sh "$IMAGE" -c "$SMOKE"
+
+  # GoReSym's arm64 stage cross-compiles on the build host's platform, so on
+  # an amd64 runner it runs natively, without emulation, and its binary must
+  # match the same pinned sha256 the arm64 runner's native build matches.
+  goresym-cross:
+    name: goresym-mcp's arm64 stage cross-compiled on amd64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build the stage
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: services
+          file: services/goresym-mcp/Dockerfile
+          platforms: linux/arm64
+          target: goresym-arm64
+          push: false
+          provenance: false
+          sbom: false

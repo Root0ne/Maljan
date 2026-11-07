@@ -240,6 +240,12 @@ def test_every_pulled_and_base_image_is_pinned_by_digest() -> None:
         text = dockerfile.read_text(encoding="utf-8")
         stages = set(re.findall(rf"{FROM}\S+ AS (\S+)$", text, re.MULTILINE))
         for base in re.findall(rf"{FROM}(\S+)", text, re.MULTILINE):
+            # A stage picked by TARGETARCH starts from one of this file's own,
+            # and only when a stage exists for amd64 and for arm64 (T-573).
+            if "${TARGETARCH}" in base:
+                picked = {base.replace("${TARGETARCH}", arch) for arch in ("amd64", "arm64")}
+                assert picked <= stages, f"{dockerfile.name}: FROM {base}"
+                continue
             assert DIGEST.search(base), f"{dockerfile.name}: FROM {base}"
         for source in re.findall(r"COPY --from=(\S+)", text):
             if source not in stages:
@@ -282,11 +288,20 @@ def test_minio_is_built_from_the_release_its_tag_names() -> None:
 X86_ONLY = {
     "ghidra-mcp": None,
     "die-mcp": "_amd64.deb",
-    "goresym-mcp": "GoReSym-linux.zip",
-    "yarax-mcp": "-x86_64-unknown-linux-gnu.tar.gz",
-    "webcrack-mcp": "-linux-x64.tar.xz",
-    "unblob-mcp": "sasquatch_1.0_amd64.deb",
-    "jadx-mcp": "_x64_linux_hotspot_",
+}
+# The sidecars built natively for amd64 and arm64 (T-573), and the two
+# release assets, one per architecture, each Dockerfile picks between.
+NATIVE_SIDECARS = {
+    "yarax-mcp": (
+        "-${triple}.tar.gz",
+        "triple=x86_64-unknown-linux-gnu",
+        "triple=aarch64-unknown-linux-gnu",
+    ),
+    "jadx-mcp": ("OpenJDK21U-jre_${jre_arch}_linux_hotspot_", "jre_arch=x64", "jre_arch=aarch64"),
+    "webcrack-mcp": ("-linux-${node_arch}.tar.xz", "node_arch=x64", "node_arch=arm64"),
+    "unblob-mcp": ("sasquatch_1.0_${deb_arch}.deb", "deb_arch=amd64", "deb_arch=arm64"),
+    # GoReSym's release has no arm64 build: that stage compiles the tag's source.
+    "goresym-mcp": ("GoReSym-linux.zip", "GOARCH=arm64 go build", "FROM goresym-${TARGETARCH}"),
 }
 # The services built or pulled for the host's own architecture.
 MULTI_ARCH = (
@@ -298,6 +313,7 @@ MULTI_ARCH = (
     "postgres",
     "redis",
     "qdrant",
+    *NATIVE_SIDECARS,
 )
 
 
@@ -316,6 +332,34 @@ def test_only_the_x86_only_services_ask_for_amd64() -> None:
             assert asset in dockerfile.read_text(encoding="utf-8"), name
     for name in MULTI_ARCH:
         assert "platform" not in services[name], name
+
+
+def test_a_native_sidecar_pins_a_build_for_each_architecture() -> None:
+    # The image picks the build for the architecture BuildKit builds for, each
+    # under a sha256 of its own, and stops on any other: a case on TARGETARCH
+    # whose fallback fails, or a stage per architecture and none for the rest.
+    services = yaml.safe_load((ROOT / "docker" / "docker-compose.yml").read_text())["services"]
+    for name, needles in NATIVE_SIDECARS.items():
+        dockerfile = ROOT / "services" / services[name]["build"]["dockerfile"]
+        text = dockerfile.read_text(encoding="utf-8")
+        assert re.search(r"^ARG TARGETARCH$", text, re.MULTILINE), name
+        for needle in needles:
+            assert needle in text, (name, needle)
+        for arch in ("AMD64", "ARM64"):
+            assert re.search(rf"^ARG \w+_{arch}_\w*SHA256=[0-9a-f]{{64}}$", text, re.MULTILINE), (
+                name,
+                arch,
+            )
+        stage = re.search(r"^FROM (\S+)-\$\{TARGETARCH\} AS \S+$", text, re.MULTILINE)
+        if stage:
+            named = re.findall(r"^FROM .* AS (\S+)$", text, re.MULTILINE)
+            assert sorted(n for n in named if n.startswith(f"{stage[1]}-")) == [
+                f"{stage[1]}-amd64",
+                f"{stage[1]}-arm64",
+            ], name
+        else:
+            assert 'case "${TARGETARCH:-$(dpkg --print-architecture)}" in' in text, name
+            assert re.search(r"^\s+\*\) echo .*>&2; exit 1 ;; \\$", text, re.MULTILINE), name
 
 
 def _workflow_service_images() -> dict[str, str]:

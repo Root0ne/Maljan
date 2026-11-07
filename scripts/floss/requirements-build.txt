@@ -1,0 +1,16 @@
+# What binary2strings' sdist builds with (its pyproject.toml asks for
+# setuptools>=42 and pybind11>=2.10.0), with their hashes, installed into the
+# backend image's FLOSS environment before requirements.txt so that build runs
+# without fetching anything unhashed. setuptools is held at the release the
+# unblob-mcp image pins. Regenerate with
+#   printf 'setuptools==84.2.1\npybind11\n' > build.in
+#   uv pip compile --universal --python-version 3.13 --generate-hashes --no-header build.in
+# and install with pip install --require-hashes -r requirements-build.txt.
+pybind11==3.1.0 \
+    --hash=sha256:a1cc06b524ab3edca51f8ad3895f9c4fa20b8b19283173dff4ae781449dc9639 \
+    --hash=sha256:b8488090f8acffbcb6b5d6a85571a6827a0a2981ffb75e5a0b27b87c4a6b7dd0
+    # via -r build.in
+setuptools==84.2.1 \
+    --hash=sha256:3ff8b3b5492a0aa66960f4419365a86b84e013070d4313e4d4a6894f5d64d6bc \
+    --hash=sha256:ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2
+    # via -r build.in

@@ -176,33 +176,44 @@ then every run reports long-term memory unavailable and goes on without it.
 
 Malspark runs on an Apple Silicon Mac with the same compose file. The core
 services (`backend-api`, `backend-worker`, `enrichment-worker`, `frontend`,
-`minio`, `postgres`, `redis`, `qdrant`) build or pull native arm64 images. The
-services whose image carries an x86-64-only program declare
-`platform: linux/amd64` and run emulated, slower than native:
+`minio`, `postgres`, `redis`, `qdrant`) build or pull native arm64 images, and
+so do the sidecars whose program has an arm64 build: each Dockerfile picks the
+pinned release asset, or build stage, for the architecture BuildKit builds for,
+each under a sha256 of its own, and stops on any other.
 
-| Service | Why it is x86-64 only |
+| Service | arm64 |
 |---|---|
-| `ghidra-mcp` | Ghidra's release ships no `linux_arm_64` decompiler. |
-| `die-mcp` | DIE's amd64 `.deb`. |
-| `goresym-mcp` | GoReSym's x86-64 Linux build. |
-| `yarax-mcp` | yara-x's x86_64 Linux build. |
-| `webcrack-mcp` | Node's `linux-x64` build. |
-| `unblob-mcp` | sasquatch's amd64 `.deb`. |
-| `jadx-mcp` | Temurin's x64 JRE. |
+| `yarax-mcp` | Native: yara-x's `aarch64-unknown-linux-gnu` build. |
+| `jadx-mcp` | Native: Temurin's `aarch64` Linux JRE. |
+| `webcrack-mcp` | Native: Node's `linux-arm64` build. |
+| `unblob-mcp` | Native: sasquatch's arm64 `.deb`; every hashed wheel has an aarch64 build. |
+| `goresym-mcp` | Native: the release has no arm64 build, so the image compiles the pinned tag's source with a pinned Go toolchain and checks the binary's sha256. |
+| `ghidra-mcp` | Emulated: Ghidra's release ships no `linux_arm_64` decompiler, and building one needs a compiler toolchain in the image built from the external tree. |
+| `die-mcp` | Emulated: Detect It Easy 3.21 publishes Linux packages for amd64 only. |
 
-On an amd64 host the `platform:` lines change nothing.
+The two emulated services declare `platform: linux/amd64` and run slower than
+native. On an amd64 host every image is the amd64 one, as before.
 
-One program inside a native image is x86-64 only as well: FLOSS, the analysis
-server's emulating string decoder, is FLARE's x86-64 Linux build, and the
-backend image installs that build whatever its architecture. On an arm64
-backend it may not run there (whether it does depends on the x86-64 emulation
-the VM offers native containers); the analysis server asks the build its
-version and reports the `floss` tool unavailable, with the reason, when it
-does not answer. Every other tool runs as usual.
+FLOSS, the analysis server's emulating string decoder, is native too. On amd64
+the backend image installs FLARE's standalone x86-64 build, as before; on
+arm64, for which FLARE publishes none, it installs the same release, FLOSS
+3.1.1, from PyPI into an environment of its own, every package by hash, behind
+a launcher the analysis server checks by its own pinned sha256. The launcher
+checks every installed file against its package's RECORD, and one sha256 over
+every package's RECORD against a pin of its own, before it starts FLOSS.
+Either way the server asks the executable its version, and expects 3.1.1,
+before it reports the `floss` tool available. Outside the image,
+`scripts/install_floss.sh` on an arm64 Linux host installs the x86-64 build
+only when x86-64 emulation is registered with the kernel, and otherwise points
+to the backend image.
 
-**Rosetta is required.** The emulated services need Rosetta, not Docker's
-default QEMU user-mode emulation: under QEMU some multi-threaded programs crash
-(GoReSym among them), so a sidecar starts and then fails its calls. In Docker
+The release publishes every image for `linux/amd64` and `linux/arm64` but
+`die-mcp`, which is `linux/amd64` only.
+
+**Rosetta is required** for the emulated services, and `ghidra-mcp` runs in
+the default profiles. They need Rosetta, not Docker's default QEMU user-mode
+emulation: under QEMU some multi-threaded x86-64 programs crash, so a sidecar
+starts and then fails its calls. In Docker
 Desktop, turn on *Use Rosetta for x86_64/amd64 emulation on Apple Silicon*
 under Settings → General. With Colima, start the VM on Apple's virtualisation
 framework with Rosetta:
@@ -226,8 +237,6 @@ Studio with *Serve on Local Network* in its server settings. The server then
 also answers every machine that can reach the Mac: keep the macOS firewall on,
 or block the port from other hosts, since neither server asks for a key by
 default.
-
-Native arm64 images for every service are planned.
 
 ## Required secrets
 

@@ -712,7 +712,20 @@ copy, so a file changed after it was checked is refused rather than run.
 downloads the asset, checks both digests and installs the executable at
 `~/.local/share/malspark/tools/floss-3.1.1/floss`, the first
 place looked. The backend image does the same in a build stage and puts it at
-`/usr/local/bin/floss`. Without it the manifest marks `floss` unavailable with
+`/usr/local/bin/floss`. That build is x86-64 only: an arm64 backend image
+installs the same release from PyPI, every package by hash
+(`scripts/floss/requirements.txt`), into `/opt/floss` and puts the launcher
+`scripts/floss/floss` at `/usr/local/bin/floss`. On an arm64 host the tool
+accepts the launcher's sha256, which `emulated_strings.py` pins, as well as
+the standalone build's (which runs there only under x86-64 emulation); on
+every other host only the standalone build's. The launcher starts its
+interpreter without `site` (`-ISB`), so nothing in the environment runs before
+it checks it, and checks before FLOSS is imported: the pinned release, every
+installed file against its package's RECORD, no file in `site-packages` that
+no RECORD lists, no compiled bytecode, and one sha256 over every package's
+RECORD equal to the one the image build gives on that machine; anything else
+exits 2 and nothing runs. On either architecture the build counts as available only when
+`--version` exits 0 and reports 3.1.1. Without it the manifest marks `floss` unavailable with
 the reason (not installed, or not the pinned build) and the remedy, and a call
 answers the same.
 

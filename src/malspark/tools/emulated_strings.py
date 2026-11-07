@@ -18,11 +18,14 @@ concluded from the strings here; which of them matter is the reader's call.
 
 FLOSS runs as FLARE's standalone Linux build, a pinned executable outside this
 project's Python environment, so its dependency bounds never reach the
-product's lockfile. It is found at ``MALSPARK_FLOSS_PATH``, in the user tools
+product's lockfile; on arm64, which that build does not run on, the backend
+image runs the same release from an environment of its own through a pinned
+launcher instead. It is found at ``MALSPARK_FLOSS_PATH``, in the user tools
 directory ``scripts/install_floss.sh`` writes to, or on ``PATH`` (where the
-backend image puts it), and is run only when its sha256 is the pinned build's
-and it answers ``--version`` on this host: an executable built for another
-machine has the right digest and still never runs.
+backend image puts it), and is run only when its sha256 is one accepted on
+this host's machine and it answers ``--version`` with the pinned release on
+this host: an executable built for another machine has the right digest and
+still never runs.
 The child has a hard wall clock and an address-space limit, runs in a session
 of its own so an overrun takes the whole process group, and is given a home and
 a temporary directory inside this job's staging directory and no other
@@ -39,6 +42,8 @@ import errno
 import hashlib
 import json
 import os
+import platform
+import re
 import resource
 import shutil
 import signal
@@ -61,6 +66,18 @@ from malspark.tools.strings import DEFAULT_STRINGS_LIMIT, _matcher
 FLOSS_VERSION = "3.1.1"
 FLOSS_ZIP_SHA256 = "40c05a869f34f7e2417b17ca290cc54bd3671ee1f0a2d9bd5103284c01a54666"
 FLOSS_BINARY_SHA256 = "d71b9ea4fe3b2de974dc1ae3c5d0f67569921bc118dcb02ed72e905a662411cb"
+
+# That build is x86-64. On arm64, for which FLARE publishes no standalone
+# build, the backend image installs the same release from PyPI, every package
+# by hash, into an environment of its own and puts the launcher
+# ``scripts/floss/floss`` on ``PATH``; this is the launcher's sha256. The
+# launcher checks that environment against its own pins before it imports
+# FLOSS. Which digests an executable may have is decided by this host's
+# machine: the standalone build's everywhere, and on arm64 the launcher's as
+# well, so an x86-64 host still runs the standalone build alone and an arm64
+# host with x86-64 emulation may still run it (the version probe judges).
+FLOSS_LAUNCHER_SHA256 = "83052aa58a23d8850da7aabcc7717be4fc5dc38e0bb3d5456a2b08bf3d6482ee"
+_LAUNCHER_MACHINES = frozenset({"aarch64", "arm64"})
 
 # Where an operator names the executable, set in the analysis server's ``env``.
 FLOSS_PATH_ENV = "MALSPARK_FLOSS_PATH"
@@ -126,6 +143,9 @@ _VERIFIED: dict[tuple[str, int, int, int, int], bool] = {}
 # Whether each verified executable ran when asked its version, keyed as
 # ``_VERIFIED`` is: ``None`` when it answered, else the reason it did not.
 _RUNS: dict[tuple[str, int, int, int, int], str | None] = {}
+# The pinned version as ``--version`` writes it: the standalone build answers
+# ``floss v3.1.1-0-g…``, the PyPI release ``floss 3.1.1``; 3.1.10 is not 3.1.1.
+_VERSION_WORD = re.compile(rf"(?<![\d.]){re.escape(FLOSS_VERSION)}(?![\d.])")
 # The wall clock that one answer may take. The standalone build unpacks about
 # 63 MB before it answers, a few seconds natively and several times that under
 # an emulator; a build that has not answered by then is not one a run can use.
@@ -176,6 +196,19 @@ def default_install_path() -> Path:
     return user_tools_dir() / f"floss-{FLOSS_VERSION}" / "floss"
 
 
+def accepted_sha256s(machine: str | None = None) -> frozenset[str]:
+    """The sha256 values a FLOSS executable may have on ``machine``, this host's when not given.
+
+    The standalone build's on every machine, the launcher's too on arm64: on
+    any other machine that build is the only one there is, and a host that
+    cannot run what it holds is told so by the version probe.
+    """
+    name = (platform.machine() if machine is None else machine).lower()
+    if name in _LAUNCHER_MACHINES:
+        return frozenset({FLOSS_BINARY_SHA256, FLOSS_LAUNCHER_SHA256})
+    return frozenset({FLOSS_BINARY_SHA256})
+
+
 def _is_pinned_build(path: Path) -> bool:
     """Whether ``path`` is the pinned build, by its sha256.
 
@@ -200,7 +233,7 @@ def _is_pinned_build(path: Path) -> bool:
                 hasher.update(block)
     except OSError:
         return False
-    _VERIFIED[key] = hasher.hexdigest() == FLOSS_BINARY_SHA256
+    _VERIFIED[key] = hasher.hexdigest() in accepted_sha256s()
     return _VERIFIED[key]
 
 
@@ -294,7 +327,11 @@ def _does_not_run(path: Path) -> str | None:
         lasting = False
         reason = f"floss cannot be executed on this host: {type(exc).__name__}"
     else:
-        if done.returncode != 0:
+        if done.returncode == 0 and not _VERSION_WORD.search(done.stdout):
+            # The right digest and an exit of 0 are still not the pinned
+            # release unless the build says so.
+            reason = f"floss is not installed: floss --version did not report {FLOSS_VERSION}"
+        elif done.returncode != 0:
             tail = done.stderr
             for where in (str(done.args[0]), str(path)):
                 tail = tail.replace(where, "floss")
@@ -387,7 +424,7 @@ def _verified_copy(source: Path, directory: Path) -> Path:
     except OSError:
         target.unlink(missing_ok=True)
         raise
-    if hasher.hexdigest() != FLOSS_BINARY_SHA256:
+    if hasher.hexdigest() not in accepted_sha256s():
         target.unlink(missing_ok=True)
         raise NotThePinnedBuild(
             f"the floss executable is not the pinned FLOSS {FLOSS_VERSION} build "
