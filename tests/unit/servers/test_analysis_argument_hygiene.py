@@ -634,8 +634,8 @@ class TestTheSixSpellingsAModelWrote:
         ):
             answer = tool(path=str(sample), carved_path=f'"{payload["path"]}"', **extra)
             assert next(iter(answer)) == "read_path", tool
-            cut = json.dumps(answer)[:200]
-            assert str(written) in cut, tool
+            # Whatever width a cut keeps, the answer opens with the file it read.
+            assert json.dumps(answer).startswith(json.dumps({"read_path": str(written)})[:-1]), tool
 
 
 class TestReadingTheQuotesOffAValue:

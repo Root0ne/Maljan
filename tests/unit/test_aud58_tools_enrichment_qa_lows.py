@@ -78,8 +78,12 @@ def test_tb16_floss_is_not_started_with_a_preexec_function(
 
     limited: list[int] = []
     monkeypatch.setattr(emulated_strings.subprocess, "Popen", _spy)
+    # Set whether or not this host's ``resource`` has a prlimit of its own.
     monkeypatch.setattr(
-        emulated_strings.resource, "prlimit", lambda pid, which, limit: limited.append(pid)
+        emulated_strings.resource,
+        "prlimit",
+        lambda pid, which, limit: limited.append(pid),
+        raising=False,
     )
     emulated_strings._spawn(["true"], 10.0, str(tmp_path))
     assert "preexec_fn" not in seen
