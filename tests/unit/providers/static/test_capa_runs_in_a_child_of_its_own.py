@@ -36,6 +36,7 @@ from malspark.providers.static import capa_yara
 from malspark.tools import rules as tool
 from malspark.tools import staging
 from tests.credential_shapes import lowercase_body, password
+from tests.unit._process_table import running
 
 # What the tool answers when the child gave no document, as it always has.
 NO_RESULT = (
@@ -45,6 +46,12 @@ NO_RESULT = (
 
 # The job the worker-side runs here belong to.
 JOB = "a-capa-job"
+
+# The names the operating system itself adds to a new process's environment,
+# whatever its parent handed it: none came from the worker, so none is a
+# secret leaking. Each is listed by name; nothing else is let through.
+#   __CF_USER_TEXT_ENCODING: macOS sets it in every process at start-up.
+PLATFORM_INJECTED = frozenset({"__CF_USER_TEXT_ENCODING"})
 
 
 @pytest.fixture(autouse=True)
@@ -130,7 +137,7 @@ class TestTheEnvironment:
 
         assert seen is not None
         assert not set(canaries) & set(seen["names"])
-        assert set(seen["names"]) <= set(BASE_KEYS) | {"HOME", "TMPDIR"}
+        assert set(seen["names"]) - PLATFORM_INJECTED <= set(BASE_KEYS) | {"HOME", "TMPDIR"}
         # Its home, temporary and working directory: its own run directory,
         # inside the job's capa directory and away from the sample.
         run = Path(seen["cwd"])
@@ -338,11 +345,7 @@ _PARENT = (
 
 def _running(pid: int) -> bool:
     """Whether ``pid`` is a live process: present, and not a zombie waiting to be reaped."""
-    try:
-        stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-    except (FileNotFoundError, ProcessLookupError):
-        return False
-    return stat.rsplit(")", 1)[1].split()[0] != "Z"
+    return running(pid)
 
 
 def _gone_within(pid: int, seconds: float) -> bool:
