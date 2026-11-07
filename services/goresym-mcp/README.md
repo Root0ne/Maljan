@@ -5,7 +5,7 @@ read from the Go runtime's own tables (pclntab, moduledata, build info) in PE,
 ELF and Mach-O files, stripped or not. Tools around GoReSym 3.4.1 (MIT) in an
 image of its own: on amd64 the release's static Linux build, checked against
 the release's sha256 and the binary's own; on arm64, for which the release has
-no build, the tag's source compiled with a pinned Go toolchain and checked
+no build, the tag's commit compiled with a pinned Go toolchain and checked
 against the sha256 that build gives. The shared plumbing is `../cli-sidecar`.
 
 Shipped as the built-in server block `goresym`, switched off, reached at

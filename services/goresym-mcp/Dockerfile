@@ -9,14 +9,15 @@
 # On amd64 it is the release's static Linux build: the release publishes the
 # archive's sha256; the binary's was computed from it when it was pinned, and
 # both are checked before the binary is kept. The release has no arm64 build,
-# so on arm64 the pinned tag's source (GitHub's archive of the tag, whose
-# sha256 was computed when it was pinned) is compiled with the Go toolchain of
-# the digest-pinned image below, never one fetched at build time, its modules
-# checked against the tree's go.sum. The compiler runs on the build host's
-# platform and cross-compiles, as upstream's release build does (cgo off,
-# version stamped), and the binary must match the sha256 that build gave when
-# it was pinned: Go builds the same bytes from the same source and toolchain on
-# any host.
+# so on arm64 the pinned tag is cloned, its commit must be GORESYM_COMMIT or
+# the build stops, and it is compiled with the Go toolchain of the
+# digest-pinned image below, never one fetched at build time, its modules
+# checked against the tree's go.sum and the checksum database. The compiler
+# runs on the build host's platform and cross-compiles, as upstream's release
+# build does (cgo off, version stamped; no VCS stamp, so the clone's metadata
+# changes nothing), and the binary must match the sha256 it was pinned with.
+# The same bytes come out of an amd64 host's cross-compile and an arm64 host's
+# native build: CI builds this stage both ways and checks both against it.
 #
 # Nothing here runs a sample: GoReSym reads the file it is given. The
 # container runs as the ids compose gives it (never root), with no capability,
@@ -39,17 +40,18 @@ RUN python3 -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[
 
 FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine3.24@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS goresym-arm64
 ARG GORESYM_VERSION
-ARG GORESYM_SOURCE_SHA256=c8600ad8634aae2166f09af224ac7c257c8ee403acd42d72f6f1276e786a70e8
+ARG GORESYM_COMMIT=722897e0a80da0a06c00c5e40591a253a551f04e
 ARG GORESYM_ARM64_BINARY_SHA256=e6ca60e32a82d8d75cee5b85dace4d720e7399cb1d50b4186899b08e8553f5d0
 ENV CGO_ENABLED=0 \
     GOTOOLCHAIN=local \
-    GOFLAGS="-trimpath -mod=readonly"
+    GOFLAGS="-trimpath -mod=readonly -buildvcs=false"
+RUN apk add --no-cache git
 WORKDIR /src
-RUN wget -q -O /tmp/goresym.tar.gz \
-        "https://github.com/mandiant/GoReSym/archive/refs/tags/v${GORESYM_VERSION}.tar.gz" && \
-    echo "${GORESYM_SOURCE_SHA256}  /tmp/goresym.tar.gz" | sha256sum -c - && \
-    tar -xzf /tmp/goresym.tar.gz --strip-components=1 && \
-    rm /tmp/goresym.tar.gz && \
+RUN git clone --quiet --depth 1 --branch "v${GORESYM_VERSION}" https://github.com/mandiant/GoReSym.git . && \
+    commit="$(git rev-parse HEAD)" && \
+    if [ "${commit}" != "${GORESYM_COMMIT}" ]; then \
+        echo "goresym: v${GORESYM_VERSION} is commit ${commit}, expected ${GORESYM_COMMIT}" >&2; exit 1; \
+    fi && \
     GOOS=linux GOARCH=arm64 go build -ldflags "-X main.Version=v${GORESYM_VERSION}" -o /out/GoReSym . && \
     echo "${GORESYM_ARM64_BINARY_SHA256}  /out/GoReSym" | sha256sum -c - && \
     chmod 0755 /out/GoReSym
