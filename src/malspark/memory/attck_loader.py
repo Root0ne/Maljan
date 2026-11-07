@@ -93,8 +93,12 @@ def default_cache_dir(
     return current
 
 
-_DEFAULT_CACHE_DIR = default_cache_dir()
-ATTCK_CACHE_DIR = Path(os.environ.get("MALSPARK_ATTCK_CACHE", str(_DEFAULT_CACHE_DIR)))
+# The variable is read first: the default is looked for, and named in the log,
+# only when it is unset.
+_CONFIGURED_CACHE_DIR = os.environ.get("MALSPARK_ATTCK_CACHE")
+ATTCK_CACHE_DIR = (
+    Path(_CONFIGURED_CACHE_DIR) if _CONFIGURED_CACHE_DIR is not None else default_cache_dir()
+)
 ATTCK_CACHE_FILES: dict[str, Path] = {
     domain: ATTCK_CACHE_DIR / f"{domain}-attack.json" for domain in DOMAINS
 }

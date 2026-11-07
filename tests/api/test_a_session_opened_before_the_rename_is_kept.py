@@ -25,18 +25,33 @@ from app.database import get_db
 from malspark.core.previous_name import PREVIOUS_NAME
 
 
-def _token(issuer: str, audience: str, secret: str | None = None) -> str:
+def _token(
+    issuer: str,
+    audience: str,
+    secret: str | None = None,
+    minted: datetime | None = None,
+    with_iat: bool = True,
+) -> str:
+    claims = {
+        "sub": "someone",
+        "type": "access",
+        "exp": datetime.now(UTC) + timedelta(hours=1),
+        "iss": issuer,
+        "aud": audience,
+    }
+    if with_iat:
+        claims["iat"] = minted or datetime.now(UTC)
     return pyjwt.encode(
-        {
-            "sub": "someone",
-            "type": "access",
-            "exp": datetime.now(UTC) + timedelta(hours=1),
-            "iss": issuer,
-            "aud": audience,
-        },
+        claims,
         secret if secret is not None else auth_jwt._secret(),
         algorithm=settings.jwt_algorithm,
     )
+
+
+@pytest.fixture
+def shipped_labels(monkeypatch: pytest.MonkeyPatch) -> None:
+    for field in ("jwt_issuer", "jwt_audience"):
+        monkeypatch.setattr(settings, field, APISettings.model_fields[field].default)
 
 
 def test_the_previous_labels_are_built_from_the_previous_name() -> None:
@@ -45,22 +60,41 @@ def test_the_previous_labels_are_built_from_the_previous_name() -> None:
     assert PREVIOUS_REFRESH_COOKIE == f"{PREVIOUS_NAME}_refresh"
 
 
-def test_a_token_minted_under_the_previous_labels_is_read(monkeypatch: pytest.MonkeyPatch) -> None:
-    for field in ("jwt_issuer", "jwt_audience"):
-        monkeypatch.setattr(settings, field, APISettings.model_fields[field].default)
+def test_a_token_minted_under_the_previous_labels_is_read(shipped_labels: None) -> None:
     old = _token(auth_jwt.PREVIOUS_ISSUER, auth_jwt.PREVIOUS_AUDIENCE)
     new = _token(settings.jwt_issuer, settings.jwt_audience)
     assert auth_jwt.decode_token(old)["sub"] == "someone"
     assert auth_jwt.decode_token(new)["sub"] == "someone"
 
 
-def test_a_token_under_the_previous_labels_still_needs_the_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    for field in ("jwt_issuer", "jwt_audience"):
-        monkeypatch.setattr(settings, field, APISettings.model_fields[field].default)
+def test_a_token_under_the_previous_labels_still_needs_the_secret(shipped_labels: None) -> None:
     forged = _token(auth_jwt.PREVIOUS_ISSUER, auth_jwt.PREVIOUS_AUDIENCE, secret="x" * 48)
     assert auth_jwt.decode_token(forged) is None
+
+
+def test_the_previous_labels_are_read_only_for_a_token_minted_in_the_window(
+    shipped_labels: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert auth_jwt.previous_labels_minted_before() == datetime(
+        2026, 11, 7, tzinfo=UTC
+    ) + timedelta(days=90)
+    now = datetime.now(UTC)
+    monkeypatch.setattr(auth_jwt, "previous_labels_minted_before", lambda: now - timedelta(hours=1))
+    before = _token(
+        auth_jwt.PREVIOUS_ISSUER, auth_jwt.PREVIOUS_AUDIENCE, minted=now - timedelta(hours=2)
+    )
+    after = _token(auth_jwt.PREVIOUS_ISSUER, auth_jwt.PREVIOUS_AUDIENCE, minted=now)
+    unstamped = _token(auth_jwt.PREVIOUS_ISSUER, auth_jwt.PREVIOUS_AUDIENCE, with_iat=False)
+    assert auth_jwt.decode_token(before)["sub"] == "someone"
+    assert auth_jwt.decode_token(after) is None
+    assert auth_jwt.decode_token(unstamped) is None
+    # A token under the current labels is not bound by the window.
+    assert auth_jwt.decode_token(_token(settings.jwt_issuer, settings.jwt_audience))["sub"]
+
+
+def test_one_previous_label_beside_a_current_one_is_refused(shipped_labels: None) -> None:
+    assert auth_jwt.decode_token(_token(settings.jwt_issuer, auth_jwt.PREVIOUS_AUDIENCE)) is None
+    assert auth_jwt.decode_token(_token(auth_jwt.PREVIOUS_ISSUER, settings.jwt_audience)) is None
 
 
 def test_an_operator_s_own_issuer_is_the_only_one_read(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,8 +148,34 @@ def test_the_previous_refresh_cookie_opens_a_session_under_the_current_one(
     client.cookies.set(PREVIOUS_REFRESH_COOKIE, "old-refresh", path="/api/v1/auth")
     r = client.post("/api/v1/auth/refresh")
     assert r.status_code == 200 and r.json()["access_token"] == "access-jwt"
-    assert r.headers["set-cookie"].startswith(f"{REFRESH_COOKIE}=new-refresh")
+    cookies = r.headers.get_list("set-cookie")
+    assert any(c.startswith(f"{REFRESH_COOKIE}=new-refresh") for c in cookies)
+    assert any(c.startswith(f"{PREVIOUS_REFRESH_COOKIE}=") and "Max-Age=0" in c for c in cookies)
     auth_module.refresh_token_rotate.assert_awaited()
+
+
+def test_with_the_current_cookie_present_the_previous_one_is_ignored(client: TestClient) -> None:
+    client.cookies.set(REFRESH_COOKIE, "current-refresh", path="/api/v1/auth")
+    client.cookies.set(PREVIOUS_REFRESH_COOKIE, "old-refresh", path="/api/v1/auth")
+    r = client.post("/api/v1/auth/refresh")
+    # The current cookie is the one read (this double refuses it); the old one is not tried.
+    assert r.status_code == 401
+    auth_module.refresh_token_rotate.assert_not_awaited()
+
+
+def test_logout_with_both_cookies_consumes_both(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        auth_module,
+        "decode_token",
+        lambda t: {"type": "refresh", "sub": str(uuid.UUID(int=1)), "jti": t},
+    )
+    client.cookies.set(REFRESH_COOKIE, "jti-current", path="/api/v1/auth")
+    client.cookies.set(PREVIOUS_REFRESH_COOKIE, "jti-old", path="/api/v1/auth")
+    assert client.post("/api/v1/auth/logout").status_code == 204
+    consumed = {c.args[1] for c in auth_module.refresh_token_consume.await_args_list}
+    assert consumed == {"jti-current", "jti-old"}
 
 
 def test_logout_consumes_the_previous_cookie_and_clears_both(client: TestClient) -> None:

@@ -79,13 +79,16 @@ REFRESH_COOKIE_PATH = "/api/v1/auth"
 PREVIOUS_REFRESH_COOKIE = f"{PREVIOUS_NAME}_refresh"
 
 
-def _refresh_cookie(request: Request, current: str | None) -> str | None:
-    """The refresh cookie the client sent: the current one, else the previous-name one."""
-    if current:
-        return current
+def _previous_refresh_cookie(request: Request) -> str | None:
+    """The previous-name refresh cookie the client sent, or ``None``."""
     held = getattr(request, "cookies", None)
     value = held.get(PREVIOUS_REFRESH_COOKIE) if isinstance(held, Mapping) else None
     return value if isinstance(value, str) and value else None
+
+
+def _refresh_cookie(request: Request, current: str | None) -> str | None:
+    """The refresh cookie the client sent: the current one, else the previous-name one."""
+    return current or _previous_refresh_cookie(request)
 
 
 def _set_refresh_cookie(response: Response, token: str, refresh_days: int) -> None:
@@ -104,17 +107,24 @@ def _set_refresh_cookie(response: Response, token: str, refresh_days: int) -> No
         path=REFRESH_COOKIE_PATH,
         max_age=refresh_days * 86400,
     )
+    # A browser that still holds the previous-name cookie never keeps it beside
+    # the new session: its token would stay live until it expired.
+    _delete_cookie(response, PREVIOUS_REFRESH_COOKIE)
+
+
+def _delete_cookie(response: Response, name: str) -> None:
+    response.delete_cookie(
+        name,
+        path=REFRESH_COOKIE_PATH,
+        httponly=True,
+        samesite="lax",
+        secure=bool(settings.cookie_secure),
+    )
 
 
 def _clear_refresh_cookie(response: Response) -> None:
     for name in (REFRESH_COOKIE, PREVIOUS_REFRESH_COOKIE):
-        response.delete_cookie(
-            name,
-            path=REFRESH_COOKIE_PATH,
-            httponly=True,
-            samesite="lax",
-            secure=bool(settings.cookie_secure),
-        )
+        _delete_cookie(response, name)
 
 
 def _email_tag(email: str) -> str:
@@ -431,11 +441,17 @@ async def logout(
     A missing or already-consumed cookie is not an error: logout is
     idempotent so a client can call it defensively without checking state.
     """
-    malspark_refresh = _refresh_cookie(request, malspark_refresh)
-    if malspark_refresh:
-        payload = decode_token(malspark_refresh) or {}
-        if payload.get("type") == "refresh":
-            await refresh_token_consume(payload.get("sub"), payload.get("jti", ""))
+    # Both cookies when a browser holds both: the previous-name one's session
+    # ends here too, never left live after a logout.
+    held = [t for t in (malspark_refresh, _previous_refresh_cookie(request)) if t]
+    audited = False
+    for token in dict.fromkeys(held):
+        payload = decode_token(token) or {}
+        if payload.get("type") != "refresh":
+            continue
+        await refresh_token_consume(payload.get("sub"), payload.get("jti", ""))
+        if not audited:
+            audited = True
             await _audit(
                 db,
                 uuid.UUID(payload["sub"]) if payload.get("sub") else None,

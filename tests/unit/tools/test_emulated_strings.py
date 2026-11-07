@@ -378,6 +378,23 @@ class TestTheExecutable:
         monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(body).hexdigest())
         assert tool.find_floss() == (installed, "")
 
+    def test_a_build_under_the_previous_name_with_another_digest_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MALSPARK_FLOSS_PATH", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+        installed = tool.previous_install_path()
+        installed.parent.mkdir(parents=True)
+        installed.write_bytes(b"#!/bin/sh\necho not floss\n")
+        installed.chmod(0o755)
+
+        found, reason = tool.find_floss()
+
+        assert found is None
+        assert "sha256 mismatch" in reason
+        assert str(tmp_path) not in reason
+
     def test_an_environment_handed_in_is_read_instead_of_this_process_s(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

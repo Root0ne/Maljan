@@ -222,6 +222,18 @@ def test_a_previous_name_marker_that_is_not_the_worker_s_own_adopts_nothing(dirs
     assert (folder / f"{A}.exe").read_bytes() == b"corpus"
 
 
+def test_a_foreign_current_marker_is_refused_beside_a_valid_previous_one(dirs):
+    folder = Path(sf.settings.samples_dir) / "dataset"
+    folder.mkdir(parents=True, mode=0o755)
+    (folder / sf.MIRROR_MARKER).write_text("copied in with a dataset\n")
+    (folder / sf.PREVIOUS_MIRROR_MARKER).write_text(sf.PREVIOUS_MIRROR_MARKER_TEXT)
+    (folder / f"{A}.exe").write_bytes(b"corpus")
+    with pytest.raises(sf.NotAMirrorDirectory):
+        sf.work_dir("dataset")
+    assert sf.remove_for_sha(A, subdirs=["dataset"]) == []
+    assert (folder / f"{A}.exe").read_bytes() == b"corpus"
+
+
 def test_a_directory_that_cannot_be_opened_skips_only_itself(dirs, monkeypatch):
     stale = sf.work_dir("r2-work") / f"{C}.exe"
     stale.write_bytes(b"x")

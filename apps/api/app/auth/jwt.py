@@ -8,6 +8,7 @@ and refresh-token rotation/reuse detection.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import hmac
 import ipaddress
@@ -272,15 +273,60 @@ def _fingerprint(label: bytes, ip: str, user_agent: str) -> str:
 # The issuer and audience a release before the product's rename (T-576) minted
 # its tokens under, by default (``malspark.core.previous_name``). A session
 # opened before the upgrade is still read while the deployment keeps the
-# shipped default: the signing secret is the same, so only the label moved.
+# shipped defaults: the signing secret is the same, so only the label moved.
 PREVIOUS_ISSUER = f"{PREVIOUS_NAME}-api"
 PREVIOUS_AUDIENCE = f"{PREVIOUS_NAME}-clients"
+# The day the rename was released. A token under the previous labels is read
+# only when it was minted before this day plus the longest refresh lifetime the
+# settings allow: every session opened before the upgrade has ended by then,
+# and a deployment of an earlier release that shares the secret is not
+# accepted for good.
+RENAME_RELEASED = datetime(2026, 11, 7, tzinfo=UTC)
 
 
-def _accepted(configured: str, field: str, previous: str) -> list[str]:
-    """``configured``, and ``previous`` while ``configured`` is the shipped default."""
-    default = APISettings.model_fields[field].default
-    return [configured, previous] if configured == default else [configured]
+@functools.cache
+def previous_labels_minted_before() -> datetime:
+    """The end of the window a token under the previous labels must be minted in."""
+    from app.services.settings_catalog_api import API_EDITABLE
+
+    longest = int(API_EDITABLE["jwt_refresh_token_expire_days"]["maximum"])
+    return RENAME_RELEASED + timedelta(days=longest)
+
+
+def _shipped_labels() -> bool:
+    """Whether the deployment keeps the shipped issuer and audience."""
+    fields = APISettings.model_fields
+    return bool(
+        settings.jwt_issuer == fields["jwt_issuer"].default
+        and settings.jwt_audience == fields["jwt_audience"].default
+    )
+
+
+def _under_previous_labels(token: str, secret: str) -> dict[str, Any] | None:
+    """``token`` read under the previous labels, or ``None``.
+
+    Only while the deployment keeps the shipped labels, and only for a token
+    whose ``iat`` falls before :func:`previous_labels_minted_before`.
+    """
+    if not _shipped_labels():
+        return None
+    try:
+        payload = jwt.decode(
+            token,
+            secret,
+            algorithms=[settings.jwt_algorithm],
+            audience=PREVIOUS_AUDIENCE,
+            issuer=PREVIOUS_ISSUER,
+            options={"require": ["iat"]},
+        )
+    except jwt.PyJWTError:
+        return None
+    minted = payload.get("iat")
+    if not isinstance(minted, (int, float)) or isinstance(minted, bool):
+        return None
+    if datetime.fromtimestamp(minted, UTC) >= previous_labels_minted_before():
+        return None
+    return cast(dict[str, Any], payload)
 
 
 def decode_token(token: str) -> dict[str, Any] | None:
@@ -289,7 +335,9 @@ def decode_token(token: str) -> dict[str, Any] | None:
     Try the active secret first, then fall back to
     the previous secret if configured. This is the dual-secret accept
     window that lets operators rotate ``JWT_SECRET_KEY`` without
-    invalidating every issued token at once.
+    invalidating every issued token at once. A token refused only for its
+    issuer or audience is read under the labels a release before the rename
+    used, within that window (:func:`_under_previous_labels`).
     """
     secrets_to_try = [_secret()]
     prev = _previous_secret()
@@ -304,10 +352,15 @@ def decode_token(token: str) -> dict[str, Any] | None:
                     token,
                     candidate,
                     algorithms=[settings.jwt_algorithm],
-                    audience=_accepted(settings.jwt_audience, "jwt_audience", PREVIOUS_AUDIENCE),
-                    issuer=_accepted(settings.jwt_issuer, "jwt_issuer", PREVIOUS_ISSUER),
+                    audience=settings.jwt_audience,
+                    issuer=settings.jwt_issuer,
                 ),
             )
+        except (jwt.InvalidIssuerError, jwt.InvalidAudienceError):
+            held = _under_previous_labels(token, candidate)
+            if held is not None:
+                return held
+            continue
         except jwt.PyJWTError:
             continue
     return None
