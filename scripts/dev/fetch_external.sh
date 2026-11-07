@@ -15,12 +15,22 @@
 # deployment rather than a dependency. This project talks to one over its REST
 # API; it does not install, build or package it.
 #
-#   scripts/dev/fetch_external.sh
+# A pinned tag that does not build or start as released carries a patch,
+# scripts/dev/patches/<name>-<ref>.patch, applied after the checkout. A tree that
+# already carries it is left as it is; one where it neither applies nor is in
+# place stops the script, since the image built from it would not be the one
+# the pin describes.
+#
+#   scripts/dev/fetch_external.sh               every tree, the Sigma rules and capa's data
+#   scripts/dev/fetch_external.sh ghidra-mcp    only the named trees
+#
+# MALSPARK_EXTERNAL_DIR puts the trees somewhere other than external/.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-EXTERNAL="$REPO_ROOT/external"
+EXTERNAL="${MALSPARK_EXTERNAL_DIR:-$REPO_ROOT/external}"
+PATCHES="$REPO_ROOT/scripts/dev/patches"
 
 # name|url|ref  — the ref is what the project was built and measured against.
 targets=(
@@ -38,11 +48,21 @@ SIGMA_URL="https://github.com/SigmaHQ/sigma.git"
 SIGMA_REF="r2026-07-01"
 SIGMA_DEST="$REPO_ROOT/data/sigma_rules"
 
+# A name that is no target is a typo, and fetching nothing for it would pass for success.
+known=" ${targets[*]%%|*} "
+for wanted in "$@"; do
+  if [[ "$known" != *" $wanted "* ]]; then
+    echo "  FAIL     no target named $wanted; the targets are:$known" >&2
+    exit 2
+  fi
+done
+
 mkdir -p "$EXTERNAL"
 
 for spec in "${targets[@]}"; do
   IFS='|' read -r name url ref <<<"$spec"
   dest="$EXTERNAL/$name"
+  [[ $# -eq 0 || " $* " == *" $name "* ]] || continue
 
   if [[ -d "$dest/.git" ]]; then
     have=$(git -C "$dest" rev-parse --short HEAD)
@@ -52,25 +72,68 @@ for spec in "${targets[@]}"; do
     if [[ -n "$want" && "$(git -C "$dest" rev-parse HEAD)" == "$want" ]] \
        || [[ "$have" == "${ref:0:${#have}}" ]]; then
       echo "  ok       $name at $have"
-      continue
+    else
+      echo "  checkout $name -> $ref"
+      # The patch this script applied for the earlier pin comes off first, so
+      # it does not stand in the checkout's way: only one whose ref (its file
+      # name, <name>-<ref>.patch) is the tree's HEAD and that comes off
+      # cleanly, and nothing else in the tree is touched.
+      for applied in "$PATCHES/$name"-*.patch; do
+        [[ -f "$applied" ]] || continue
+        from="${applied##*/}"
+        from="${from#"$name"-}"
+        from="${from%.patch}"
+        at=$(git -C "$dest" rev-parse --verify --quiet "${from}^{commit}" 2>/dev/null || true)
+        [[ -n "$at" && "$at" == "$(git -C "$dest" rev-parse HEAD)" ]] || continue
+        if git -C "$dest" apply --ignore-whitespace --reverse --check "$applied" 2>/dev/null; then
+          git -C "$dest" apply --ignore-whitespace --reverse "$applied"
+          # The lines it puts back carry the patch's line endings; a file that
+          # then differs from the checkout in those alone is the checkout's again.
+          while IFS=$'\t' read -r _ _ file; do
+            if git -C "$dest" diff --quiet --ignore-cr-at-eol -- "$file"; then
+              git -C "$dest" checkout --quiet -- "$file"
+            fi
+          done < <(git -C "$dest" apply --numstat "$applied")
+          echo "  unpatch  $name ${applied##*/}"
+        fi
+      done
+      git -C "$dest" fetch --quiet --tags origin
+      git -C "$dest" checkout --quiet "$ref" || {
+        echo "  FAIL     $name: cannot check out $ref; local changes in $dest are in the way" \
+          "(see git -C $dest status), or the ref is not there" >&2
+        exit 1
+      }
     fi
-    echo "  checkout $name -> $ref"
-    git -C "$dest" fetch --quiet --tags origin
-    git -C "$dest" checkout --quiet "$ref"
-    continue
-  fi
-
-  if [[ -e "$dest" ]]; then
+  elif [[ -e "$dest" ]]; then
     echo "  SKIP     $name exists and is not a git checkout: $dest" >&2
     continue
+  else
+    echo "  clone    $name $ref"
+    # No default-branch checkout: its .gitattributes line-ending rules can make the
+    # pinned ref's files look locally modified and block the checkout below.
+    git clone --quiet --no-checkout "$url" "$dest"
+    git -C "$dest" checkout --quiet "$ref"
   fi
 
-  echo "  clone    $name $ref"
-  # No default-branch checkout: its .gitattributes line-ending rules can make the
-  # pinned ref's files look locally modified and block the checkout below.
-  git clone --quiet --no-checkout "$url" "$dest"
-  git -C "$dest" checkout --quiet "$ref"
+  # The tag's own files differ in line endings by checkout (CRLF as released,
+  # LF once an editor has touched them), so whitespace is not compared.
+  patch="$PATCHES/$name-$ref.patch"
+  if [[ -f "$patch" ]]; then
+    if git -C "$dest" apply --ignore-whitespace --check "$patch" 2>/dev/null; then
+      git -C "$dest" apply --ignore-whitespace "$patch"
+      echo "  patch    $name ${patch##*/}"
+    elif git -C "$dest" apply --ignore-whitespace --reverse --check "$patch" 2>/dev/null; then
+      echo "  ok       $name carries ${patch##*/}"
+    else
+      echo "  FAIL     $name: ${patch##*/} neither applies to $dest nor is in place" >&2
+      git -C "$dest" apply --ignore-whitespace --check "$patch" || true
+      exit 1
+    fi
+  fi
 done
+
+# Named trees only: the rule corpora below are fetched by a run without names.
+(( $# == 0 )) || exit 0
 
 
 if [[ -d "$SIGMA_DEST/.git" ]]; then

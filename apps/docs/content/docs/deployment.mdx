@@ -192,9 +192,20 @@ services whose image carries an x86-64-only program declare
 
 On an amd64 host the `platform:` lines change nothing.
 
-**Turn on x86-64 emulation.** In Docker Desktop, turn on *Use Rosetta for
-x86_64/amd64 emulation on Apple Silicon* under Settings → General. With Colima,
-start the VM on Apple's virtualisation framework with Rosetta:
+One program inside a native image is x86-64 only as well: FLOSS, the analysis
+server's emulating string decoder, is FLARE's x86-64 Linux build, and the
+backend image installs that build whatever its architecture. On an arm64
+backend it may not run there (whether it does depends on the x86-64 emulation
+the VM offers native containers); the analysis server asks the build its
+version and reports the `floss` tool unavailable, with the reason, when it
+does not answer. Every other tool runs as usual.
+
+**Rosetta is required.** The emulated services need Rosetta, not Docker's
+default QEMU user-mode emulation: under QEMU some multi-threaded programs crash
+(GoReSym among them), so a sidecar starts and then fails its calls. In Docker
+Desktop, turn on *Use Rosetta for x86_64/amd64 emulation on Apple Silicon*
+under Settings → General. With Colima, start the VM on Apple's virtualisation
+framework with Rosetta:
 
 ```bash
 colima start --vm-type vz --vz-rosetta --memory 32 --cpu 8

@@ -194,6 +194,13 @@ services:
     build:
       context: ../external/ghidra-mcp
       dockerfile: docker/Dockerfile
+      # The Ghidra release the pinned tree's pom.xml builds against, passed here
+      # so the image does not lean on the Dockerfile's default. The patch
+      # scripts/dev/fetch_external.sh applies moves that default to the same
+      # release: change the three together.
+      args:
+        GHIDRA_VERSION: "12.0.4"
+        GHIDRA_DATE: "20260303"
     image: ghidra-mcp-headless:latest
     # x86-64 only: Ghidra's release ships no linux_arm_64 decompiler; an arm64 host runs it emulated.
     platform: linux/amd64

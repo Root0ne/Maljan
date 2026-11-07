@@ -20,7 +20,9 @@ FLOSS runs as FLARE's standalone Linux build, a pinned executable outside this
 project's Python environment, so its dependency bounds never reach the
 product's lockfile. It is found at ``MALSPARK_FLOSS_PATH``, in the user tools
 directory ``scripts/install_floss.sh`` writes to, or on ``PATH`` (where the
-backend image puts it), and is run only when its sha256 is the pinned build's.
+backend image puts it), and is run only when its sha256 is the pinned build's
+and it answers ``--version`` on this host: an executable built for another
+machine has the right digest and still never runs.
 The child has a hard wall clock and an address-space limit, runs in a session
 of its own so an overrun takes the whole process group, and is given a home and
 a temporary directory inside this job's staging directory and no other
@@ -33,6 +35,7 @@ once costs one emulation.
 from __future__ import annotations
 
 import contextlib
+import errno
 import hashlib
 import json
 import os
@@ -120,6 +123,17 @@ _IN_FLIGHT: dict[tuple[str, int, int, int], threading.Lock] = {}
 # the path is checked again.
 _VERIFIED: dict[tuple[str, int, int, int, int], bool] = {}
 
+# Whether each verified executable ran when asked its version, keyed as
+# ``_VERIFIED`` is: ``None`` when it answered, else the reason it did not.
+_RUNS: dict[tuple[str, int, int, int, int], str | None] = {}
+# The wall clock that one answer may take. The standalone build unpacks about
+# 63 MB before it answers, a few seconds natively and several times that under
+# an emulator; a build that has not answered by then is not one a run can use.
+_PROBE_TIMEOUT_S = 60
+# The errors an exec of the file itself gives every time: a format this kernel
+# does not load, a loader or interpreter that is not there, no permission.
+_LASTING_EXEC_ERRORS = frozenset({errno.ENOEXEC, errno.ENOENT, errno.EACCES})
+
 # The name the verified copy of the build is written under, inside the run's
 # own directory.
 _RUN_COPY = "floss"
@@ -191,7 +205,7 @@ def _is_pinned_build(path: Path) -> bool:
 
 
 def find_floss(environ: Mapping[str, str] | None = None) -> tuple[Path | None, str]:
-    """The pinned FLOSS executable, or ``None`` and the reason there is none.
+    """The pinned FLOSS executable that runs here, or ``None`` and the reason there is none.
 
     ``MALSPARK_FLOSS_PATH`` when it is set, and nothing else then; otherwise the
     user tools directory, then ``PATH``. The reason names where the tool looked
@@ -217,17 +231,85 @@ def find_floss(environ: Mapping[str, str] | None = None) -> tuple[Path | None, s
             else "no floss executable in the user tools directory or on PATH"
         )
         return None, f"floss is not installed: {where}"
-    for path in found:
-        if _is_pinned_build(path):
+    pinned = [path for path in found if _is_pinned_build(path)]
+    if not pinned:
+        return None, (
+            f"floss is not installed: the executable found is not the pinned FLOSS "
+            f"{FLOSS_VERSION} build (sha256 mismatch)"
+        )
+    reason = ""
+    for path in pinned:
+        failed = _does_not_run(path)
+        if failed is None:
             return path, ""
-    return None, (
-        f"floss is not installed: the executable found is not the pinned FLOSS "
-        f"{FLOSS_VERSION} build (sha256 mismatch)"
-    )
+        reason = reason or failed
+    return None, reason
+
+
+def _does_not_run(path: Path) -> str | None:
+    """Why the pinned build at ``path`` cannot run on this host, or ``None`` when it answers.
+
+    The right bytes are not yet a working tool: an executable built for another
+    machine, or one whose loader or libraries are missing, has the pinned digest
+    and still never runs. So the build is run once, as every run is (a verified
+    copy, its own directory, a wall clock), asking only its version. A verdict
+    the file gives every time is remembered per size, mtime, inode and ctime, as
+    the digest's is. No failure of the probe escapes it: the capability manifest
+    asks while the server starts. The reason quotes the end of what the child
+    wrote and never a host path.
+    """
+    try:
+        info = path.stat()
+    except OSError as exc:
+        return f"floss cannot be executed on this host: {exc.strerror or type(exc).__name__}"
+    key = (str(path), info.st_size, info.st_mtime_ns, info.st_ino, info.st_ctime_ns)
+    if key in _RUNS:
+        return _RUNS[key]
+    reason: str | None = None
+    # Only an answer that the same file gives every time is remembered: an exit
+    # status, the digest, or an exec the kernel refuses for the file itself. A
+    # timeout, a full disk or a process limit says more about this moment than
+    # about the build, so the next probe asks again.
+    lasting = True
+    try:
+        done = _run([str(path), "--version"], _PROBE_TIMEOUT_S, pinned=path)
+    except subprocess.TimeoutExpired:
+        lasting = False
+        reason = (
+            f"floss cannot be executed on this host: it did not answer --version "
+            f"within {_PROBE_TIMEOUT_S} s"
+        )
+    except NotThePinnedBuild as exc:
+        reason = f"floss is not installed: {exc}"
+    except ExecRefused as exc:
+        lasting = exc.errno in _LASTING_EXEC_ERRORS
+        reason = f"floss cannot be executed on this host: {exc.strerror or type(exc).__name__}"
+    except OSError as exc:
+        # The run's directory or the copy, not the build: a later probe may succeed.
+        lasting = False
+        reason = f"floss cannot be executed on this host: {exc.strerror or type(exc).__name__}"
+    except Exception as exc:  # noqa: BLE001 - a probe answers; it never stops the server
+        # A staging directory refused as unsafe, for one: its message names a
+        # host path, so only the kind of failure is said.
+        lasting = False
+        reason = f"floss cannot be executed on this host: {type(exc).__name__}"
+    else:
+        if done.returncode != 0:
+            tail = done.stderr
+            for where in (str(done.args[0]), str(path)):
+                tail = tail.replace(where, "floss")
+            tail = " ".join(tail.split())[-_ERROR_TAIL_CHARS:]
+            reason = (
+                f"floss cannot be executed on this host: --version exited with "
+                f"{done.returncode}" + (f": {tail}" if tail else "")
+            )
+    if lasting:
+        _RUNS[key] = reason
+    return reason
 
 
 def floss_unavailable(environ: Mapping[str, str] | None = None) -> str | None:
-    """The capability manifest's probe: ``None`` when the pinned build is here."""
+    """The capability manifest's probe: ``None`` when the pinned build is here and runs."""
     path, reason = find_floss(environ)
     return None if path is not None else reason
 
@@ -277,6 +359,10 @@ def _limit_address_space(pid: int) -> bool:
 
 class NotThePinnedBuild(OSError):
     """The executable's bytes, read to be run, are not the pinned build's."""
+
+
+class ExecRefused(OSError):
+    """Starting the build failed: the exec itself, not the directory set up for it."""
 
 
 def _verified_copy(source: Path, directory: Path) -> Path:
@@ -364,15 +450,18 @@ def _spawn(
     out_path = Path(workdir) / _STDOUT_NAME
     err_path = Path(workdir) / _STDERR_NAME
     with out_path.open("wb") as out_file, err_path.open("wb") as err_file:
-        process = subprocess.Popen(  # noqa: S603 - a fixed argv naming the verified build
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=out_file,
-            stderr=err_file,
-            env=env,
-            cwd=workdir,
-            start_new_session=True,
-        )
+        try:
+            process = subprocess.Popen(  # noqa: S603 - a fixed argv naming the verified build
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=out_file,
+                stderr=err_file,
+                env=env,
+                cwd=workdir,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise ExecRefused(exc.errno, exc.strerror) from exc
         capped = _limit_address_space(process.pid)
     # Its own session, so its group is what the server kills when every caller
     # of this run has gone (``tools.children``).
@@ -636,11 +725,12 @@ NOT_REMEMBERED = (
 
 
 def forget_documents() -> None:
-    """Drop every remembered result document and checked digest. For tests."""
+    """Drop every remembered result document, checked digest and version answer. For tests."""
     with _LOCK:
         _REMEMBERED.clear()
         _IN_FLIGHT.clear()
     _VERIFIED.clear()
+    _RUNS.clear()
 
 
 def _refused(target: Path, path: str) -> dict[str, Any] | None:
