@@ -295,6 +295,12 @@ class TestFailuresAreAnswers:
 
 
 class TestTheExecutable:
+    @pytest.fixture(autouse=True)
+    def _staging(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The probe runs the build once, in a run directory under staging.
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.delenv("MALSPARK_STAGING_JOB", raising=False)
+
     def _executable(self, tmp_path: Path, body: bytes) -> Path:
         target = tmp_path / "floss"
         target.write_bytes(body)
@@ -378,6 +384,100 @@ class TestTheExecutable:
 
         assert tool.find_floss({"PATH": str(bin_dir)}) == (target, "")
         assert tool.find_floss({"PATH": str(tmp_path / "empty")})[0] is None
+
+
+class TestTheBuildMustRunHere:
+    """The pinned digest is not enough: the probe asks the build its version once."""
+
+    @pytest.fixture(autouse=True)
+    def _staging(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
+        monkeypatch.delenv("MALSPARK_STAGING_JOB", raising=False)
+
+    def _pinned(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: bytes) -> Path:
+        import hashlib
+
+        target = tmp_path / "bin" / "floss"
+        target.parent.mkdir()
+        target.write_bytes(body)
+        target.chmod(0o755)
+        monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(body).hexdigest())
+        monkeypatch.setenv("MALSPARK_FLOSS_PATH", str(target))
+        return target
+
+    def test_a_build_that_answers_its_version_is_available(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        body = b'#!/bin/sh\n[ "$1" = --version ] && echo "3.1.1" && exit 0\nexit 2\n'
+        self._pinned(tmp_path, monkeypatch, body)
+
+        assert tool.floss_unavailable() is None
+
+    def test_a_build_whose_loader_is_missing_is_unavailable_with_its_words(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The shape of an executable for another machine run through a missing loader."""
+        body = b'#!/bin/sh\necho "$0: cannot execute: required file not found" >&2\nexit 127\n'
+        self._pinned(tmp_path, monkeypatch, body)
+
+        reason = tool.floss_unavailable()
+
+        assert reason is not None
+        assert reason.startswith("floss cannot be executed on this host: --version exited with 127")
+        assert "required file not found" in reason
+        assert str(tmp_path) not in reason
+
+    def test_bytes_the_kernel_cannot_execute_are_unavailable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An image in a format this kernel does not load: the exec itself fails."""
+        self._pinned(tmp_path, monkeypatch, b"\x00\x01\x02 no format this kernel knows\n")
+
+        reason = tool.floss_unavailable()
+
+        assert reason is not None
+        assert reason.startswith("floss cannot be executed on this host: ")
+        assert str(tmp_path) not in reason
+
+    def test_a_build_that_does_not_answer_in_time_is_unavailable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._pinned(tmp_path, monkeypatch, b"#!/bin/sh\nexec sleep 30\n")
+        monkeypatch.setattr(tool, "_PROBE_TIMEOUT_S", 1)
+
+        reason = tool.floss_unavailable()
+
+        assert reason == (
+            "floss cannot be executed on this host: it did not answer --version within 1 s"
+        )
+
+    def test_the_answer_is_asked_once_per_file_and_again_when_it_changes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import hashlib
+
+        count = tmp_path / "asked"
+        body = f'#!/bin/sh\necho x >> "{count}"\n'.encode()
+        target = self._pinned(tmp_path, monkeypatch, body)
+
+        assert tool.floss_unavailable() is None
+        assert tool.floss_unavailable() is None
+        assert count.read_text().count("x") == 1
+
+        changed = body + b"exit 3\n"
+        target.write_bytes(changed)
+        monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", hashlib.sha256(changed).hexdigest())
+
+        assert "exited with 3" in (tool.floss_unavailable() or "")
+        assert count.read_text().count("x") == 2
+
+    def test_the_run_leaves_nothing_in_staging(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._pinned(tmp_path, monkeypatch, b"#!/bin/sh\n")
+
+        assert tool.floss_unavailable() is None
+        assert list((tmp_path / "staging" / "floss").iterdir()) == []
 
 
 class TestTheChild:
