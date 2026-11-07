@@ -1,7 +1,9 @@
 # ── webcrack MCP sidecar ────────────────────────────
 # webcrack (MIT) on Node.js, under the shared MCP plumbing (../cli-sidecar).
-# Node.js is the official Linux build of the pinned release, checked against
-# the sha256 its release's SHASUMS256.txt publishes; webcrack and every package
+# Node.js is the official Linux build of the pinned release for the image's
+# architecture (x64 or arm64, the one BuildKit names in TARGETARCH, else the
+# build host's), checked against the sha256 its release's signed
+# SHASUMS256.txt publishes for that build; webcrack and every package
 # it needs are pinned by integrity hash in package-lock.json and installed with
 # npm ci --ignore-scripts, so no package's install script runs. Built with
 # services/ as the context (docker/docker-compose.yml, profile `webcrack`).
@@ -16,14 +18,21 @@
 # capability, a read-only root, no route out and the sample directory mounted
 # read-only.
 FROM python:3.13-slim-trixie@sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39 AS node
+ARG TARGETARCH
 ARG NODE_VERSION=22.23.4
-ARG NODE_TXZ_SHA256=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce
+ARG NODE_AMD64_TXZ_SHA256=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce
+ARG NODE_ARM64_TXZ_SHA256=6287aa46b6c375d816e63ae66d024fbbfd70404825aabdfdf898a970871d2f4b
 WORKDIR /opt
-RUN python3 -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], 'node.tar.xz')" \
-        "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" && \
-    echo "${NODE_TXZ_SHA256}  node.tar.xz" | sha256sum -c - && \
+RUN case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+        amd64) node_arch=x64 txz_sha256="${NODE_AMD64_TXZ_SHA256}" ;; \
+        arm64) node_arch=arm64 txz_sha256="${NODE_ARM64_TXZ_SHA256}" ;; \
+        *) echo "node: no Linux build is pinned for ${TARGETARCH:-$(dpkg --print-architecture)}" >&2; exit 1 ;; \
+    esac && \
+    python3 -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], 'node.tar.xz')" \
+        "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.xz" && \
+    echo "${txz_sha256}  node.tar.xz" | sha256sum -c - && \
     python3 -c "import tarfile; tarfile.open('node.tar.xz').extractall('.', filter='data')" && \
-    mv "node-v${NODE_VERSION}-linux-x64" node && \
+    mv "node-v${NODE_VERSION}-linux-${node_arch}" node && \
     rm -f node.tar.xz
 WORKDIR /app
 COPY webcrack-mcp/package.json webcrack-mcp/package-lock.json ./

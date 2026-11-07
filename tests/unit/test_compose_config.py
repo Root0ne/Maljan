@@ -283,7 +283,6 @@ X86_ONLY = {
     "ghidra-mcp": None,
     "die-mcp": "_amd64.deb",
     "goresym-mcp": "GoReSym-linux.zip",
-    "webcrack-mcp": "-linux-x64.tar.xz",
     "unblob-mcp": "sasquatch_1.0_amd64.deb",
 }
 # The sidecars built natively for amd64 and arm64 (T-573), and the two
@@ -295,6 +294,7 @@ NATIVE_SIDECARS = {
         "triple=aarch64-unknown-linux-gnu",
     ),
     "jadx-mcp": ("OpenJDK21U-jre_${jre_arch}_linux_hotspot_", "jre_arch=x64", "jre_arch=aarch64"),
+    "webcrack-mcp": ("-linux-${node_arch}.tar.xz", "node_arch=x64", "node_arch=arm64"),
 }
 # The services built or pulled for the host's own architecture.
 MULTI_ARCH = (

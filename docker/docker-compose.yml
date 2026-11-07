@@ -553,8 +553,6 @@ services:
       context: ../services
       dockerfile: webcrack-mcp/Dockerfile
     image: malspark-webcrack-mcp:2.16.0
-    # x86-64 only: the image unpacks Node's linux-x64 build; an arm64 host runs it emulated.
-    platform: linux/amd64
     container_name: malspark-webcrack-mcp
     environment:
       MCP_AUTH_TOKEN: ${WEBCRACK_MCP_AUTH_TOKEN:-}

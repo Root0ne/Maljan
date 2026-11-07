@@ -964,7 +964,10 @@ def test_the_oletools_image_installs_only_hashed_wheels_of_the_pinned_release() 
 def test_the_webcrack_image_pins_node_and_every_package_by_hash() -> None:
     dockerfile = _dockerfile("webcrack")
     (node,) = re.findall(r"^ARG NODE_VERSION=(\S+)$", dockerfile, re.MULTILINE)
-    assert re.findall(r"^ARG NODE_TXZ_SHA256=([0-9a-f]{64})$", dockerfile, re.MULTILINE)
+    # One build per architecture, each by the digest its release publishes.
+    assert re.findall(
+        r"^ARG NODE_(AMD64|ARM64)_TXZ_SHA256=[0-9a-f]{64}$", dockerfile, re.MULTILINE
+    ) == ["AMD64", "ARM64"]
     assert node.split(".")[0] in ("22", "24") and "sha256sum -c -" in dockerfile
     assert "npm ci --ignore-scripts" in dockerfile
     # The sandbox webcrack would evaluate decoders in is not in the image.
