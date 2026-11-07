@@ -1,0 +1,81 @@
+name: Ghidra MCP image
+
+on:
+  # The image is built from a tree fetched at a pinned tag and patched, outside
+  # this repository, so it breaks when the pin, its patch or the compose build
+  # changes, and when something upstream of the tag (a Ghidra release asset, a
+  # base image) moves. Those changes and a weekly run build it; other pull
+  # requests do not, since the build takes minutes and downloads Ghidra.
+  pull_request:
+    branches: ["main", "dev"]
+    paths:
+      - "scripts/dev/fetch_external.sh"
+      - "scripts/dev/patches/**"
+      - "docker/docker-compose.yml"
+      - ".github/workflows/ghidra-mcp.yml"
+  push:
+    branches: ["dev"]
+    paths:
+      - "scripts/dev/fetch_external.sh"
+      - "scripts/dev/patches/**"
+      - "docker/docker-compose.yml"
+      - ".github/workflows/ghidra-mcp.yml"
+  schedule:
+    - cron: "23 3 * * 3"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ghidra-mcp and wait for its healthcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Values only for the compose file's guards: no other service is built or started.
+    env:
+      POSTGRES_PASSWORD: ci-only
+      REDIS_PASSWORD: ci-only
+      MINIO_ROOT_USER: ci-only
+      MINIO_ROOT_PASSWORD: ci-only-password
+      JWT_SECRET_KEY: ci-only
+      SETTINGS_ENCRYPTION_KEY: ci-only
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch the pinned tree and apply its patch
+        run: bash scripts/dev/fetch_external.sh ghidra-mcp
+
+      - name: Build the image as the compose file does
+        run: docker compose -f docker/docker-compose.yml --profile ghidra build ghidra-mcp
+
+      - name: Start it and wait for its healthcheck
+        run: |
+          token="$(openssl rand -hex 24)"
+          docker run -d --name ghidra-mcp-ci \
+            -e GHIDRA_MCP_AUTH_TOKEN="$token" \
+            -e GHIDRA_MCP_BIND_ADDRESS=0.0.0.0 \
+            -e GHIDRA_MCP_PORT=8089 \
+            ghidra-mcp-headless:latest
+          for _ in $(seq 1 60); do
+            state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' ghidra-mcp-ci)"
+            echo "$state"
+            case "$state" in
+              "running healthy") exit 0 ;;
+              running*) sleep 10 ;;
+              *) break ;;
+            esac
+          done
+          docker logs ghidra-mcp-ci
+          exit 1
+
+      - name: Server log
+        if: always()
+        run: docker logs ghidra-mcp-ci 2>&1 | tail -n 100 || true
