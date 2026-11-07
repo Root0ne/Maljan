@@ -212,11 +212,7 @@ not parse or lists a page that is not there; if a link to `/docs/...`,
 `/assets/...` or `/examples/...`, anchor included, leads nowhere, or a link is
 relative, outside those three, or points at the old GitHub Pages address; and
 if an address the old site served (`scripts/old-addresses.mjs`) no longer
-leads to a page. On `main` the workflow also publishes a redirect site to
-GitHub Pages, so every address of the old GitHub Pages site leads to the same
-page under `https://malspark.com/docs/`, and a page that moved, such as
-`/paper/` or a retired benchmark score page, to the page that holds its text
-now.
+leads to a page.
 
 [Validation codes](/docs/validation-codes/) is generated, not written. Run
 `uv run python scripts/validation_codes/run.py` and commit the page after any of

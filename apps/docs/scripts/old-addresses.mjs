@@ -1,9 +1,8 @@
 /* The docs addresses the old site served, relative to its root
- * (https://root0ne.github.io/Malspark/), from the MkDocs era on.
+ * (the retired GitHub Pages site), from the MkDocs era on.
  *
  * Each now lives at the same path under /docs/ on malspark.com, except those
- * in MOVED, which name their new address. scripts/pages-redirect.mjs applies
- * MOVED before the generic rule, and scripts/check.mjs fails when an old
+ * in MOVED, which name their new address; scripts/check.mjs fails when an old
  * address no longer leads to a page.
  */
 export const OLD_PATHS = [
