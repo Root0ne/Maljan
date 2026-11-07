@@ -113,6 +113,16 @@ def _start_time(pid: int) -> str | None:
     return rest[19] if len(rest) > 19 else None
 
 
+# What the worker says, once, on a host without the process table the
+# children are read from: nothing a handle started can then be named.
+NO_PROCESS_TABLE = (
+    "mcp servers: this host has no process table at /proc/self/task, so the child a stdio "
+    "server runs as cannot be identified: it is not reaped when its transport's own shutdown "
+    "does not run, and its isolation is not measured (the run says it cannot be told)"
+)
+_NO_PROCESS_TABLE_SAID = threading.Event()
+
+
 def _own_child_pids() -> set[int]:
     """The pids of this process's direct children, empty where /proc is absent.
 
@@ -121,20 +131,26 @@ def _own_child_pids() -> set[int]:
     ``Process`` in a generator frame. Snapshotting before and after
     ``initialize`` names the child a handle spawned precisely enough to signal
     it — and only it — when the transport's own shutdown never gets to run.
+    Where the table cannot be read, that is said once (``NO_PROCESS_TABLE``)
+    rather than read as a process with no children.
     """
     import os
 
     try:
-        children: set[int] = set()
-        for task in os.listdir("/proc/self/task"):
-            try:
-                with open(f"/proc/self/task/{task}/children") as fh:
-                    children.update(int(pid) for pid in fh.read().split())
-            except (OSError, ValueError):
-                continue
-        return children
+        tasks = os.listdir("/proc/self/task")
     except OSError:
+        if not _NO_PROCESS_TABLE_SAID.is_set():
+            _NO_PROCESS_TABLE_SAID.set()
+            logger.warning("%s.", NO_PROCESS_TABLE)
         return set()
+    children: set[int] = set()
+    for task in tasks:
+        try:
+            with open(f"/proc/self/task/{task}/children") as fh:
+                children.update(int(pid) for pid in fh.read().split())
+        except (OSError, ValueError):
+            continue
+    return children
 
 
 # Child pids already attributed to a handle, by the handle that owns each. Two

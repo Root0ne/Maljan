@@ -25,6 +25,8 @@ from typing import Any
 
 import pytest
 
+from tests.unit._process_table import running
+
 LIVE_BUDGET_S = 90.0
 
 _INTERPRETER_MISSING = not sys.executable or not shutil.which(sys.executable)
@@ -41,18 +43,18 @@ def _still_running(pid: int) -> bool:
 
     The child of a handle dies with the loop whether or not the handle was
     closed, so "no longer our child" on its own says nothing; this asks the
-    procfs entry, and reads a zombie as gone.
+    process table, and reads a zombie as gone.
     """
-    try:
-        with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
-            fields = fh.read().rsplit(") ", 1)
-    except OSError:
-        return False
-    return bool(fields[1:]) and fields[1].split(" ", 1)[0] != "Z"
+    return running(pid)
 
 
 @pytest.mark.skipif(
     _INTERPRETER_MISSING, reason="no python interpreter available to launch the sidecar"
+)
+@pytest.mark.skipif(
+    not Path("/proc/self/task").is_dir(),
+    reason="a handle names its child from the process table at /proc/self/task; a host "
+    "without one is told so (test_a_host_without_a_process_table_is_told_so_once)",
 )
 class TestAFinishedJobHoldsNoSidecar:
     """Production first: the teardown the worker runs, against real children."""
@@ -139,6 +141,34 @@ class TestAFinishedJobHoldsNoSidecar:
         from malspark.providers import servers
 
         assert [handle for handle in servers._LIVE_HANDLES if handle._job_id == job_id] == []
+
+
+def test_a_host_without_a_process_table_is_told_so_once(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """No children read is not "no children": the worker says what it cannot do."""
+    import logging
+    import os
+
+    from malspark.providers import servers
+
+    real_listdir = os.listdir
+
+    def no_proc(path: Any = ".") -> list[str]:
+        if str(path).startswith("/proc"):
+            raise FileNotFoundError(2, "No such file or directory", str(path))
+        return real_listdir(path)
+
+    monkeypatch.setattr(os, "listdir", no_proc)
+    monkeypatch.setattr(servers, "_NO_PROCESS_TABLE_SAID", type(servers._NO_PROCESS_TABLE_SAID)())
+
+    with caplog.at_level(logging.WARNING, logger="malspark"):
+        assert servers._own_child_pids() == set()
+        assert servers._own_child_pids() == set()
+
+    said = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert said == [f"{servers.NO_PROCESS_TABLE}."]
+    assert "is not reaped" in said[0] and "isolation is not measured" in said[0]
 
 
 class _Handle:
