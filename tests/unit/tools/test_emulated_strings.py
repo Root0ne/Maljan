@@ -523,7 +523,7 @@ class TestTheBuildMustRunHere:
 
         def refused(*_args: Any, **_kwargs: Any) -> subprocess.CompletedProcess[str]:
             calls.append(1)
-            raise OSError(number, os.strerror(number))
+            raise tool.ExecRefused(number, os.strerror(number))
 
         monkeypatch.setattr(tool, "_run", refused)
 
@@ -532,6 +532,46 @@ class TestTheBuildMustRunHere:
 
         assert first == second == f"floss cannot be executed on this host: {os.strerror(number)}"
         assert len(calls) == (1 if remembered else 2)
+
+    def test_the_same_errno_from_setting_up_the_run_is_not_remembered(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ENOENT from the run's directory says nothing lasting about the build."""
+        self._pinned(tmp_path, monkeypatch, b"#!/bin/sh\n")
+        calls: list[int] = []
+
+        def no_directory(*_args: Any, **_kwargs: Any) -> Path:
+            calls.append(1)
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(tmp_path))
+
+        monkeypatch.setattr(tool, "_scratch", no_directory)
+
+        first = tool.floss_unavailable()
+        assert first == f"floss cannot be executed on this host: {os.strerror(errno.ENOENT)}"
+        assert str(tmp_path) not in first
+        assert tool.floss_unavailable() == first
+        assert len(calls) == 2
+
+    def test_an_exec_the_kernel_refuses_is_marked_as_the_exec_s(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._pinned(tmp_path, monkeypatch, b"\x00\x01\x02 no format this kernel knows\n")
+        seen: list[BaseException] = []
+        real = tool._run
+
+        def watched(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            try:
+                return real(*args, **kwargs)
+            except BaseException as exc:
+                seen.append(exc)
+                raise
+
+        monkeypatch.setattr(tool, "_run", watched)
+
+        assert tool.floss_unavailable() is not None
+        assert tool.floss_unavailable() is not None
+        assert len(seen) == 1
+        assert isinstance(seen[0], tool.ExecRefused)
 
     def test_the_run_leaves_nothing_in_staging(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

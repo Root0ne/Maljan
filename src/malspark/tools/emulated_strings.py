@@ -281,8 +281,12 @@ def _does_not_run(path: Path) -> str | None:
         )
     except NotThePinnedBuild as exc:
         reason = f"floss is not installed: {exc}"
-    except OSError as exc:
+    except ExecRefused as exc:
         lasting = exc.errno in _LASTING_EXEC_ERRORS
+        reason = f"floss cannot be executed on this host: {exc.strerror or type(exc).__name__}"
+    except OSError as exc:
+        # The run's directory or the copy, not the build: a later probe may succeed.
+        lasting = False
         reason = f"floss cannot be executed on this host: {exc.strerror or type(exc).__name__}"
     except Exception as exc:  # noqa: BLE001 - a probe answers; it never stops the server
         # A staging directory refused as unsafe, for one: its message names a
@@ -355,6 +359,10 @@ def _limit_address_space(pid: int) -> bool:
 
 class NotThePinnedBuild(OSError):
     """The executable's bytes, read to be run, are not the pinned build's."""
+
+
+class ExecRefused(OSError):
+    """Starting the build failed: the exec itself, not the directory set up for it."""
 
 
 def _verified_copy(source: Path, directory: Path) -> Path:
@@ -442,15 +450,18 @@ def _spawn(
     out_path = Path(workdir) / _STDOUT_NAME
     err_path = Path(workdir) / _STDERR_NAME
     with out_path.open("wb") as out_file, err_path.open("wb") as err_file:
-        process = subprocess.Popen(  # noqa: S603 - a fixed argv naming the verified build
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=out_file,
-            stderr=err_file,
-            env=env,
-            cwd=workdir,
-            start_new_session=True,
-        )
+        try:
+            process = subprocess.Popen(  # noqa: S603 - a fixed argv naming the verified build
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=out_file,
+                stderr=err_file,
+                env=env,
+                cwd=workdir,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            raise ExecRefused(exc.errno, exc.strerror) from exc
         capped = _limit_address_space(process.pid)
     # Its own session, so its group is what the server kills when every caller
     # of this run has gone (``tools.children``).

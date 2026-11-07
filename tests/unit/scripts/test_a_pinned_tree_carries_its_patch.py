@@ -192,6 +192,21 @@ class TestANewPin:
         assert _git(dest, "rev-parse", "HEAD") == _git(upstream, "rev-parse", "v2^{commit}")
         assert (dest / "build.txt").read_bytes() == b"version=1b\r\nname=tool\r\n"
 
+    def test_only_the_patch_named_for_the_tree_s_ref_comes_off(self, tmp_path: Path) -> None:
+        """A patch named for another ref is left alone, even one that would come off."""
+        upstream = self._upstream_with_v2(tmp_path)
+        tree = _tree(tmp_path, upstream.as_uri())
+        patches = tree / "scripts" / "dev" / "patches"
+        assert _fetch(tree, "tool").returncode == 0
+        (patches / "tool-v0.patch").write_text(_PATCH, encoding="utf-8")
+        self._pin(tree, "v2")
+
+        done = _fetch(tree, "tool")
+
+        assert done.returncode == 0, done.stderr
+        assert "unpatch  tool tool-v1.patch" in done.stdout
+        assert "tool-v0.patch" not in done.stdout
+
     def test_a_patched_tree_an_editor_converted_moves_to_the_new_pin(self, tmp_path: Path) -> None:
         upstream = self._upstream_with_v2(tmp_path)
         tree = _tree(tmp_path, upstream.as_uri())

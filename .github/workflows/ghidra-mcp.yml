@@ -50,6 +50,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # The checkout, data/samples among it, belongs to the runner's user, and
+      # volume-init refuses a tree owned by any id but root's and the one it is
+      # given, as a deployment whose ids do not match is told. So the services
+      # run as the runner's ids, still non-root and with no capability.
+      - name: Run the services as the checkout's owner
+        run: |
+          { echo "MALSPARK_UID=$(id -u)"; echo "MALSPARK_GID=$(id -g)"; } >> "$GITHUB_ENV"
+
       - name: Fetch the pinned tree and apply its patch
         run: bash scripts/dev/fetch_external.sh ghidra-mcp
 

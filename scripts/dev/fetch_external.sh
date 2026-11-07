@@ -74,11 +74,17 @@ for spec in "${targets[@]}"; do
       echo "  ok       $name at $have"
     else
       echo "  checkout $name -> $ref"
-      # The patches this script applied for the earlier pin come off first, so
-      # they do not stand in the checkout's way; only one that comes off
-      # cleanly is taken off, and nothing else in the tree is touched.
+      # The patch this script applied for the earlier pin comes off first, so
+      # it does not stand in the checkout's way: only one whose ref (its file
+      # name, <name>-<ref>.patch) is the tree's HEAD and that comes off
+      # cleanly, and nothing else in the tree is touched.
       for applied in "$PATCHES/$name"-*.patch; do
         [[ -f "$applied" ]] || continue
+        from="${applied##*/}"
+        from="${from#"$name"-}"
+        from="${from%.patch}"
+        at=$(git -C "$dest" rev-parse --verify --quiet "${from}^{commit}" 2>/dev/null || true)
+        [[ -n "$at" && "$at" == "$(git -C "$dest" rev-parse HEAD)" ]] || continue
         if git -C "$dest" apply --ignore-whitespace --reverse --check "$applied" 2>/dev/null; then
           git -C "$dest" apply --ignore-whitespace --reverse "$applied"
           # The lines it puts back carry the patch's line endings; a file that
