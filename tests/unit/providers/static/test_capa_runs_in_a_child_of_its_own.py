@@ -49,9 +49,12 @@ JOB = "a-capa-job"
 
 # The names the operating system itself adds to a new process's environment,
 # whatever its parent handed it: none came from the worker, so none is a
-# secret leaking. Each is listed by name; nothing else is let through.
+# secret leaking. Each is listed by name, for the one system that adds it;
+# nothing else is let through, and on every other system nothing at all.
 #   __CF_USER_TEXT_ENCODING: macOS sets it in every process at start-up.
-PLATFORM_INJECTED = frozenset({"__CF_USER_TEXT_ENCODING"})
+PLATFORM_INJECTED: frozenset[str] = (
+    frozenset({"__CF_USER_TEXT_ENCODING"}) if sys.platform == "darwin" else frozenset()
+)
 
 
 @pytest.fixture(autouse=True)

@@ -589,11 +589,6 @@ class TestTheChild:
         monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
         monkeypatch.delenv("MALSPARK_STAGING_JOB", raising=False)
 
-    @pytest.mark.skipif(
-        not hasattr(resource, "prlimit"),
-        reason="the cap is set with resource.prlimit, which this host lacks; there the result "
-        "says the cap was not applied (test_tb16_the_result_says_the_cap_was_not_applied)",
-    )
     def test_the_child_gets_the_limit_and_a_home_inside_staging_and_nothing_else(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -611,7 +606,11 @@ class TestTheChild:
 
         seen = json.loads(finished.stdout)
         scratch = tmp_path / "staging" / "floss"
-        assert seen["limit"] == tool.FLOSS_ADDRESS_SPACE_BYTES
+        if hasattr(resource, "prlimit"):
+            assert seen["limit"] == tool.FLOSS_ADDRESS_SPACE_BYTES
+        else:
+            # The cap is set with resource.prlimit; without it the run says so.
+            assert getattr(finished, "memory_cap_applied", True) is False
         assert seen["home"] == seen["tmp"] == seen["cwd"]
         assert Path(seen["home"]).parent == scratch
         assert Path(seen["home"]).name.startswith("run-")
