@@ -41,9 +41,11 @@ import ctypes
 import functools
 import gc
 import os
+import shutil
 import subprocess
 import sys
 import threading
+import time
 import tracemalloc
 from collections.abc import Callable
 from typing import Any
@@ -87,6 +89,17 @@ _tracemalloc_prev: Any = None
 # How long the ``ps`` reading of the resident set may take before it counts
 # as no reading.
 PS_TIMEOUT_SECONDS = 5.0
+# How long one ``ps`` reading stands for the resident set. A probe runs per
+# graph node, and two at a time around each; one ``ps`` a second at most is a
+# cost a host without ``/proc`` can carry, and a figure a second old is as good
+# to the recycle ceiling and the probes as a fresh one.
+PS_READING_MAX_AGE_SECONDS = 1.0
+# Where ``ps`` is looked for: the system's own, never one the job's PATH names.
+PS_SEARCH_PATH = "/bin:/usr/bin"
+# The last ``ps`` reading and when it was taken; ``failed`` once ``ps`` was
+# missing or gave no number, after which it is not started again.
+_ps_lock = threading.Lock()
+_ps_reading: dict[str, Any] = {"at": None, "mb": None, "failed": False}
 
 
 def rss_mb() -> float | None:
@@ -110,18 +123,37 @@ def rss_mb() -> float | None:
 
 
 def _rss_mb_from_ps() -> float | None:
-    """This process's resident set as ``ps`` reports it, in MiB, or ``None``."""
-    try:
-        shown = subprocess.run(  # noqa: S603 — fixed argv, no shell
-            ["ps", "-o", "rss=", "-p", str(os.getpid())],  # noqa: S607
-            capture_output=True,
-            text=True,
-            timeout=PS_TIMEOUT_SECONDS,
-            check=False,
-        ).stdout.strip()
-        return round(int(shown) / 1024, 1)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return None
+    """This process's resident set as ``ps`` reports it, in MiB, or ``None``.
+
+    One reading stands for ``PS_READING_MAX_AGE_SECONDS``; callers in that
+    second share it rather than each starting ``ps``. Once ``ps`` is missing or
+    answers no number, it is not started again and the answer stays ``None``.
+    """
+    with _ps_lock:
+        if _ps_reading["failed"]:
+            return None
+        now = time.monotonic()
+        taken = _ps_reading["at"]
+        if taken is not None and now - taken < PS_READING_MAX_AGE_SECONDS:
+            kept: float | None = _ps_reading["mb"]
+            return kept
+        ps = shutil.which("ps", path=PS_SEARCH_PATH)
+        try:
+            if ps is None:
+                raise FileNotFoundError("ps")
+            shown = subprocess.run(  # noqa: S603 — fixed argv, no shell
+                [ps, "-o", "rss=", "-p", str(os.getpid())],
+                capture_output=True,
+                text=True,
+                timeout=PS_TIMEOUT_SECONDS,
+                check=False,
+            ).stdout.strip()
+            mb = round(int(shown) / 1024, 1)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            _ps_reading.update(at=None, mb=None, failed=True)
+            return None
+        _ps_reading.update(at=now, mb=mb)
+        return mb
 
 
 _libc: Any = None
