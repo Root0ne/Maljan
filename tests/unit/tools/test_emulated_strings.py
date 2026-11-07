@@ -90,6 +90,13 @@ def _nothing_remembered() -> None:
     tool.forget_documents()
 
 
+@pytest.fixture(autouse=True)
+def _the_standalone_build_is_pinned(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The fake builds below stand in for the standalone build, whose digest is
+    # the one pinned on every machine but arm64; an arm64 host runs them so too.
+    monkeypatch.setattr(tool, "_LAUNCHER_MACHINES", frozenset())
+
+
 def _pe(tmp_path: Path, name: str = "s.dll") -> str:
     target = tmp_path / name
     target.write_bytes(b"MZ" + b"\x00" * 62)

@@ -1,0 +1,14 @@
+#!/opt/floss/bin/python3 -I
+# FLOSS 3.1.1 from the backend image's own FLOSS environment, /opt/floss, on an
+# architecture FLARE publishes no standalone build for (arm64). The image
+# installs that environment from requirements.txt beside this file, every
+# package by hash, and puts this file on PATH as `floss`, where the analysis
+# server's floss tool finds it; the tool runs it only when its sha256 is the one
+# src/malspark/tools/emulated_strings.py pins for this file. -I keeps the
+# environment's interpreter from reading PYTHON* variables, the user's site
+# directory and the directory the copy it runs sits in.
+import sys
+
+from floss.main import main
+
+sys.exit(main())

@@ -712,7 +712,13 @@ copy, so a file changed after it was checked is refused rather than run.
 downloads the asset, checks both digests and installs the executable at
 `~/.local/share/malspark/tools/floss-3.1.1/floss`, the first
 place looked. The backend image does the same in a build stage and puts it at
-`/usr/local/bin/floss`. Without it the manifest marks `floss` unavailable with
+`/usr/local/bin/floss`. That build is x86-64 only: an arm64 backend image
+installs the same release from PyPI, every package by hash
+(`scripts/floss/requirements.txt`), into `/opt/floss` and puts the launcher
+`scripts/floss/floss` at `/usr/local/bin/floss`, and on an arm64 host the tool
+runs the executable only when its sha256 is the launcher's, which
+`emulated_strings.py` pins; on every other host only the standalone build's
+digest is accepted. Without it the manifest marks `floss` unavailable with
 the reason (not installed, or not the pinned build) and the remedy, and a call
 answers the same.
 
