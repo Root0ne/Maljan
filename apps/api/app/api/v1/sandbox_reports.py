@@ -138,8 +138,10 @@ def _minio_client() -> Any:
 
 def _put_object_blocking(path: str, blob: bytes, *, content_type: str = "application/json") -> None:
     # The bucket is created the one way every path creates it, private
-    # (``object_store.ensure_bucket``).
-    object_store.put_bytes(_minio_client(), path, blob, content_type=content_type)
+    # (``object_store.ensure_bucket``), and written only while it stays so.
+    store = _minio_client()
+    object_store.require_private(store)
+    object_store.put_bytes(store, path, blob, content_type=content_type)
 
 
 async def put_object(path: str, blob: bytes, *, content_type: str = "application/json") -> None:
@@ -160,7 +162,9 @@ def get_object(path: str) -> bytes:
     and needs the bytes before the sandbox provider is built — hence the public
     name and the synchronous shape. Inside the API, call ``get_object_async``.
     """
-    return object_store.read_bytes(_minio_client(), path)
+    store = _minio_client()
+    object_store.require_private(store)
+    return object_store.read_bytes(store, path)
 
 
 async def get_object_async(path: str) -> bytes:

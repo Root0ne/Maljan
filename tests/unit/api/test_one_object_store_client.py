@@ -180,7 +180,9 @@ def test_no_other_module_builds_a_client() -> None:
     assert "Minio(" in inspect.getsource(object_store)
 
 
-# ---- the health probe asks whether the bucket is still private --------------
+# ---- the bucket is asked whether it is still private ------------------------
+
+_OWN_ANONYMOUS_CLIENT = object_store.anonymous_client
 
 
 def _refusal(code: str) -> Exception:
@@ -206,11 +208,13 @@ class _Anonymous:
 
 
 class _Policied(_Store):
-    def __init__(self, policy: dict[str, Any] | None) -> None:
+    def __init__(self, policy: dict[str, Any] | None | Exception) -> None:
         super().__init__(exists=True)
         self.policy = policy
 
     def get_bucket_policy(self, bucket: str) -> str:
+        if isinstance(self.policy, Exception):
+            raise self.policy
         if self.policy is None:
             raise _refusal("NoSuchBucketPolicy")
         import json
@@ -218,18 +222,22 @@ class _Policied(_Store):
         return json.dumps(self.policy)
 
 
-def _allow_anyone(*actions: str, principal: Any = None) -> dict[str, Any]:
+def _statement(**fields: Any) -> dict[str, Any]:
     return {
-        "Version": "2012-10-17",
-        "Statement": [
-            {
-                "Effect": "Allow",
-                "Principal": principal if principal is not None else {"AWS": ["*"]},
-                "Action": list(actions),
-                "Resource": [f"arn:aws:s3:::{settings.minio_bucket}/*"],
-            }
-        ],
+        "Effect": "Allow",
+        "Principal": {"AWS": ["*"]},
+        "Action": ["s3:GetObject"],
+        "Resource": [f"arn:aws:s3:::{settings.minio_bucket}/*"],
+        **fields,
     }
+
+
+def _policy(*statements: Any) -> dict[str, Any]:
+    return {"Version": "2012-10-17", "Statement": list(statements)}
+
+
+def _anonymously(*grants: str) -> Any:
+    return lambda *_args: _Anonymous(grants)
 
 
 def test_a_bucket_with_no_policy_is_private() -> None:
@@ -243,17 +251,71 @@ def test_an_anonymous_read_and_listing_are_found_by_asking() -> None:
     assert granted == ["list", "read"]
 
 
-@pytest.mark.parametrize("principal", ["*", {"AWS": "*"}, {"AWS": ["*"]}])
-def test_a_policy_that_lets_anyone_write_is_found_without_writing(principal: Any) -> None:
-    store = _Policied(_allow_anyone("s3:PutObject", principal=principal))
-    assert object_store.anonymous_access(store, _Anonymous()) == ["policy allows s3:PutObject"]
-    assert "put_object" not in store.names()
+@pytest.mark.parametrize(
+    ("statement", "granted"),
+    [
+        (_statement(Principal="*"), ["policy allows s3:GetObject"]),
+        (_statement(Principal={"AWS": "*"}), ["policy allows s3:GetObject"]),
+        (
+            _statement(Principal={"AWS": ["arn:aws:iam::1:user/x", "*"]}),
+            ["policy allows s3:GetObject"],
+        ),
+        (
+            _statement(Principal={"AWS": "*", "Service": "x.amazonaws.com"}),
+            ["policy allows s3:GetObject"],
+        ),
+        (
+            {**_statement(NotPrincipal={"AWS": ["arn:aws:iam::1:user/x"]}), "Principal": None},
+            ["policy allows s3:GetObject"],
+        ),
+        (
+            {
+                k: v
+                for k, v in _statement(Principal="*", NotAction=["s3:DeleteObject"]).items()
+                if k != "Action"
+            },
+            ["policy allows all but s3:DeleteObject"],
+        ),
+        (_statement(Action="s3:PutObject"), ["policy allows s3:PutObject"]),
+    ],
+    ids=[
+        "star",
+        "aws-star",
+        "star-among-arns",
+        "star-beside-a-service",
+        "not-principal",
+        "not-action",
+        "a-write",
+    ],
+)
+def test_every_spelling_of_an_open_grant_is_found(
+    statement: dict[str, Any], granted: list[str]
+) -> None:
+    store = _Policied(_policy(statement))
+    assert object_store.anonymous_access(store, _Anonymous()) == granted
+    assert "put_object" not in store.names(), "a write is read from the policy, never tried"
 
 
-def test_a_deny_or_a_named_principal_is_not_anonymous_access() -> None:
-    policy = _allow_anyone("s3:GetObject", principal={"AWS": ["arn:aws:iam::1:user/x"]})
-    policy["Statement"].append({**_allow_anyone("s3:GetObject")["Statement"][0], "Effect": "Deny"})
+def test_a_deny_a_named_principal_and_a_malformed_statement_are_not_open() -> None:
+    policy = _policy(
+        _statement(Principal={"AWS": ["arn:aws:iam::1:user/x"]}),
+        _statement(Effect="Deny", Principal="*"),
+        "not a statement",
+        ["nor", "this"],
+    )
     assert object_store.anonymous_access(_Policied(policy), _Anonymous()) == []
+
+
+def test_a_key_that_may_not_read_the_policy_keeps_the_anonymous_verdict(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = _Policied(_refusal("AccessDenied"))
+    with caplog.at_level("WARNING"):
+        assert object_store.anonymous_access(store, _Anonymous(("s3:GetObject",))) == ["read"]
+        assert object_store.anonymous_access(store, _Anonymous()) == []
+    said = [r for r in caplog.records if "not checked" in r.getMessage()]
+    assert len(said) == 1, "said once"
+    assert "may not read the bucket policy" in said[0].getMessage()
 
 
 def test_a_failure_other_than_a_refusal_is_raised() -> None:
@@ -265,34 +327,116 @@ def test_a_failure_other_than_a_refusal_is_raised() -> None:
         object_store.anonymous_access(_Policied(None), _Broken())
 
 
-def test_the_health_probe_fails_a_bucket_that_is_not_private(
-    caplog: pytest.LogCaptureFixture,
+def test_the_verdict_is_kept_for_a_while_and_asked_again_after(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    store = _Policied(_allow_anyone("s3:GetObject"))
-    with (
-        patch.object(object_store, "client", lambda: store),
-        patch.object(object_store, "anonymous_client", lambda: _Anonymous(("s3:GetObject",))),
-        caplog.at_level("ERROR"),
-    ):
+    import time
+
+    clock = [1000.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    asked: list[int] = []
+    grants: list[tuple[str, ...]] = [("s3:GetObject",)]
+
+    def _anonymous(*_args: Any) -> _Anonymous:
+        asked.append(1)
+        return _Anonymous(grants[0])
+
+    monkeypatch.setattr(object_store, "anonymous_client", _anonymous)
+    store = _Policied(None)
+    with caplog.at_level("INFO"):
+        assert object_store.privacy(store) == ("read",)
+        clock[0] += object_store.PRIVACY_TTL_SECONDS - 1
+        assert object_store.privacy(store) == ("read",)
+        assert len(asked) == 1
+        # The store is fixed: within the cache's life it is served again, without a restart.
+        grants[0] = ()
+        clock[0] += 2
+        assert object_store.privacy(store) == ()
+    assert len(asked) == 2
+    assert "is not private" in caplog.text and "is private again" in caplog.text
+
+
+def test_a_store_that_cannot_be_asked_is_no_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The suite's own fixture leaves the anonymous client unreachable.
+    assert object_store.privacy(_Policied(None)) is None
+    object_store.require_private(_Policied(None))
+
+
+def test_a_bucket_anyone_can_read_refuses_samples_and_reports(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Fail closed: the sample upload, the worker's download and a report's write and read."""
+    from app.api.v1 import samples, sandbox_reports
+
+    monkeypatch.setattr(object_store, "anonymous_client", _anonymously("s3:GetObject"))
+    store = _Policied(None)
+    source = tmp_path / "sample.bin"
+    source.write_bytes(b"MZ")
+    with patch.object(samples, "_minio_client", lambda: store):
+        with pytest.raises(object_store.StoreNotPrivate):
+            samples._store_sample_bytes_blocking("samples/aa/aaaa", str(source), "x")
+    with patch.object(sandbox_reports, "_minio_client", lambda: store):
+        with pytest.raises(object_store.StoreNotPrivate):
+            sandbox_reports._put_object_blocking("sandbox-reports/r.json", b"{}")
+        with pytest.raises(object_store.StoreNotPrivate):
+            sandbox_reports.get_object("sandbox-reports/r.json")
+    with pytest.raises(object_store.StoreNotPrivate):
+        object_store.download(store, "samples/aa/aaaa", str(tmp_path / "out"))
+    assert not {"put_object", "fput_object", "get_object", "fget_object"} & set(store.names())
+    assert str(object_store.StoreNotPrivate()) == "object store is not private; see the API log"
+
+
+def test_the_health_probe_fails_a_bucket_that_is_not_private_as_required(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    store = _Policied(_policy(_statement()))
+    monkeypatch.setattr(object_store, "client", lambda: store)
+    monkeypatch.setattr(object_store, "anonymous_client", _anonymously("s3:GetObject"))
+    with caplog.at_level("ERROR"):
         answer = object_store.probe()
-    # The endpoint is unauthenticated: the answer says only that it is not private.
-    assert answer == {"ok": False, "error": "the bucket is not private; see the API log"}
+    # The endpoint is unauthenticated: the answer does not announce the exposure.
+    assert answer == {
+        "ok": False,
+        "error": "object store policy check failed; see the API log",
+        "required": True,
+    }
     assert "read, policy allows s3:GetObject" in caplog.text
 
 
-def test_the_health_probe_passes_a_private_bucket_and_a_missing_one() -> None:
-    with (
-        patch.object(object_store, "client", lambda: _Policied(None)),
-        patch.object(object_store, "anonymous_client", lambda: _Anonymous()),
-    ):
-        assert object_store.probe() is None
-    with patch.object(object_store, "client", lambda: _Store()):
-        assert object_store.probe() is None
+def test_the_health_probe_passes_a_private_bucket_and_a_missing_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(object_store, "anonymous_client", _anonymously())
+    monkeypatch.setattr(object_store, "client", lambda: _Policied(None))
+    assert object_store.probe() is None
+    monkeypatch.setattr(object_store, "client", lambda: _Store())
+    assert object_store.probe() is None
 
 
-def test_the_anonymous_client_carries_no_credentials() -> None:
+def test_the_start_asks_the_bucket_once_it_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(object_store, "anonymous_client", _anonymously("s3:ListBucket"))
+    monkeypatch.setattr(object_store, "client", lambda: _Store())
+    object_store.check_privacy_at_start()
+    assert object_store._PRIVACY == {}
+    monkeypatch.setattr(object_store, "client", lambda: _Policied(None))
+    object_store.check_privacy_at_start()
+    assert object_store._PRIVACY[settings.minio_bucket][1] == ("list",)
+
+
+def test_the_anonymous_client_carries_no_credentials_and_is_bounded() -> None:
+    # The suite's fixture replaced it; the module's own, held at import, is under test.
+    own = _OWN_ANONYMOUS_CLIENT
+    store = MagicMock()
+    store._get_region.return_value = "eu-west-1"
     with patch("minio.Minio") as minio:
-        object_store.anonymous_client()
+        own(store, "bucket")
     _, kwargs = minio.call_args
     assert minio.call_args.args == (settings.minio_endpoint,)
     assert "access_key" not in kwargs and "secret_key" not in kwargs
+    assert "credentials" not in kwargs
+    assert kwargs["region"] == "eu-west-1"
+    store._get_region.assert_called_once_with("bucket")
+    pool = kwargs["http_client"]
+    assert pool.connection_pool_kw["timeout"].connect_timeout == object_store.ANONYMOUS_SECONDS
+    assert pool.connection_pool_kw["timeout"].read_timeout == object_store.ANONYMOUS_SECONDS
+    assert pool.connection_pool_kw["retries"].total is False

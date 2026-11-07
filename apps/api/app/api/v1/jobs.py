@@ -906,8 +906,10 @@ async def get_job_evidence_object(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="The part was not kept for this job"
         )
+    store = object_store.client()
+    await asyncio.to_thread(object_store.require_private, store)
     try:
-        response = await asyncio.to_thread(object_store.open_object, object_store.client(), key)
+        response = await asyncio.to_thread(object_store.open_object, store, key)
     except Exception as exc:  # noqa: BLE001 — the store's failure is logged, not served
         logger.warning(
             f"Evidence object {log_safe(key)} could not be read: {log_safe(type(exc).__name__)}",

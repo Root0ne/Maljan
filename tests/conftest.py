@@ -416,3 +416,30 @@ def pytest_collection_finish(session: pytest.Session) -> None:
 def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
     """The session ends with how many golden cases compared nothing for want of a source."""
     report_absent_fixture_skips(terminalreporter)
+
+
+@pytest.fixture(autouse=True)
+def no_anonymous_request_reaches_a_real_store(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The object store's privacy check sends no request unless a test hands it a client.
+
+    Every sample and sandbox-report path asks the bucket, anonymously, whether
+    it is private (``object_store.privacy``); left on, a test with a client
+    double would send those requests to whatever answers at the configured
+    endpoint. Here the check cannot reach a store, which leaves the verdict
+    open and the path served, and no verdict outlives its test.
+    """
+    try:
+        from app.services import object_store
+    except ImportError:
+        yield
+        return
+
+    def _unreachable(*_args: object, **_kwargs: object) -> object:
+        raise ConnectionError("no object store in tests")
+
+    monkeypatch.setattr(object_store, "anonymous_client", _unreachable)
+    object_store._PRIVACY.clear()
+    object_store._POLICY_UNREAD.clear()
+    yield
+    object_store._PRIVACY.clear()
+    object_store._POLICY_UNREAD.clear()

@@ -100,12 +100,15 @@ def ensure_bucket(store: Any) -> None:
     MinIO answers an anonymous caller only through a bucket policy that allows
     it; a bucket with no policy refuses every anonymous read, write and
     listing, and the configured access key works as before. So a fresh bucket
-    gets no policy. A deny policy is not set either: MinIO refuses the
-    ``aws:PrincipalType`` condition that would scope it to anonymous callers,
-    and a deny on every principal adds nothing to a bucket that already refuses
-    them and is replaced whole by any policy an operator sets later. Whether
-    the bucket stays private is the health probe's question
-    (``anonymous_access``), asked of new and old buckets alike.
+    gets no policy. A deny policy is not set either. MinIO refuses the
+    ``aws:PrincipalType`` condition that would scope it to anonymous callers;
+    a store that accepted the policy but dropped a condition it does not know
+    would hold a deny on every principal, the platform's own key among them,
+    which no check here could tell from a store that honours it; and any
+    policy an operator sets later replaces it whole. Whether the bucket stays
+    private is asked of new and old buckets alike (``privacy``): at start, by
+    the health probe, and before a sample or a sandbox report is taken or
+    served.
     """
     name = bucket(store)
     if store.bucket_exists(name):
@@ -148,7 +151,11 @@ def open_object(store: Any, path: str) -> Any:
 
 
 def download(store: Any, path: str, destination: str) -> None:
-    """Copy the object at ``path`` to ``destination``, readable by this user only (0600)."""
+    """Copy the object at ``path`` to ``destination``, readable by this user only (0600).
+
+    Not while the bucket lets an anonymous caller in (``require_private``).
+    """
+    require_private(store)
     store.fget_object(bucket(store), path, destination)
     os.chmod(destination, 0o600)
 
@@ -505,22 +512,88 @@ def remove_prefix(store: Any, prefix: str) -> int:
     return removed
 
 
-def anonymous_client(http_client: Any = None) -> Any:
-    """A client with no credentials: every request it sends is an anonymous one."""
+# How long an anonymous request of the privacy check may take, and how long
+# its verdict is kept before the store is asked again: a store that is fixed
+# is served again within that time, without a restart.
+ANONYMOUS_SECONDS = 2.0
+PRIVACY_TTL_SECONDS = 60.0
+
+
+def anonymous_client(store: Any | None = None, name: str | None = None) -> Any:
+    """A client with no credentials: every request it sends is an anonymous one.
+
+    Each request is bounded (``ANONYMOUS_SECONDS`` to connect and to read) and
+    never retried. Its region is the one ``store``'s key resolves for the
+    bucket, so an unsigned request reaches a bucket outside the default region.
+    """
+    import urllib3
     from minio import Minio
 
-    return Minio(settings.minio_endpoint, secure=settings.minio_secure, http_client=http_client)
+    region = None
+    if store is not None and name is not None:
+        try:
+            region = store._get_region(name) or None
+        except Exception:  # noqa: BLE001 — the client then resolves no region, as before
+            region = None
+    pool = urllib3.PoolManager(
+        timeout=urllib3.Timeout(connect=ANONYMOUS_SECONDS, read=ANONYMOUS_SECONDS),
+        retries=False,
+    )
+    return Minio(
+        settings.minio_endpoint, secure=settings.minio_secure, region=region, http_client=pool
+    )
 
 
 # The key an anonymous read is asked for. It is never written: a private
 # bucket refuses the read (AccessDenied), one that lets anyone read answers
 # that the key is missing.
 ANONYMOUS_PROBE_KEY = "anonymous-access-probe"
-_ANONYMOUS_PRINCIPALS = ("*", ["*"], {"AWS": "*"}, {"AWS": ["*"]})
+# The buckets whose policy this process's key could not read, said once each.
+_POLICY_UNREAD: set[str] = set()
 
 
 def _code(exc: Exception) -> str | None:
     return getattr(exc, "code", None)
+
+
+def _names_anyone(principal: Any) -> bool:
+    """Whether ``*`` is among the principals, however the statement spells them."""
+    if principal == "*":
+        return True
+    if isinstance(principal, list):
+        return any(_names_anyone(item) for item in principal)
+    if isinstance(principal, dict):
+        return any(_names_anyone(item) for item in principal.values())
+    return False
+
+
+def _as_list(value: Any) -> list[Any]:
+    return [value] if isinstance(value, str) else list(value or [])
+
+
+def policy_grants(policy: str) -> list[str]:
+    """What a bucket policy allows an anonymous caller, statement by statement.
+
+    A statement is open to anyone when its principal names ``*`` anywhere (a
+    string, in a list, under any key) or when it allows by ``NotPrincipal``,
+    which allows everyone it does not name. ``NotAction`` allows every action
+    but the ones it names, and is reported so.
+    """
+    statements = json.loads(policy).get("Statement", [])
+    found: list[str] = []
+    for statement in statements if isinstance(statements, list) else [statements]:
+        if not isinstance(statement, dict) or statement.get("Effect") != "Allow":
+            continue
+        if "NotPrincipal" not in statement and not _names_anyone(statement.get("Principal")):
+            continue
+        if "NotAction" in statement:
+            grants = ["all but " + ", ".join(map(str, _as_list(statement["NotAction"])))]
+        else:
+            grants = [str(action) for action in _as_list(statement.get("Action"))]
+        for grant in grants:
+            if f"policy allows {grant}" not in found:
+                found.append(f"policy allows {grant}")
+    return found
 
 
 def anonymous_access(store: Any, anonymous: Any) -> list[str]:
@@ -530,8 +603,13 @@ def anonymous_access(store: Any, anonymous: Any) -> list[str]:
     bucket and reads a key that is never written, so a refusal is the server's
     own answer, whatever the policy says; and the bucket's policy, read with
     ``store``'s key, names what it allows anyone, a write among it, which is
-    not tried. A failure other than a refusal is raised, so the caller reports
-    a store it could not ask rather than a private one.
+    not tried. A key not let read the policy leaves the write unchecked, said
+    once, and the anonymous answers stand. A failure other than a refusal is
+    raised, so the caller reports a store it could not ask rather than a
+    private one.
+
+    The probe reads the bucket, not each object: a store that grants
+    per-object access (an object ACL on AWS S3) is not seen by it.
     """
     from minio.error import S3Error
 
@@ -554,41 +632,102 @@ def anonymous_access(store: Any, anonymous: Any) -> list[str]:
     try:
         policy = store.get_bucket_policy(name)
     except S3Error as exc:
+        if _code(exc) == "AccessDenied":
+            if name not in _POLICY_UNREAD:
+                _POLICY_UNREAD.add(name)
+                logger.warning(
+                    "MinIO bucket %s: the configured key may not read the bucket policy, so "
+                    "whether an anonymous caller may write is not checked; the anonymous "
+                    "read and listing are.",
+                    log_safe(name),
+                )
+            return found
         if _code(exc) != "NoSuchBucketPolicy":
             raise
-        policy = None
+        return found
     if policy:
-        statements = json.loads(policy).get("Statement", [])
-        for statement in statements if isinstance(statements, list) else [statements]:
-            if statement.get("Effect") != "Allow":
-                continue
-            if statement.get("Principal") not in _ANONYMOUS_PRINCIPALS:
-                continue
-            actions = statement.get("Action", [])
-            for action in [actions] if isinstance(actions, str) else actions:
-                if f"policy allows {action}" not in found:
-                    found.append(f"policy allows {action}")
+        found.extend(grant for grant in policy_grants(policy) if grant not in found)
     return found
+
+
+class StoreNotPrivate(RuntimeError):
+    """The bucket lets an anonymous caller in: samples are neither taken nor served."""
+
+    detail = "object store is not private; see the API log"
+
+    def __init__(self) -> None:
+        super().__init__(self.detail)
+
+
+# The privacy verdict per bucket: when it was asked, and what an anonymous
+# caller is let do (``None``: the store could not be asked).
+_PRIVACY: dict[str, tuple[float, tuple[str, ...] | None]] = {}
+
+
+def privacy(store: Any, *, fresh: bool = False) -> tuple[str, ...] | None:
+    """What the bucket lets an anonymous caller do, asked at most once a ``PRIVACY_TTL_SECONDS``.
+
+    Empty when it is private, ``None`` when the store could not be asked (the
+    caller's own request then says what is wrong with it). A bucket that lets
+    anyone in is logged at ERROR each time it is asked again; one that is
+    fixed is logged once when it is found private.
+    """
+    import time
+
+    name = bucket(store)
+    now = time.monotonic()
+    held = _PRIVACY.get(name)
+    if held is not None and not fresh and now - held[0] < PRIVACY_TTL_SECONDS:
+        return held[1]
+    verdict: tuple[str, ...] | None
+    try:
+        verdict = tuple(anonymous_access(store, anonymous_client(store, name)))
+    except Exception as exc:  # noqa: BLE001 — an unanswered check is no verdict
+        logger.warning(
+            "MinIO bucket %s: whether it is private could not be checked: %s",
+            log_safe(name),
+            log_safe(type(exc).__name__),
+        )
+        verdict = None
+    if verdict:
+        logger.error(
+            "MinIO bucket %s is not private; an anonymous caller is let through: %s. "
+            "Samples are neither taken nor served until it is. Remove the bucket "
+            "policy that allows it (mc anonymous set none).",
+            log_safe(name),
+            log_safe(", ".join(verdict)),
+        )
+    elif verdict is not None and held is not None and held[1]:
+        logger.info("MinIO bucket %s is private again.", log_safe(name))
+    _PRIVACY[name] = (now, verdict)
+    return verdict
+
+
+def require_private(store: Any) -> None:
+    """Raise ``StoreNotPrivate`` while the bucket lets an anonymous caller in (fail closed)."""
+    if privacy(store):
+        raise StoreNotPrivate()
+
+
+def check_privacy_at_start() -> None:
+    """Ask the bucket once at start, after its name settles; the verdict is logged."""
+    store = client()
+    if store.bucket_exists(bucket(store)):
+        privacy(store, fresh=True)
 
 
 def probe() -> dict[str, Any] | None:
     """The health check's question: raise when the store cannot be reached.
 
-    A bucket that answers an anonymous caller fails the check: the answer
-    says only that the bucket is not private (the endpoint is
-    unauthenticated), and the log says what it lets anyone do.
+    A bucket that lets an anonymous caller in fails the check, as a required
+    component. The endpoint is unauthenticated, so the answer says only that
+    the check failed; the log says what the bucket lets anyone do.
     """
     store = client()
-    name = bucket(store)
-    if not store.bucket_exists(name):
+    if not store.bucket_exists(bucket(store)) or not privacy(store):
         return None
-    granted = anonymous_access(store, anonymous_client())
-    if not granted:
-        return None
-    logger.error(
-        "MinIO bucket %s is not private; an anonymous caller is let through: %s. "
-        "Remove the bucket policy that allows it (mc anonymous set none).",
-        log_safe(name),
-        log_safe(", ".join(granted)),
-    )
-    return {"ok": False, "error": "the bucket is not private; see the API log"}
+    return {
+        "ok": False,
+        "error": "object store policy check failed; see the API log",
+        "required": True,
+    }
