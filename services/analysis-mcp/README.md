@@ -715,10 +715,16 @@ place looked. The backend image does the same in a build stage and puts it at
 `/usr/local/bin/floss`. That build is x86-64 only: an arm64 backend image
 installs the same release from PyPI, every package by hash
 (`scripts/floss/requirements.txt`), into `/opt/floss` and puts the launcher
-`scripts/floss/floss` at `/usr/local/bin/floss`, and on an arm64 host the tool
-runs the executable only when its sha256 is the launcher's, which
-`emulated_strings.py` pins; on every other host only the standalone build's
-digest is accepted. Without it the manifest marks `floss` unavailable with
+`scripts/floss/floss` at `/usr/local/bin/floss`. On an arm64 host the tool
+accepts the launcher's sha256, which `emulated_strings.py` pins, as well as
+the standalone build's (which runs there only under x86-64 emulation); on
+every other host only the standalone build's. The launcher checks the
+environment before FLOSS is imported: the pinned release, the RECORD files
+of FLOSS, vivisect and viv-utils as the image build wrote them, every
+installed file against its package's RECORD, no file in `site-packages` that
+no RECORD lists and no compiled bytecode; anything else exits 2 and nothing
+runs. On either architecture the build counts as available only when
+`--version` exits 0 and reports 3.1.1. Without it the manifest marks `floss` unavailable with
 the reason (not installed, or not the pinned build) and the remedy, and a call
 answers the same.
 

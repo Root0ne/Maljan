@@ -20,13 +20,18 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.mark.parametrize("machine", ["x86_64", "AMD64", "i686", "riscv64", ""])
-def test_every_machine_but_arm64_pins_the_standalone_build(machine: str) -> None:
-    assert tool.pinned_sha256(machine) == tool.FLOSS_BINARY_SHA256
+def test_every_machine_but_arm64_accepts_the_standalone_build_alone(machine: str) -> None:
+    assert tool.accepted_sha256s(machine) == {tool.FLOSS_BINARY_SHA256}
 
 
 @pytest.mark.parametrize("machine", ["aarch64", "arm64", "ARM64"])
-def test_arm64_pins_the_launcher(machine: str) -> None:
-    assert tool.pinned_sha256(machine) == tool.FLOSS_LAUNCHER_SHA256
+def test_arm64_accepts_the_launcher_and_the_standalone_build(machine: str) -> None:
+    # The standalone build stays acceptable there: under x86-64 emulation it
+    # runs, and the version probe is what says whether it does.
+    assert tool.accepted_sha256s(machine) == {
+        tool.FLOSS_BINARY_SHA256,
+        tool.FLOSS_LAUNCHER_SHA256,
+    }
 
 
 def test_the_launcher_is_the_file_the_module_pins() -> None:
@@ -35,25 +40,36 @@ def test_the_launcher_is_the_file_the_module_pins() -> None:
     assert tool.FLOSS_LAUNCHER_SHA256 != tool.FLOSS_BINARY_SHA256
     first = launcher.read_text(encoding="utf-8").splitlines()[0]
     # The environment's own interpreter, isolated from the caller's variables,
-    # the user's site directory and the directory the run's copy sits in.
-    assert first == "#!/opt/floss/bin/python3 -I"
+    # the user's site directory and the directory the run's copy sits in, and
+    # writing no bytecode.
+    assert first == "#!/opt/floss/bin/python3 -IB"
 
 
-def test_an_arm64_host_refuses_the_standalone_build(
+def _fake(tmp_path: Path, name: str) -> Path:
+    target = tmp_path / name
+    target.write_bytes(f"#!/bin/sh\n# {name}\n".encode())
+    target.chmod(0o755)
+    return target
+
+
+def test_only_an_arm64_host_accepts_the_launcher(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    standalone = tmp_path / "floss"
-    standalone.write_bytes(b"#!/bin/sh\nexit 0\n")
-    standalone.chmod(0o755)
-    monkeypatch.setattr(
-        tool, "FLOSS_BINARY_SHA256", hashlib.sha256(standalone.read_bytes()).hexdigest()
-    )
-    monkeypatch.setattr(tool.platform, "machine", lambda: "aarch64")
-    tool._VERIFIED.clear()
-    assert not tool._is_pinned_build(standalone)
-    monkeypatch.setattr(tool.platform, "machine", lambda: "x86_64")
-    tool._VERIFIED.clear()
-    assert tool._is_pinned_build(standalone)
+    standalone, launcher = _fake(tmp_path, "standalone"), _fake(tmp_path, "launcher")
+    digest = {
+        path: hashlib.sha256(path.read_bytes()).hexdigest() for path in (standalone, launcher)
+    }
+    monkeypatch.setattr(tool, "FLOSS_BINARY_SHA256", digest[standalone])
+    monkeypatch.setattr(tool, "FLOSS_LAUNCHER_SHA256", digest[launcher])
+    expected = {
+        "aarch64": {standalone: True, launcher: True},
+        "x86_64": {standalone: True, launcher: False},
+    }
+    for machine, verdicts in expected.items():
+        monkeypatch.setattr(tool.platform, "machine", lambda machine=machine: machine)
+        for path, accepted in verdicts.items():
+            tool._VERIFIED.clear()
+            assert tool._is_pinned_build(path) is accepted, (machine, path.name)
     tool._VERIFIED.clear()
 
 

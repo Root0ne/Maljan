@@ -29,9 +29,13 @@ RUN python3 -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[
 # installed by hash from scripts/floss/requirements.txt. binary2strings has no
 # Linux wheel and is compiled from its hashed sdist against the hashed build
 # requirements installed first, so nothing unhashed is fetched; the compiler
-# stays in this stage. The launcher scripts/floss/floss goes where the
-# standalone build goes, and the analysis server runs it only when its sha256
-# is the one emulated_strings.py pins for arm64. The build stops unless the
+# stays in this stage. Nothing is compiled to bytecode and what the build
+# itself left is removed, so every module runs from a source its RECORD hashes;
+# pip and the build requirements, which FLOSS never imports, are taken out.
+# The launcher scripts/floss/floss
+# goes where the standalone build goes; the analysis server runs it only when
+# its sha256 is the one emulated_strings.py pins, and it checks the environment
+# against its own pins before FLOSS is imported. The build stops unless the
 # launcher answers --version with the pinned release.
 FROM python:3.13-slim@sha256:9d2e5553305c7c7b0097999bb17187c69b921ccd6bc9d40e4bb5ebe652c00285 AS floss-arm64
 ARG FLOSS_VERSION=3.1.1
@@ -40,8 +44,10 @@ COPY scripts/floss/ scripts/floss/
 RUN apt-get update && apt-get install -y --no-install-recommends g++ && \
     rm -rf /var/lib/apt/lists/* && \
     python3 -m venv /opt/floss && \
-    /opt/floss/bin/pip install --no-cache-dir --require-hashes -r scripts/floss/requirements-build.txt && \
-    /opt/floss/bin/pip install --no-cache-dir --require-hashes --no-build-isolation -r scripts/floss/requirements.txt && \
+    /opt/floss/bin/pip install --no-cache-dir --no-compile --require-hashes -r scripts/floss/requirements-build.txt && \
+    /opt/floss/bin/pip install --no-cache-dir --no-compile --require-hashes --no-build-isolation -r scripts/floss/requirements.txt && \
+    /opt/floss/bin/python3 -m pip uninstall --yes --quiet setuptools pybind11 pip && \
+    find /opt/floss -name __pycache__ -type d -prune -exec rm -rf {} + && \
     mkdir -p /out/usr/local/bin /out/opt && \
     install -m 0755 scripts/floss/floss /out/usr/local/bin/floss && \
     cp -a /opt/floss /out/opt/floss && \
