@@ -12,6 +12,7 @@ from __future__ import annotations
 import errno
 import json
 import os
+import resource
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -588,6 +589,11 @@ class TestTheChild:
         monkeypatch.setenv("MALSPARK_STAGING_DIR", str(tmp_path / "staging"))
         monkeypatch.delenv("MALSPARK_STAGING_JOB", raising=False)
 
+    @pytest.mark.skipif(
+        not hasattr(resource, "prlimit"),
+        reason="the cap is set with resource.prlimit, which this host lacks; there the result "
+        "says the cap was not applied (test_tb16_the_result_says_the_cap_was_not_applied)",
+    )
     def test_the_child_gets_the_limit_and_a_home_inside_staging_and_nothing_else(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -333,6 +333,7 @@ def test_a_descendant_whose_environment_cannot_be_read_is_unknown_and_fails(
     assert _part(STDIO, [_reads()], {"mcp:analysis": [note]})["isolated"] is False
 
 
+@pytest.mark.skipif(not Path("/proc/self/status").exists(), reason="no procfs")
 def test_environ_names_keeps_names_only(tmp_path: Path) -> None:
     child = subprocess.Popen(
         [sys.executable, "-I", "-c", "import time; print('up', flush=True); time.sleep(30)"],
@@ -884,6 +885,7 @@ def test_a_container_without_a_job_key_notes_nothing() -> None:
     assert noted("job-c")[REPORT_SOURCE][0]["label"] == REPORT_LABEL
 
 
+@pytest.mark.skipif(not Path("/proc/self/status").exists(), reason="no procfs")
 def test_a_connection_test_measures_nothing(tmp_path: Path) -> None:
     from malspark.core.config import MCPServerConfig
     from malspark.providers.servers import ServerHandle
@@ -903,6 +905,11 @@ def test_a_connection_test_measures_nothing(tmp_path: Path) -> None:
 @pytest.mark.skipif(
     not sys.executable or not shutil.which(sys.executable),
     reason="no python interpreter available to launch the sidecar",
+)
+@pytest.mark.skipif(
+    not Path("/proc/self/task").is_dir(),
+    reason="the child is named from the process table at /proc/self/task; without one the "
+    "worker says so and the run says the isolation cannot be told",
 )
 def test_a_jobs_stdio_server_is_measured_at_its_start_and_forgotten_at_teardown(
     tmp_path: Path,
