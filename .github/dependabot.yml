@@ -116,6 +116,26 @@ updates:
         versions: [">=6.0"]
     open-pull-requests-limit: 5
 
+  # The backend image's own FLOSS environment on arm64, pinned by hash. FLOSS
+  # itself moves with the standalone build src/malspark/tools/emulated_strings.py
+  # pins, never alone, and it takes networkx below 3.2, which a hashed file
+  # bumped entry by entry would not keep.
+  - package-ecosystem: "pip"
+    directory: "/scripts/floss"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    target-branch: "dev"
+    labels: ["dependencies", "python"]
+    groups:
+      floss-minor-and-patch:
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "flare-floss"
+      - dependency-name: "networkx"
+        versions: [">=3.2"]
+    open-pull-requests-limit: 5
+
   - package-ecosystem: "npm"
     directory: "/services/webcrack-mcp"
     schedule:
