@@ -1139,8 +1139,13 @@ def test_the_jadx_image_pins_the_runtime_and_the_release_its_install_hint_names(
     assert pinned == jadx.JADX_VERSION and pinned in jadx.PROGRAM.install
     (runtime,) = re.findall(r"^ARG JRE_VERSION=(\S+)$", dockerfile, re.MULTILINE)
     assert runtime.split(".")[0] == "21"
-    # The runtime's archive and JADX's, each checked before its contents are kept.
-    assert len(re.findall(r"^ARG \w+_SHA256=[0-9a-f]{64}$", dockerfile, re.MULTILINE)) == 2
+    # The runtime's archive, one per architecture, and JADX's, each checked
+    # before its contents are kept.
+    assert len(re.findall(r"^ARG \w+_SHA256=[0-9a-f]{64}$", dockerfile, re.MULTILINE)) == 3
+    assert re.findall(r"^ARG JRE_(AMD64|ARM64)_TGZ_SHA256=", dockerfile, re.MULTILINE) == [
+        "AMD64",
+        "ARM64",
+    ]
     assert len(re.findall(r"sha256sum -c -", dockerfile)) == 2
     assert "JADX_JAR=/opt/jadx/jadx.jar" in dockerfile and "--require-hashes" in dockerfile
 

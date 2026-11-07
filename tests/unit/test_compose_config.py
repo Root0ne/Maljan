@@ -285,7 +285,6 @@ X86_ONLY = {
     "goresym-mcp": "GoReSym-linux.zip",
     "webcrack-mcp": "-linux-x64.tar.xz",
     "unblob-mcp": "sasquatch_1.0_amd64.deb",
-    "jadx-mcp": "_x64_linux_hotspot_",
 }
 # The sidecars built natively for amd64 and arm64 (T-573), and the two
 # release assets, one per architecture, each Dockerfile picks between.
@@ -295,6 +294,7 @@ NATIVE_SIDECARS = {
         "triple=x86_64-unknown-linux-gnu",
         "triple=aarch64-unknown-linux-gnu",
     ),
+    "jadx-mcp": ("OpenJDK21U-jre_${jre_arch}_linux_hotspot_", "jre_arch=x64", "jre_arch=aarch64"),
 }
 # The services built or pulled for the host's own architecture.
 MULTI_ARCH = (

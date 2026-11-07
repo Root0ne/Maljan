@@ -1,26 +1,35 @@
 # ── JADX MCP sidecar ────────────────────────────────
 # JADX's command-line decompiler (Apache-2.0) on the Eclipse Temurin 21 Java
 # runtime, under the shared MCP plumbing (../cli-sidecar). The runtime is the
-# release's Linux archive and JADX the release's own archive, each checked
-# against the sha256 GitHub publishes for it before its contents are kept;
-# JADX's jar is run on the runtime directly. Built with services/ as the
-# context (docker/docker-compose.yml, profile `jadx`). Keep JADX_VERSION in
-# step with JADX_VERSION in server.py, which the install hint names.
+# release's Linux archive for the image's architecture (x64 or aarch64) and
+# JADX the release's own archive, each checked against the sha256 GitHub
+# publishes for it before its contents are kept; JADX's jar is run on the
+# runtime directly. Built with services/ as the context
+# (docker/docker-compose.yml, profile `jadx`) for the architecture BuildKit
+# names in TARGETARCH, else the build host's. Keep JADX_VERSION in step with
+# JADX_VERSION in server.py, which the install hint names.
 #
 # Nothing here runs a sample: JADX reads the dex bytecode and writes Java
 # source, and loads no class of the sample into a virtual machine. The
 # container runs as the ids compose gives it (never root), with no capability,
 # a read-only root, no route out and the sample directory mounted read-only.
 FROM python:3.13-slim-trixie@sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39
+ARG TARGETARCH
 ARG JRE_VERSION=21.0.12.1
 ARG JRE_BUILD=1
-ARG JRE_TGZ_SHA256=2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500
+ARG JRE_AMD64_TGZ_SHA256=2413149700df0f7d440500a84a8f764c535f21e5a5e87d38328b64eec2c5b500
+ARG JRE_ARM64_TGZ_SHA256=14be1f35ebdbd1f6e8d57eb911a3ffb74d6d9aa255abc5daf2b1302002cf2cf2
 ARG JADX_VERSION=1.5.6
 ARG JADX_ZIP_SHA256=545ea2be9c242511bc145755cf4bda2485ade42966e096f8b4d3da2a230e8974
 WORKDIR /opt
-RUN python3 -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], 'jre.tar.gz')" \
-        "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-${JRE_VERSION}%2B${JRE_BUILD}/OpenJDK21U-jre_x64_linux_hotspot_${JRE_VERSION}_${JRE_BUILD}.tar.gz" && \
-    echo "${JRE_TGZ_SHA256}  jre.tar.gz" | sha256sum -c - && \
+RUN case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
+        amd64) jre_arch=x64 tgz_sha256="${JRE_AMD64_TGZ_SHA256}" ;; \
+        arm64) jre_arch=aarch64 tgz_sha256="${JRE_ARM64_TGZ_SHA256}" ;; \
+        *) echo "temurin: no Linux runtime is pinned for ${TARGETARCH:-$(dpkg --print-architecture)}" >&2; exit 1 ;; \
+    esac && \
+    python3 -c "import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], 'jre.tar.gz')" \
+        "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-${JRE_VERSION}%2B${JRE_BUILD}/OpenJDK21U-jre_${jre_arch}_linux_hotspot_${JRE_VERSION}_${JRE_BUILD}.tar.gz" && \
+    echo "${tgz_sha256}  jre.tar.gz" | sha256sum -c - && \
     python3 -c "import tarfile; tarfile.open('jre.tar.gz').extractall('.', filter='data')" && \
     mv "jdk-${JRE_VERSION}+${JRE_BUILD}-jre" jre && \
     rm -f jre.tar.gz

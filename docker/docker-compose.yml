@@ -652,8 +652,6 @@ services:
       context: ../services
       dockerfile: jadx-mcp/Dockerfile
     image: malspark-jadx-mcp:1.5.6
-    # x86-64 only: the image unpacks Temurin's x64 JRE; an arm64 host runs it emulated.
-    platform: linux/amd64
     container_name: malspark-jadx-mcp
     environment:
       MCP_AUTH_TOKEN: ${JADX_MCP_AUTH_TOKEN:-}
