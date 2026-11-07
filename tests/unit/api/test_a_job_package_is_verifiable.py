@@ -1168,6 +1168,79 @@ async def test_the_rows_and_the_seal_are_read_once_in_one_snapshot(
     assert _verify(tmp_path / "api.tar.gz")["status"] == "verified"
 
 
+@pytest.mark.asyncio
+async def test_a_package_reads_no_part_from_a_bucket_anyone_can_read(
+    tmp_path: Path, monkeypatch: Any
+):
+    """The package's own fetch goes through the store's primitive, which refuses (T-575)."""
+    from unittest.mock import MagicMock
+
+    from minio.error import S3Error
+
+    from app.services import ledger_verify, object_store
+
+    def _answer(code: str) -> S3Error:
+        return S3Error(MagicMock(), code, "", "", "", "")
+
+    class _Open:
+        def bucket_exists(self, bucket: str) -> bool:
+            raise _answer("AccessDenied")
+
+        def stat_object(self, bucket: str, key: str) -> Any:
+            raise _answer("NoSuchKey")
+
+    class _Store:
+        read: list[str] = []
+
+        def bucket_exists(self, bucket: str) -> bool:
+            return True
+
+        def get_bucket_policy(self, bucket: str) -> str:
+            raise _answer("NoSuchBucketPolicy")
+
+        def get_object(self, bucket: str, key: str) -> Any:
+            self.read.append(key)
+            raise AssertionError("an open store is never read")
+
+    run = _run(tmp_path / "run")
+    evidence = json.loads((run / "evidence.json").read_text())["items"]
+    byjob = json.loads((run / "report-byjob.json").read_text())
+    job = json.loads((run / "job.json").read_text())
+    report = {**byjob, "malware_report": json.loads((run / "report.json").read_text())}
+    rows = run_export.JobRows(job=job, report=report, evidence=evidence)
+
+    async def _read(conn: Any, job_id: Any) -> Any:
+        return rows
+
+    async def _verify_job(conn: Any, job_id: Any, *, preloaded: Any = None) -> dict[str, Any]:
+        return verify_run(run)
+
+    async def _bound() -> int:
+        return MAX
+
+    fetched: dict[str, Any] = {}
+
+    def _build_package(*args: Any, fetch: Any, **kwargs: Any) -> dict[str, Any]:
+        fetched["fetch"] = fetch
+        return {}
+
+    store = _Store()
+    monkeypatch.setattr(run_export, "read_job_rows", _read)
+    monkeypatch.setattr(ledger_verify, "verify_job", _verify_job)
+    monkeypatch.setattr(object_store, "evidence_bound", _bound)
+    monkeypatch.setattr(job_package, "signature_key", lambda: (SIGNER, None))
+    monkeypatch.setattr(job_package, "build_package", _build_package)
+    monkeypatch.setattr(object_store, "client", lambda: store)
+    monkeypatch.setattr(object_store, "anonymous_client", lambda *_args: _Open())
+    with (tmp_path / "api.tar.gz").open("wb") as out:
+        await job_package.build_for_job(_Engine(), job["id"], out)
+
+    key = object_store.evidence_key(job["id"], "a" * 64)
+    with pytest.raises(object_store.StoreNotPrivate):
+        list(fetched["fetch"](key))
+    assert store.read == []
+
+
 def test_a_build_never_touches_another_build_s_partial_file(tmp_path: Path, monkeypatch: Any):
     monkeypatch.setattr(job_package, "signature_key", lambda: (SIGNER, None))
     run = _run(tmp_path / "run")

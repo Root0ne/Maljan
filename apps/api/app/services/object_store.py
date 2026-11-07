@@ -118,14 +118,20 @@ def ensure_bucket(store: Any) -> None:
 
 
 def put_file(store: Any, path: str, source: str, *, content_type: str) -> None:
-    """Write the file at ``source`` to ``path``, creating the bucket first when missing."""
+    """Write the file at ``source`` to ``path``, creating the bucket first when missing.
+
+    Not while the bucket lets an anonymous caller in (``require_private``),
+    nor any other read or write of a sample, a report or a job's evidence below.
+    """
     ensure_bucket(store)
+    require_private(store)
     store.fput_object(bucket(store), path, source, content_type=content_type)
 
 
 def put_bytes(store: Any, path: str, blob: bytes, *, content_type: str) -> None:
     """Write ``blob`` to ``path``, creating the bucket first when missing."""
     ensure_bucket(store)
+    require_private(store)
     store.put_object(
         bucket(store), path, io.BytesIO(blob), length=len(blob), content_type=content_type
     )
@@ -133,6 +139,7 @@ def put_bytes(store: Any, path: str, blob: bytes, *, content_type: str) -> None:
 
 def read_bytes(store: Any, path: str) -> bytes:
     """The object at ``path``, read whole."""
+    require_private(store)
     response = store.get_object(bucket(store), path)
     try:
         return bytes(response.read())
@@ -147,14 +154,12 @@ EVIDENCE_CHUNK_BYTES = 1024 * 1024
 
 def open_object(store: Any, path: str) -> Any:
     """The object at ``path`` as a response to stream; the caller closes and releases it."""
+    require_private(store)
     return store.get_object(bucket(store), path)
 
 
 def download(store: Any, path: str, destination: str) -> None:
-    """Copy the object at ``path`` to ``destination``, readable by this user only (0600).
-
-    Not while the bucket lets an anonymous caller in (``require_private``).
-    """
+    """Copy the object at ``path`` to ``destination``, readable by this user only (0600)."""
     require_private(store)
     store.fget_object(bucket(store), path, destination)
     os.chmod(destination, 0o600)
@@ -338,6 +343,10 @@ class JobEvidenceSpill(EvidenceSpill):
             known = key in self._written and sha256 not in self._failed
         if not known or self.down:
             return None
+        try:
+            require_private(self._client())
+        except StoreNotPrivate:
+            return None
         if future is not None:
             try:
                 future.result(timeout=EVIDENCE_CONNECT_SECONDS + EVIDENCE_READ_SECONDS)
@@ -375,6 +384,7 @@ class JobEvidenceSpill(EvidenceSpill):
             if not self._bucket_ready:
                 ensure_bucket(store)
                 self._bucket_ready = True
+            require_private(store)
             store.put_object(
                 bucket(store),
                 key,
@@ -382,6 +392,8 @@ class JobEvidenceSpill(EvidenceSpill):
                 length=len(blob),
                 content_type=content_type,
             )
+        except StoreNotPrivate:
+            self._failed[sha256] = "store not private"
         except Exception as exc:  # noqa: BLE001 — stated on the reference at the drain
             reason = type(exc).__name__
             if _unreachable(exc):
@@ -616,8 +628,8 @@ def anonymous_access(store: Any, anonymous: Any) -> list[str]:
     name = bucket(store)
     found: list[str] = []
     try:
-        anonymous.bucket_exists(name)
-        found.append("list")
+        if anonymous.bucket_exists(name):
+            found.append("list")
     except S3Error as exc:
         if _code(exc) != "AccessDenied":
             raise
@@ -660,27 +672,35 @@ class StoreNotPrivate(RuntimeError):
 
 
 # The privacy verdict per bucket: when it was asked, and what an anonymous
-# caller is let do (``None``: the store could not be asked).
+# caller is let do (``None``: the store could not be asked). An unanswered ask
+# is kept only ``UNCHECKED_TTL_SECONDS``, and never replaces a verdict that
+# found the bucket open: that one stands until the store answers private.
 _PRIVACY: dict[str, tuple[float, tuple[str, ...] | None]] = {}
+UNCHECKED_TTL_SECONDS = 5.0
 
 
 def privacy(store: Any, *, fresh: bool = False) -> tuple[str, ...] | None:
     """What the bucket lets an anonymous caller do, asked at most once a ``PRIVACY_TTL_SECONDS``.
 
-    Empty when it is private, ``None`` when the store could not be asked (the
-    caller's own request then says what is wrong with it). A bucket that lets
-    anyone in is logged at ERROR each time it is asked again; one that is
-    fixed is logged once when it is found private.
+    Empty when it is private or does not exist yet (nothing in it to expose,
+    and not kept, so the bucket is asked once it is made); ``None`` when the
+    store could not be asked. A failed ask after the bucket was found open
+    keeps that verdict, so a passing error never opens the gate. A bucket
+    that lets anyone in is logged at ERROR each time it is asked again; one
+    that is fixed is logged once when it is found private.
     """
     import time
 
     name = bucket(store)
     now = time.monotonic()
     held = _PRIVACY.get(name)
-    if held is not None and not fresh and now - held[0] < PRIVACY_TTL_SECONDS:
-        return held[1]
-    verdict: tuple[str, ...] | None
+    if held is not None and not fresh:
+        ttl = PRIVACY_TTL_SECONDS if held[1] is not None else UNCHECKED_TTL_SECONDS
+        if now - held[0] < ttl:
+            return held[1]
     try:
+        if not store.bucket_exists(name):
+            return ()
         verdict = tuple(anonymous_access(store, anonymous_client(store, name)))
     except Exception as exc:  # noqa: BLE001 — an unanswered check is no verdict
         logger.warning(
@@ -688,7 +708,10 @@ def privacy(store: Any, *, fresh: bool = False) -> tuple[str, ...] | None:
             log_safe(name),
             log_safe(type(exc).__name__),
         )
-        verdict = None
+        if held is not None and held[1]:
+            return held[1]
+        _PRIVACY[name] = (now, None)
+        return None
     if verdict:
         logger.error(
             "MinIO bucket %s is not private; an anonymous caller is let through: %s. "
@@ -697,7 +720,7 @@ def privacy(store: Any, *, fresh: bool = False) -> tuple[str, ...] | None:
             log_safe(name),
             log_safe(", ".join(verdict)),
         )
-    elif verdict is not None and held is not None and held[1]:
+    elif held is not None and held[1]:
         logger.info("MinIO bucket %s is private again.", log_safe(name))
     _PRIVACY[name] = (now, verdict)
     return verdict
@@ -720,14 +743,20 @@ def probe() -> dict[str, Any] | None:
     """The health check's question: raise when the store cannot be reached.
 
     A bucket that lets an anonymous caller in fails the check, as a required
-    component. The endpoint is unauthenticated, so the answer says only that
-    the check failed; the log says what the bucket lets anyone do.
+    component; one whose privacy could not be asked fails it as an optional
+    one. The endpoint is unauthenticated, so the answer says only which check
+    failed; the log says the rest.
     """
     store = client()
-    if not store.bucket_exists(bucket(store)) or not privacy(store):
+    if not store.bucket_exists(bucket(store)):
         return None
-    return {
-        "ok": False,
-        "error": "object store policy check failed; see the API log",
-        "required": True,
-    }
+    verdict = privacy(store)
+    if verdict is None:
+        return {"ok": False, "error": "object store privacy not checked; see the API log"}
+    if verdict:
+        return {
+            "ok": False,
+            "error": "object store policy check failed; see the API log",
+            "required": True,
+        }
+    return None

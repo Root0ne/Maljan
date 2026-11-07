@@ -152,14 +152,18 @@ an anonymous caller every read, write and listing. It sets no deny policy:
 MinIO refuses the condition that would scope one to anonymous callers, and a
 store that dropped the condition would deny the platform's own key too. Whether
 the bucket stays private is asked at start, by `/health?deep=true` and before
-a sample or a sandbox report is stored or served, at most once a minute: an
-anonymous client lists the bucket and reads a key that is never written, and
-the bucket policy is read for any statement that allows anyone. While a bucket
-lets an anonymous caller in, the API log names what it allows at ERROR, the
-health check answers `degraded`, and those requests answer 503 until the store
-is fixed (`mc anonymous set none`); the API still starts. A key that may not
-read the bucket policy leaves an anonymous write unchecked, and the log says
-so once.
+any sample, sandbox report or kept evidence part is written to it or read from
+it, at most once a minute: an anonymous client lists the bucket and reads a key
+that is never written, and the bucket policy is read for any statement that
+allows anyone. While a bucket lets an anonymous caller in, the API log names
+what it allows at ERROR, the health check answers `degraded`, those reads and
+writes are refused (an upload or a download answers 503, a part a job would
+keep is stated not kept) until the store is fixed (`mc anonymous set none`),
+and the API still starts. A check that could not reach the store is asked
+again within seconds, fails the health check as optional, and never clears a
+bucket already found open. The audit chain's anchored heads are not held back:
+they are hashes of the chain, not samples. A key that may not read the bucket
+policy leaves an anonymous write unchecked, and the log says so once.
 
 Another S3 store in MinIO's place relies on that check alone. It asks the
 bucket, not each object: an object made public by its own ACL (AWS S3) is not

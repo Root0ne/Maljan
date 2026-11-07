@@ -70,3 +70,93 @@ async def test_a_refused_sample_answers_503_with_what_to_read() -> None:
     response = await handler(None, StoreNotPrivate())
     assert response.status_code == 503
     assert json.loads(response.body) == {"detail": "object store is not private; see the API log"}
+
+
+# ---- through the routes, with the suite's fixture overridden to an open store --
+
+
+class _OpenToAnyone:
+    """The anonymous client of a bucket whose policy lets anyone read."""
+
+    def bucket_exists(self, bucket: str) -> bool:
+        from unittest.mock import MagicMock
+
+        from minio.error import S3Error
+
+        raise S3Error(MagicMock(), "AccessDenied", "", "", "", "")
+
+    def stat_object(self, bucket: str, key: str) -> Any:
+        from unittest.mock import MagicMock
+
+        from minio.error import S3Error
+
+        raise S3Error(MagicMock(), "NoSuchKey", "", "", "", "")
+
+
+class _Store:
+    """The platform's own client: the bucket is there and has no policy; writes are noted."""
+
+    def __init__(self) -> None:
+        self.written: list[str] = []
+
+    def bucket_exists(self, bucket: str) -> bool:
+        return True
+
+    def get_bucket_policy(self, bucket: str) -> str:
+        from unittest.mock import MagicMock
+
+        from minio.error import S3Error
+
+        raise S3Error(MagicMock(), "NoSuchBucketPolicy", "", "", "", "")
+
+    def fput_object(self, bucket: str, path: str, *args: Any, **kwargs: Any) -> None:
+        self.written.append(path)
+
+
+def test_the_sample_upload_answers_503_and_stores_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import uuid
+    from unittest.mock import AsyncMock, MagicMock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import app.main as main_mod
+    from app.api.v1 import samples
+    from app.database import get_db
+    from app.deps import get_current_user
+    from app.services import object_store
+
+    sha256 = "e" * 64
+    store = _Store()
+    monkeypatch.setattr(object_store, "anonymous_client", lambda *_args: _OpenToAnyone())
+    monkeypatch.setattr(samples, "_minio_client", lambda: store)
+    monkeypatch.setattr(
+        samples, "_streaming_hashes", lambda file, dest, cap: (sha256, "c" * 40, "d" * 32, 66)
+    )
+    monkeypatch.setattr(samples, "_detect_mime", lambda path: "application/x-dosexec")
+
+    async def _get(name: str) -> Any:
+        return {"upload_max_bytes": 1024 * 1024, "upload_allowed_mime_types": []}[name]
+
+    monkeypatch.setattr(samples.runtime_config, "get", AsyncMock(side_effect=_get))
+    prior = MagicMock()
+    prior.scalar_one_or_none.return_value = None
+    inserted = MagicMock()
+    inserted.scalar_one_or_none.return_value = MagicMock(id=uuid.uuid4(), sha256=sha256)
+    db = MagicMock()
+    db.execute = AsyncMock(side_effect=[None, prior, inserted, MagicMock()])
+    app = FastAPI()
+    app.include_router(samples.router, prefix="/api/v1")
+    app.add_exception_handler(object_store.StoreNotPrivate, main_mod.store_not_private_response)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: MagicMock(id=uuid.uuid4())
+
+    response = TestClient(app).post(
+        "/api/v1/samples/upload", files={"file": ("thing.exe", b"MZ" + b"\x00" * 64)}
+    )
+
+    assert response.status_code == 503, response.text
+    assert response.json() == {"detail": "object store is not private; see the API log"}
+    assert store.written == []

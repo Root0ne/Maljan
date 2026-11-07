@@ -17,7 +17,11 @@ settings store, so a database writer cannot switch it off:
 - ``object_store``: one object per head in the platform's bucket
   (``OBJECT_PREFIX``), written under the bucket's object lock when it has one,
   under a legal hold when the lock has no default retention, and plainly when
-  the bucket has no lock.
+  the bucket has no lock. It reads and writes through its own client, not the
+  object store's primitives, so a bucket that lets an anonymous caller in
+  (``object_store.require_private``) does not stop it: a head is a hash of the
+  chain, not a sample, and the chain must keep being anchored while the
+  operator fixes the store.
 - ``none`` (or nothing configured): today's behaviour, and every verification
   says so (:data:`NOT_CONFIGURED`); nothing claims more than the database head.
 

@@ -50,9 +50,7 @@ def _minio_client() -> Any:
 
 
 def _store_sample_bytes_blocking(storage_path: str, source: str, content_type: str) -> None:
-    store = _minio_client()
-    object_store.require_private(store)
-    object_store.put_file(store, storage_path, source, content_type=content_type)
+    object_store.put_file(_minio_client(), storage_path, source, content_type=content_type)
 
 
 async def store_sample_bytes(*, storage_path: str, source: Any, content_type: str) -> None:
