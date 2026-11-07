@@ -202,7 +202,9 @@ services:
         GHIDRA_VERSION: "12.0.4"
         GHIDRA_DATE: "20260303"
     image: ghidra-mcp-headless:latest
-    # x86-64 only: Ghidra's release ships no linux_arm_64 decompiler; an arm64 host runs it emulated.
+    # x86-64 only: Ghidra's release ships no linux_arm_64 decompiler, and
+    # building one (support/buildNatives) needs a compiler toolchain in the
+    # image the external tree builds; an arm64 host runs it emulated.
     platform: linux/amd64
     container_name: malspark-ghidra-mcp
     # `no` keeps a stopped container stopped across a reboot or a daemon
@@ -368,7 +370,8 @@ services:
       context: ../services
       dockerfile: die-mcp/Dockerfile
     image: malspark-die-mcp:3.21
-    # x86-64 only: the image installs DIE's amd64 .deb; an arm64 host runs it emulated.
+    # x86-64 only: Detect It Easy 3.21 publishes Linux packages for amd64
+    # alone, and the image installs its amd64 .deb; an arm64 host runs it emulated.
     platform: linux/amd64
     container_name: malspark-die-mcp
     environment:
