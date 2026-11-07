@@ -124,7 +124,9 @@ any signed-in user mints, lists and revokes only their own, and a key acts as
 the account that minted it. A
 refusal names the caller's actual role so the console can hide admin-only
 navigation rather than guess. There is no endpoint that grants admin; the first
-one is promoted in the database.
+one is made, or an existing account promoted, by
+[`malspark create-admin`](/docs/cli/#malspark-create-admin), which needs access
+to the database and records the grant in the audit log as `auth.role.grant`.
 
 `readonly` is a third value of the role column and **is enforced nowhere**: no
 route distinguishes it from `analyst`, so an account holding it can upload a

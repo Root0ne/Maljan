@@ -86,7 +86,9 @@ make dev-logs    # follow the logs
 ```
 
 The development overlay runs the console under `next dev` and restarts the
-worker on a source edit. For the production shape, run `make docker-up`
+worker on a source edit. A compose file of your own (a port moved, a service
+turned off) is added with `COMPOSE_FILE_EXTRA=docker/local.yml make dev-up`;
+see [Your own compose overrides](/docs/development/#your-own-compose-overrides). For the production shape, run `make docker-up`
 instead.
 
 The one-shot `migrate` service applies the database migrations first. The API
@@ -110,16 +112,19 @@ take its name out. Then pick another static analyser, and without Qdrant set
 
 ### Create the first account
 
-Register from the console's login page. A new account gets the `analyst`
-role. Settings and the audit log need `admin`, and no endpoint grants it, so
-promote the first account once in the database:
+Settings and the audit log need the `admin` role, and no endpoint grants it:
+an account registered from the console's login page gets `analyst`. Make the
+first admin from the command line, in the API container:
 
 ```bash
-docker compose -f docker/docker-compose.yml exec postgres \
-  psql -U malspark -d malspark -c "UPDATE users SET role='ADMIN' WHERE email='you@example.com';"
+make create-admin EMAIL=you@example.com
 ```
 
-Sign out and back in.
+It asks for the password twice, hidden, and creates the account with the
+`admin` role. If you already registered that address from the console, it
+promotes the account instead and asks for nothing; sign out and back in. See
+[`malspark create-admin`](/docs/cli/#malspark-create-admin) for the options
+and for a scripted run.
 
 </Step>
 

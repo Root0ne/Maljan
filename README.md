@@ -82,8 +82,8 @@ cp bootstrap.env.example bootstrap.env  # the same secrets, for make dev-up and 
 make dev-up                         # docker compose up -d, development overlay
 ```
 
-Open <http://localhost:3000>, register the first account, promote it to
-`admin` once in the database, then walk **Settings → Setup guides** to connect
+Create the first admin account with `make create-admin EMAIL=you@example.com`,
+sign in at <http://localhost:3000>, then walk **Settings → Setup guides** to connect
 a language model, a sandbox and the tools. The
 [quick start](https://malspark.com/docs/getting-started/) has every command,
 and [Deployment](https://malspark.com/docs/deployment/) covers production.
