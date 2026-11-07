@@ -14,8 +14,8 @@
 # what this file pins, and nothing runs (exit 2) when it differs: the
 # interpreter is the environment's; every file each installed package's RECORD
 # lists has the recorded sha256, and only a RECORD itself goes unhashed; every
-# file in site-packages is one some RECORD lists, so no module, .pth or
-# sitecustomize was added; no compiled bytecode is there to stand in for a
+# file in site-packages is one some RECORD lists and none is a symlink, so no
+# module, .pth or sitecustomize was added; no compiled bytecode is there to stand in for a
 # checked source (the image installs with --no-compile and nothing may write
 # there); FLOSS is the pinned release; one sha256 over every package's name and
 # RECORD is the one the image build gives on this machine, so no package was
@@ -123,7 +123,10 @@ def check(site: Path) -> None:
         if name not in dists or dists[name].version != version:
             refuse(f"{name} {version} is not installed")
     for path in site.rglob("*"):
-        if path.is_dir() and not path.is_symlink():
+        # A link would pass for the listed file it points at.
+        if path.is_symlink():
+            refuse(f"{path.relative_to(site)} is a symlink")
+        if path.is_dir():
             continue
         if path.suffix == ".pyc":
             refuse(f"compiled bytecode is in the environment ({path.name})")

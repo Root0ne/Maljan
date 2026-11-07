@@ -76,7 +76,7 @@ FLOSS_BINARY_SHA256 = "d71b9ea4fe3b2de974dc1ae3c5d0f67569921bc118dcb02ed72e905a6
 # machine: the standalone build's everywhere, and on arm64 the launcher's as
 # well, so an x86-64 host still runs the standalone build alone and an arm64
 # host with x86-64 emulation may still run it (the version probe judges).
-FLOSS_LAUNCHER_SHA256 = "8edd7219f9911c507b251471373b25aae81864a23805274f497b26384bceb5fe"
+FLOSS_LAUNCHER_SHA256 = "83052aa58a23d8850da7aabcc7717be4fc5dc38e0bb3d5456a2b08bf3d6482ee"
 _LAUNCHER_MACHINES = frozenset({"aarch64", "arm64"})
 
 # Where an operator names the executable, set in the analysis server's ``env``.

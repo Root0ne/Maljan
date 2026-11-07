@@ -146,6 +146,12 @@ def test_a_package_installed_twice_is_refused(env: tuple[Path, Path]) -> None:
     _refused(_pinned_run(prefix), "flare-floss is installed twice")
 
 
+def test_a_symlink_to_a_listed_file_is_refused(env: tuple[Path, Path]) -> None:
+    prefix, site = env
+    (site / "floss" / "alias.py").symlink_to(site / "floss" / "main.py")
+    _refused(_pinned_run(prefix), "floss/alias.py is a symlink")
+
+
 def test_compiled_bytecode_is_refused(env: tuple[Path, Path]) -> None:
     prefix, site = env
     cache = site / "floss" / "__pycache__"

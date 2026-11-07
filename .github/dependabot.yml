@@ -116,21 +116,9 @@ updates:
         versions: [">=6.0"]
     open-pull-requests-limit: 5
 
-  # The backend image's own FLOSS environment on arm64, pinned by hash. The
-  # launcher scripts/floss/floss pins one sha256 over every installed
-  # package's RECORD, so no entry can move without a re-pin there
-  # (scripts/floss/requirements.txt says how): Dependabot opens no version
-  # update for it and the file is moved by hand, with the re-pin.
-  - package-ecosystem: "pip"
-    directory: "/scripts/floss"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    target-branch: "dev"
-    labels: ["dependencies", "python"]
-    ignore:
-      - dependency-name: "*"
-    open-pull-requests-limit: 5
+  # scripts/floss/requirements.txt, the backend image's FLOSS environment on
+  # arm64, has no entry: it is moved by hand, with the re-pin recipe that file
+  # gives.
 
   - package-ecosystem: "npm"
     directory: "/services/webcrack-mcp"
