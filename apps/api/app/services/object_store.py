@@ -20,6 +20,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import threading
 from typing import Any
 
 from malspark.core.previous_name import PREVIOUS_NAME
@@ -677,6 +678,9 @@ class StoreNotPrivate(RuntimeError):
 # found the bucket open: that one stands until the store answers private.
 _PRIVACY: dict[str, tuple[float, tuple[str, ...] | None]] = {}
 UNCHECKED_TTL_SECONDS = 5.0
+# Held while ``_PRIVACY`` is read or written, never while the store is asked:
+# the API's threads and the health probe ask at once.
+_PRIVACY_LOCK = threading.Lock()
 
 
 def privacy(store: Any, *, fresh: bool = False) -> tuple[str, ...] | None:
@@ -693,7 +697,8 @@ def privacy(store: Any, *, fresh: bool = False) -> tuple[str, ...] | None:
 
     name = bucket(store)
     now = time.monotonic()
-    held = _PRIVACY.get(name)
+    with _PRIVACY_LOCK:
+        held = _PRIVACY.get(name)
     if held is not None and not fresh:
         ttl = PRIVACY_TTL_SECONDS if held[1] is not None else UNCHECKED_TTL_SECONDS
         if now - held[0] < ttl:
@@ -708,9 +713,12 @@ def privacy(store: Any, *, fresh: bool = False) -> tuple[str, ...] | None:
             log_safe(name),
             log_safe(type(exc).__name__),
         )
-        if held is not None and held[1]:
-            return held[1]
-        _PRIVACY[name] = (now, None)
+        # Read again: another caller may have found the bucket open meanwhile.
+        with _PRIVACY_LOCK:
+            current = _PRIVACY.get(name)
+            if current is not None and current[1]:
+                return current[1]
+            _PRIVACY[name] = (now, None)
         return None
     if verdict:
         logger.error(
@@ -720,9 +728,11 @@ def privacy(store: Any, *, fresh: bool = False) -> tuple[str, ...] | None:
             log_safe(name),
             log_safe(", ".join(verdict)),
         )
-    elif held is not None and held[1]:
+    with _PRIVACY_LOCK:
+        current = _PRIVACY.get(name)
+        _PRIVACY[name] = (now, verdict)
+    if not verdict and current is not None and current[1]:
         logger.info("MinIO bucket %s is private again.", log_safe(name))
-    _PRIVACY[name] = (now, verdict)
     return verdict
 
 

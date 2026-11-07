@@ -592,3 +592,23 @@ def test_an_evidence_write_is_failed_as_not_private_and_its_read_skipped(
     assert spill.drain(5) == {sha: "store not private"}
     assert "put_object" not in store.names()
     assert spill.read(sha) is None
+
+
+def test_a_failed_ask_never_writes_over_an_open_verdict_found_meanwhile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two asks interleaved: the first fails after the second found the bucket open."""
+    store = _Policied(None)
+    found: list[Any] = []
+
+    def _first_fails_after_the_second_answers(*_args: Any) -> Any:
+        # The second ask runs to its end while the first is still out.
+        monkeypatch.setattr(object_store, "anonymous_client", _anonymously("s3:GetObject"))
+        found.append(object_store.privacy(store, fresh=True))
+        raise TimeoutError("slow")
+
+    monkeypatch.setattr(object_store, "anonymous_client", _first_fails_after_the_second_answers)
+    assert object_store.privacy(store, fresh=True) == ("read",)
+    assert found == [("read",)]
+    assert object_store._PRIVACY[settings.minio_bucket][1] == ("read",)
+    assert isinstance(object_store._PRIVACY_LOCK, type(__import__("threading").Lock()))

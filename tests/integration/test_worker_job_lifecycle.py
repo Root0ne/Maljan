@@ -789,6 +789,49 @@ async def test_pipeline_failure_sets_failed_status(
 
 
 @pytest.mark.asyncio
+async def test_a_store_anyone_can_read_fails_the_job_before_it_runs_blind(
+    mock_ctx: dict[str, Any], mock_db_session: AsyncMock
+) -> None:
+    """The sample's download is refused (T-575): the job fails, saying why, and runs nothing."""
+    from app.services import object_store
+
+    job = _make_job()
+    sample = _make_sample()
+
+    def _make_result(obj: Any) -> MagicMock:
+        m = MagicMock()
+        status_val = getattr(obj, "status", None)
+        if isinstance(status_val, str):
+            m.scalar_one_or_none.return_value = obj
+        else:
+            m.scalar_one.return_value = obj
+        return m
+
+    recorded = _answer_reads(mock_db_session, [_make_result(job), _make_result(sample)])
+
+    def _refused(*_args: Any, **_kwargs: Any) -> None:
+        raise object_store.StoreNotPrivate()
+
+    from app import config as api_config
+
+    api_config._settings = None
+    with (
+        patch.object(object_store, "client", lambda *_args: MagicMock()),
+        patch.object(object_store, "download", _refused),
+        patch.dict("os.environ", {"MALSPARK_MOCK_MODE": "true"}, clear=False),
+    ):
+        result = await run_analysis(mock_ctx, str(job.id))
+    api_config._settings = None
+
+    assert result["status"] == "failed", result
+    # The sentence is published as written, with the id of the log entry.
+    assert result["error"].startswith("object store is not private; see the API log (error id ")
+    statuses = updates_in(recorded, "analysis_jobs")
+    assert [u["status"] for u in statuses] == ["running", "failed"]
+    assert statuses[-1]["error_message"] == result["error"]
+
+
+@pytest.mark.asyncio
 async def test_mock_mode_with_an_attached_report_fails_with_a_worded_message(
     mock_ctx: dict[str, Any],
     mock_db_session: AsyncMock,
