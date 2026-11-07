@@ -15,11 +15,15 @@ SQLite connection, and the unreachable database is a refused local port.
 from __future__ import annotations
 
 import asyncio
+import getpass
+import sys
 import uuid
 from collections.abc import Callable
 from typing import Any
 
+import click
 import pytest
+import typer
 from pydantic import SecretStr
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -161,6 +165,71 @@ def test_an_address_that_is_not_one_is_refused(session: Session) -> None:
         _grant(session, _never, email="not-an-address")
 
 
+def test_the_stored_account_is_promoted_whatever_case_the_address_is_typed_in(
+    session: Session,
+) -> None:
+    user = _user(session, UserRole.ANALYST)
+    user.email = "First@example.com"
+    session.commit()
+
+    grant = _grant(session, _never, email="  FIRST@EXAMPLE.COM ")
+    session.commit()
+
+    assert grant.outcome == "promoted" and grant.email == "First@example.com"
+    assert session.query(User).count() == 1
+    assert session.query(User).one().role == UserRole.ADMIN
+
+
+def test_two_accounts_equal_ignoring_case_are_not_chosen_between(session: Session) -> None:
+    for address in ("First@example.com", "FIRST@example.com"):
+        session.add(User(email=address, hashed_password="h", full_name="F"))
+    session.commit()
+
+    with pytest.raises(AdminAccountRefused, match="give the address exactly"):
+        _grant(session, _never, email="first@example.com")
+    assert _grant(session, _never, email="FIRST@example.com").outcome == "promoted"
+
+
+def test_an_address_registered_while_the_password_is_asked_for_is_refused(
+    session: Session,
+) -> None:
+    def registered_meanwhile() -> SecretStr:
+        with Session(session.get_bind()) as other:
+            other.add(User(email="first@example.com", hashed_password="h", full_name="F"))
+            other.commit()
+        return SecretStr(PASSWORD)
+
+    with pytest.raises(AdminAccountRefused, match="run the command again to promote it"):
+        _grant(session, registered_meanwhile)
+    session.rollback()
+    assert session.query(User).one().role == UserRole.ANALYST
+
+
+def test_the_command_s_engine_echoes_no_sql_and_hides_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[dict[str, Any]] = []
+    disposed: list[bool] = []
+
+    class _Engine:
+        async def dispose(self) -> None:
+            disposed.append(True)
+
+    def engine(url: str, **kwargs: Any) -> _Engine:
+        opened.append(kwargs)
+        return _Engine()
+
+    async def refuse(_engine: Any) -> None:
+        raise AdminAccountRefused("stop here")
+
+    monkeypatch.setattr(admin_account, "create_async_engine", engine)
+    monkeypatch.setattr(admin_account, "check_database", refuse)
+    with pytest.raises(AdminAccountRefused):
+        asyncio.run(create_admin(email="a@example.com", full_name="A", password=_never))
+    assert opened == [{"echo": False, "hide_parameters": True}]
+    assert disposed == [True]
+
+
 def test_a_database_without_this_release_s_migrations_is_named_behind() -> None:
     engine = create_engine("sqlite://")
     with engine.connect() as connection:
@@ -252,6 +321,9 @@ def test_a_grant_is_committed_and_recorded_in_the_audit_log(
     assert session.query(User).one().role == UserRole.ADMIN
     [(action, kwargs)] = recorded
     assert action == GRANT_ACTION and kwargs["details"]["outcome"] == "promoted"
+    # No signed-in account did it: the actor is empty, the account is the resource.
+    assert kwargs.get("user_id") is None
+    assert kwargs["resource_id"] == str(session.query(User).one().id)
     # A no-op leaves the audit log alone.
     assert grant().outcome == "already_admin" and len(recorded) == 1
 
@@ -261,53 +333,113 @@ def test_a_grant_is_committed_and_recorded_in_the_audit_log(
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def fake_grant(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+class _Command:
     """``create_admin`` in place of the database: it asks for the password, as a creation does."""
-    passwords: list[str] = []
 
-    async def fake(*, email: str, full_name: str, password: Callable[[], SecretStr]) -> AdminGrant:
+    def __init__(self) -> None:
+        self.passwords: list[str] = []
+        self.before_password: Callable[[], None] = lambda: None
+
+    async def __call__(
+        self, *, email: str, full_name: str, password: Callable[[], SecretStr]
+    ) -> AdminGrant:
         if email == "boom@example.com":
             raise RuntimeError("DETAIL: postgresql://malspark:s3cret-pw@db/malspark")
         if email == "admin@example.com":
             return AdminGrant("already_admin", uuid.uuid4(), email, True)
-        passwords.append(password().get_secret_value())
+        self.before_password()
+        self.passwords.append(password().get_secret_value())
         return AdminGrant("created", uuid.uuid4(), email, True)
 
+
+@pytest.fixture
+def command(monkeypatch: pytest.MonkeyPatch) -> _Command:
+    fake = _Command()
     monkeypatch.setattr(admin_account, "create_admin", fake)
-    return passwords
+    return fake
 
 
-def test_the_command_reads_the_password_from_standard_input(fake_grant: list[str]) -> None:
+def _as_terminal(monkeypatch: pytest.MonkeyPatch) -> Callable[[], None]:
+    """Standard input answering as a terminal, set inside the invocation (the runner swaps it)."""
+    return lambda: monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+
+def test_the_command_reads_the_password_from_standard_input(command: _Command) -> None:
     result = CliRunner().invoke(
         cli.app, ["create-admin", "new@example.com", "--password-stdin"], input=PASSWORD + "\n"
     )
     assert result.exit_code == 0, result.output
-    assert fake_grant == [PASSWORD]
+    assert command.passwords == [PASSWORD]
     assert "Created the admin account new@example.com." in result.output
     assert PASSWORD not in result.output
 
 
-def test_the_command_takes_no_password_argument(fake_grant: list[str]) -> None:
+def test_the_command_takes_no_password_argument(command: _Command) -> None:
     result = CliRunner().invoke(cli.app, ["create-admin", "new@example.com", PASSWORD])
-    assert result.exit_code != 0 and fake_grant == []
+    assert result.exit_code != 0 and command.passwords == []
     result = CliRunner().invoke(cli.app, ["create-admin", "new@example.com", "--password", "x"])
-    assert result.exit_code != 0 and fake_grant == []
+    assert result.exit_code != 0 and command.passwords == []
 
 
-def test_without_a_terminal_the_command_asks_for_password_stdin(fake_grant: list[str]) -> None:
+def test_an_address_after_a_double_dash_is_an_argument(command: _Command) -> None:
+    result = CliRunner().invoke(
+        cli.app, ["create-admin", "--password-stdin", "--", "-new@example.com"], input=PASSWORD
+    )
+    assert result.exit_code == 0, result.output
+    assert "Created the admin account -new@example.com." in result.output
+
+
+def test_without_a_terminal_the_command_asks_for_password_stdin(command: _Command) -> None:
     result = CliRunner().invoke(cli.app, ["create-admin", "new@example.com"], input=PASSWORD)
     assert result.exit_code == 1
-    assert "--password-stdin" in result.output and fake_grant == []
+    assert "--password-stdin" in result.output and command.passwords == []
 
 
-def test_promoting_an_admin_is_a_no_op_the_command_says(fake_grant: list[str]) -> None:
+def test_on_a_terminal_the_password_is_asked_hidden_and_twice(
+    monkeypatch: pytest.MonkeyPatch, command: _Command
+) -> None:
+    asked: list[dict[str, Any]] = []
+
+    def prompt(text: str, **kwargs: Any) -> str:
+        asked.append(kwargs)
+        return PASSWORD
+
+    monkeypatch.setattr(typer, "prompt", prompt)
+    command.before_password = _as_terminal(monkeypatch)
+    result = CliRunner().invoke(cli.app, ["create-admin", "new@example.com"])
+    assert result.exit_code == 0, result.output
+    assert asked == [{"hide_input": True, "confirmation_prompt": True}]
+    assert command.passwords == [PASSWORD]
+
+
+def test_password_stdin_typed_on_a_terminal_is_not_echoed(
+    monkeypatch: pytest.MonkeyPatch, command: _Command
+) -> None:
+    monkeypatch.setattr(getpass, "getpass", lambda prompt="": PASSWORD)
+    command.before_password = _as_terminal(monkeypatch)
+    result = CliRunner().invoke(cli.app, ["create-admin", "new@example.com", "--password-stdin"])
+    assert result.exit_code == 0, result.output
+    assert command.passwords == [PASSWORD] and PASSWORD not in result.output
+
+
+def test_an_aborted_prompt_says_aborted(monkeypatch: pytest.MonkeyPatch, command: _Command) -> None:
+    def prompt(*_a: Any, **_k: Any) -> str:
+        raise click.exceptions.Abort()
+
+    monkeypatch.setattr(typer, "prompt", prompt)
+    command.before_password = _as_terminal(monkeypatch)
+    result = CliRunner().invoke(cli.app, ["create-admin", "new@example.com"])
+    assert result.exit_code == 1
+    assert "Aborted." in result.output and "failed" not in result.output
+
+
+def test_promoting_an_admin_is_a_no_op_the_command_says(command: _Command) -> None:
     result = CliRunner().invoke(cli.app, ["create-admin", "admin@example.com"])
     assert result.exit_code == 0
     assert "already an admin; nothing changed" in result.output
 
 
-def test_an_unexpected_failure_names_its_type_only(fake_grant: list[str]) -> None:
+def test_an_unexpected_failure_names_its_type_only(command: _Command) -> None:
     result = CliRunner().invoke(cli.app, ["create-admin", "boom@example.com"])
     assert result.exit_code == 1
     assert "create-admin failed (RuntimeError)" in result.output

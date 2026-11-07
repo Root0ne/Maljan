@@ -1,14 +1,15 @@
 """The first admin account, created or promoted from the command line.
 
-No endpoint grants ``admin``: a registration gets ``analyst``, and a role is
-changed by an admin only. The first one therefore comes from someone with
-access to the database, and ``malspark create-admin`` is that access with the
-API's own models, password hashing and database settings rather than a
-hand-written ``UPDATE``.
+No endpoint grants or changes a role; a registration gets ``analyst``. The
+first admin therefore comes from someone with access to the database, and
+``malspark create-admin`` is that access with the API's own models, password
+hashing and database settings rather than a hand-written ``UPDATE``.
 
 The password is read only when an account is created, held as a
 :class:`~pydantic.SecretStr` until it is hashed, and never logged or echoed:
-a traceback that prints a frame's locals shows the mask, not the text.
+a traceback that prints a frame's locals shows the mask, not the text. The
+command's own engine never echoes SQL and keeps statement parameters out of
+its errors, so ``SQL_ECHO`` does not put the new hash in a log either.
 """
 
 from __future__ import annotations
@@ -20,10 +21,15 @@ from typing import Any, Literal
 
 from annotated_types import MaxLen, MinLen
 from pydantic import EmailStr, SecretStr, TypeAdapter, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from app.auth.password import hash_password
 from app.database import end_read_transaction
@@ -99,8 +105,9 @@ async def grant_admin(
     The caller commits.
     """
     address = checked_email(email)
-    user = (await session.execute(select(User).where(User.email == address))).scalar_one_or_none()
+    user = await _account(session, address)
     if user is not None:
+        address = user.email
         if user.role == UserRole.ADMIN:
             return AdminGrant("already_admin", user.id, address, user.is_active)
         user.role = UserRole.ADMIN
@@ -127,6 +134,29 @@ async def grant_admin(
             "run the command again to promote it."
         ) from None
     return AdminGrant("created", user.id, address, True)
+
+
+async def _account(session: AsyncSession, address: str) -> User | None:
+    """The account ``address`` names: its exact row, else the one row equal ignoring case.
+
+    Sign-in compares the address exactly, so an exact row wins; an operator who
+    typed the stored address in another case means that account, not a second
+    one beside it. Two rows equal ignoring case are not chosen between.
+    """
+    exact = (await session.execute(select(User).where(User.email == address))).scalar_one_or_none()
+    if exact is not None:
+        return exact
+    rows = (
+        (await session.execute(select(User).where(func.lower(User.email) == address.lower())))
+        .scalars()
+        .all()
+    )
+    if len(rows) > 1:
+        raise AdminAccountRefused(
+            f"{len(rows)} accounts match {address} ignoring case; give the address exactly as "
+            "it is stored."
+        )
+    return rows[0] if rows else None
 
 
 def database_state(connection: Any) -> str:
@@ -173,22 +203,32 @@ async def create_admin(
     password: Callable[[], SecretStr],
     engine: AsyncEngine | None = None,
 ) -> AdminGrant:
-    """Check the database, then create or promote the admin and record it in the audit log."""
-    if engine is None:
-        from app.database import async_engine
+    """Check the database, then create or promote the admin and record it in the audit log.
 
-        engine = async_engine
-    await check_database(engine)
-    sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with sessions() as session:
-        grant = await grant_admin(session, email=email, full_name=full_name, password=password)
-        await session.commit()
+    Without ``engine`` the command opens its own on the API's ``DATABASE_URL``,
+    with SQL echo off and statement parameters hidden, and closes it.
+    """
+    own = engine is None
+    if engine is None:
+        from app.config import settings
+
+        engine = create_async_engine(settings.database_url, echo=False, hide_parameters=True)
+    try:
+        await check_database(engine)
+        sessions = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        async with sessions() as session:
+            grant = await grant_admin(session, email=email, full_name=full_name, password=password)
+            await session.commit()
+    finally:
+        if own:
+            await engine.dispose()
     if grant.outcome != "already_admin":
+        # The actor column is empty, as for every event no signed-in account
+        # caused; the account the grant is about is the resource.
         await audit.record(
             GRANT_ACTION,
             resource_type="auth",
             resource_id=str(grant.user_id),
-            user_id=grant.user_id,
             details={"role": UserRole.ADMIN.value, "by": "command line", "outcome": grant.outcome},
         )
     return grant

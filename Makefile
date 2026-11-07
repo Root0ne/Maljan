@@ -144,7 +144,8 @@ docker-logs:
 #   COMPOSE_FILE_EXTRA=docker/local.yml make dev-up
 #   make dev-up COMPOSE_FILE_EXTRA="docker/local.yml docker/gpu.yml"
 #
-# Give the same value to dev-down and dev-logs. A path on the command line is
+# Give the same value to dev-down and dev-logs. A path with a space in it is
+# not supported: the value is split on spaces. A path on the command line is
 # read from the repository root; paths inside the file are read from docker/,
 # the first file's directory. Compose reads docker-compose.override.yml on its
 # own only when it is given no -f, and these targets give it two, so an
@@ -170,9 +171,18 @@ dev-logs:
 # DATABASE_URL there). The password is asked for on the terminal, never taken
 # from the command line. Either stack: exec reaches the service by the compose
 # project's name, whichever files started it.
+#
+# EMAIL is taken as written: `$(value ...)` keeps make from expanding a `$(...)`
+# in it, the single quotes (each one inside written as '\'') keep the shell from
+# reading it, and `--` keeps an address that starts with `-` an argument. It is
+# unexported, since make expands an exported variable to put it in a recipe's
+# environment.
+unexport EMAIL
+QUOTED_EMAIL = '$(subst ','\'',$(value EMAIL))'
+
 create-admin:
-	@[ -n "$(EMAIL)" ] || { echo "usage: make create-admin EMAIL=you@example.com" >&2; exit 2; }
-	cd docker && docker compose exec backend-api malspark create-admin '$(EMAIL)'
+	@[ -n $(QUOTED_EMAIL) ] || { echo "usage: make create-admin EMAIL=you@example.com" >&2; exit 2; }
+	cd docker && docker compose exec backend-api malspark create-admin -- $(QUOTED_EMAIL)
 
 # On the production stack, these are the two commands that make an edit real.
 fe-rebuild:

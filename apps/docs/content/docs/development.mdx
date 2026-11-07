@@ -93,7 +93,8 @@ COMPOSE_FILE_EXTRA=docker/local.yml make dev-up
 make dev-logs COMPOSE_FILE_EXTRA="docker/local.yml docker/gpu.yml"
 ```
 
-Give `dev-down` and `dev-logs` the same value. A path in `COMPOSE_FILE_EXTRA`
+Give `dev-down` and `dev-logs` the same value. The value is split on spaces,
+so a path with a space in it is not supported. A path in `COMPOSE_FILE_EXTRA`
 is read from the repository root; relative paths inside the file (a volume, a
 build context) are read from `docker/`, the first file's directory. The
 `docker-up` family passes no `-f`, and so does read

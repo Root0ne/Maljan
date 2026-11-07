@@ -436,9 +436,13 @@ def create_admin(
     from pydantic import SecretStr
 
     def read_password() -> SecretStr:
+        import getpass
         import sys
 
         if password_stdin:
+            if sys.stdin.isatty():
+                # Typed rather than piped: read without echoing it.
+                return SecretStr(getpass.getpass("Password: "))
             return SecretStr(sys.stdin.readline().rstrip("\r\n"))
         if not sys.stdin.isatty():
             raise AdminAccountRefused(
@@ -448,6 +452,7 @@ def create_admin(
         return SecretStr(typer.prompt("Password", hide_input=True, confirmation_prompt=True))
 
     async def run() -> Any:
+        # The audit row goes through the API's own engine; the grant opens its own.
         from app.database import async_engine
 
         try:
@@ -455,10 +460,15 @@ def create_admin(
         finally:
             await async_engine.dispose()
 
+    import click
+
     try:
         result = asyncio.run(run())
     except AdminAccountRefused as exc:
         typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from None
+    except (click.exceptions.Abort, KeyboardInterrupt, EOFError):
+        typer.echo("Aborted.", err=True)
         raise typer.Exit(1) from None
     except Exception as exc:  # noqa: BLE001 — a driver's text may carry the DSN or the hash
         typer.echo(f"create-admin failed ({type(exc).__name__}).", err=True)
